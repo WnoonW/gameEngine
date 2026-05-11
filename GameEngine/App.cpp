@@ -13,8 +13,10 @@ App::~App()
     if (m_fenceEvent) CloseHandle(m_fenceEvent);
 }
 
-bool App::Initialize(HINSTANCE hInstance, int nCmdShow)
+bool App::Initialize(HINSTANCE hInstance, int nCmdShow, HWND hwnd)
 {
+	m_hwnd = hwnd;
+
     InitializeDX12();
     CreateSwapChain();
     CreateRenderTargetView();
@@ -29,7 +31,6 @@ void App::Run()
     Render();
     Present();
     FlushCommandQueue();
-    OnShutdown();
 }
 
 //============================================================
@@ -124,17 +125,66 @@ void App::InitializeDX12()
 
 void App::CreateSwapChain()
 {
-    // ... (DXGI SwapChain 생성 - 표준 코드, 필요하면 더 자세히 드릴게요)
-    // 현재는 생략했으나 실제 프로젝트에서는 DXGI_SWAP_CHAIN_DESC1로 생성
+    // DXGI Factory (SwapChain 생성에 필요)
+    Microsoft::WRL::ComPtr<IDXGIFactory7> factory;
+    CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
+
+    DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+    swapChainDesc.Width = m_width;
+    swapChainDesc.Height = m_height;
+    swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferCount = FrameCount;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.SampleDesc.Quality = 0;
+    factory->CreateSwapChainForHwnd(m_commandQueue.Get(), m_hwnd, &swapChainDesc, NULL, NULL, m_swapChain.GetAddressOf());
 }
 
 void App::CreateRenderTargetView()
 {
-    // RTV Heap + RenderTarget 생성 (생략된 부분)
-    // 실제 프로젝트에서는 여기서도 완전히 구현됩니다.
+    // 1. RTV Descriptor Heap 생성
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+    rtvHeapDesc.NumDescriptors = FrameCount;
+    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(m_rtvHeap.GetAddressOf()));
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(m_dsvHeap.GetAddressOf()));
+
+    m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    m_dsvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+    // 2. SwapChain의 각 버퍼를 가져와 RTV 생성
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    for (UINT n = 0; n < FrameCount; ++n)
+    {
+        m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n]));
+        m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
+        rtvHandle.Offset(1, m_rtvDescriptorSize);
+    }
+}
+
+void App::OnResize()
+{
+
 }
 
 void App::FlushCommandQueue()
 {
-    // GPU가 모든 명령을 끝낼 때까지 대기 (종료 시 필요)
+    // Fence value 증가
+    const UINT64 currentFenceValue = ++m_fenceValue;
+
+    // GPU에 Signal 보내기
+    m_commandQueue->Signal(m_fence.Get(), currentFenceValue);
+
+    // GPU가 해당 fence value까지 완료할 때까지 대기
+    if (m_fence->GetCompletedValue() < currentFenceValue)
+    {
+        m_fence->SetEventOnCompletion(currentFenceValue, m_fenceEvent);
+        WaitForSingleObject(m_fenceEvent, INFINITE);
+    }
 }

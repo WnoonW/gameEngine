@@ -13,7 +13,7 @@ public:
     App();
     virtual ~App();
 
-    bool Initialize(HINSTANCE hInstance, int nCmdShow);
+    bool Initialize(HINSTANCE hInstance, int nCmdShow, HWND hwnd);
     void Run();
 
     // 사용자/하위 시스템이 오버라이드할 수 있는 가상 메서드
@@ -22,6 +22,7 @@ public:
     virtual void OnUpdate(float deltaTime) {}
     virtual void OnRender() {}       // RenderSystem::Draw() 호출 예정
     virtual void OnShutdown() {}
+	virtual void OnResize() {}
 
     HWND GetHwnd() const { return m_hwnd; }
     ID3D12Device* GetDevice() const { return m_device.Get(); }
@@ -35,14 +36,16 @@ private:
 
     // DX12 Core (다이어그램의 App Class 내부)
     Microsoft::WRL::ComPtr<ID3D12Device> m_device;
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain;
+    Microsoft::WRL::ComPtr<IDXGISwapChain1> m_swapChain;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
 
     static const UINT FrameCount = 2;
     UINT m_frameIndex = 0;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
     UINT m_rtvDescriptorSize = 0;
+    UINT m_dsvDescriptorSize = 0;
 
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
