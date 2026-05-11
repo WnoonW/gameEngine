@@ -3,6 +3,7 @@
 
 #include "framework.h"
 #include "GameEngine.h"
+#include "App.h"
 
 #define MAX_LOADSTRING 100
 
@@ -27,30 +28,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     // TODO: 여기에 코드를 입력합니다.
 
+	App theApp;
+
     // 전역 문자열을 초기화합니다.
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_GAMEENGINE, szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
 
-    // 애플리케이션 초기화를 수행합니다:
-    if (!InitInstance (hInstance, nCmdShow))
+    // 애플리케이션 초기화 ===========================================================================
+    if (InitInstance (hInstance, nCmdShow))
     {
+		theApp.Initialize(hInstance, nCmdShow);
         return FALSE;
     }
-
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_GAMEENGINE));
+    // ===========================================================================애플리케이션 초기화 
 
     MSG msg;
 
-    // 기본 메시지 루프입니다:
-    while (GetMessage(&msg, nullptr, 0, 0))
+    // 기본 메시지 루프===============================================================================
+    while (1)
     {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
         {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
+            if (msg.message == WM_QUIT)
+                break;
+        }
+        else
+        {
+            theApp.Run();
         }
     }
+    // ===============================================================================기본 메시지 루프
 
     return (int) msg.wParam;
 }
