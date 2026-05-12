@@ -37,6 +37,9 @@ D3DApp::~D3DApp()
 		FlushCommandQueue();
 }
 
+//GetAndSet=============================================================================================================================================
+#pragma region Getters and Setters
+
 HINSTANCE D3DApp::AppInst()const
 {
 	return mhAppInst;
@@ -68,6 +71,29 @@ void D3DApp::Set4xMsaaState(bool value)
         OnResize();
     }
 }
+
+ID3D12Resource* D3DApp::CurrentBackBuffer()const
+{
+	return mSwapChainBuffer[mCurrBackBuffer].Get();
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE D3DApp::CurrentBackBufferView()const
+{
+	return CD3DX12_CPU_DESCRIPTOR_HANDLE(
+		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
+		mCurrBackBuffer,
+		mRtvDescriptorSize);
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE D3DApp::DepthStencilView()const
+{
+	return mDsvHeap->GetCPUDescriptorHandleForHeapStart();
+}
+#pragma endregion
+//=============================================================================================================================================GetAndSet
+
+//MainAndInit===========================================================================================================================================
+#pragma region Main Loop and Initialization
 
 int D3DApp::Run()
 {
@@ -118,25 +144,11 @@ bool D3DApp::Initialize()
 	return true;
 }
  
-void D3DApp::CreateRtvAndDsvDescriptorHeaps()
-{
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
-    rtvHeapDesc.NumDescriptors = SwapChainBufferCount;
-    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-	rtvHeapDesc.NodeMask = 0;
-    ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
-        &rtvHeapDesc, IID_PPV_ARGS(mRtvHeap.GetAddressOf())));
+#pragma endregion
+//===========================================================================================================================================MainAndInit
 
-
-    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
-    dsvHeapDesc.NumDescriptors = 1;
-    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-	dsvHeapDesc.NodeMask = 0;
-    ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
-        &dsvHeapDesc, IID_PPV_ARGS(mDsvHeap.GetAddressOf())));
-}
+//WindowMessage=========================================================================================================================================
+#pragma region WindowMessage
 
 void D3DApp::OnResize()
 {
@@ -371,6 +383,11 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
+#pragma endregion
+//=========================================================================================================================================WindowMessage
+
+//Initialize============================================================================================================================================
+#pragma region Initialize
 
 bool D3DApp::InitMainWindow()
 {
@@ -477,6 +494,31 @@ bool D3DApp::InitDirect3D()
 
 	return true;
 }
+#pragma endregion
+//============================================================================================================================================Initialize
+
+//Helpers===============================================================================================================================================
+#pragma region Helpers
+
+void D3DApp::CreateRtvAndDsvDescriptorHeaps()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount;
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	rtvHeapDesc.NodeMask = 0;
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
+		&rtvHeapDesc, IID_PPV_ARGS(mRtvHeap.GetAddressOf())));
+
+
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
+	dsvHeapDesc.NumDescriptors = 1;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	dsvHeapDesc.NodeMask = 0;
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
+		&dsvHeapDesc, IID_PPV_ARGS(mDsvHeap.GetAddressOf())));
+}
 
 void D3DApp::CreateCommandObjects()
 {
@@ -553,24 +595,6 @@ void D3DApp::FlushCommandQueue()
 		WaitForSingleObject(eventHandle, INFINITE);
         CloseHandle(eventHandle);
 	}
-}
-
-ID3D12Resource* D3DApp::CurrentBackBuffer()const
-{
-	return mSwapChainBuffer[mCurrBackBuffer].Get();
-}
-
-D3D12_CPU_DESCRIPTOR_HANDLE D3DApp::CurrentBackBufferView()const
-{
-	return CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
-		mCurrBackBuffer,
-		mRtvDescriptorSize);
-}
-
-D3D12_CPU_DESCRIPTOR_HANDLE D3DApp::DepthStencilView()const
-{
-	return mDsvHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
 void D3DApp::CalculateFrameStats()
@@ -679,4 +703,5 @@ void D3DApp::LogOutputDisplayModes(IDXGIOutput* output, DXGI_FORMAT format)
         ::OutputDebugString(text.c_str());
     }
 }
-
+#pragma endregion
+//===============================================================================================================================================Helpers
