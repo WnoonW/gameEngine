@@ -5,25 +5,28 @@
 #include <vector>
 #include <wincodec.h>
 #include <DirectXMath.h>
+
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
+
+// ==================== Vertex 구조체 ====================
+struct Vertex {
+    XMFLOAT3 Position;
+    XMFLOAT2 TexCoord;
+    XMFLOAT3 Normal;
+};
+
 struct SubMesh {
     std::string name;
     std::string materialName;
-    std::vector<float> vertices;
+    std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 };
 
 struct MeshData {
     std::vector<SubMesh> subMeshes;
-    std::vector<float> vertices;      // 하위 호환용
+    std::vector<Vertex> vertices;      // 하위 호환용
     std::vector<uint32_t> indices;
-};
-
-struct Vertex {
-    XMFLOAT3 Position;
-    XMFLOAT3 Normal;
-    XMFLOAT2 TexCoord;
 };
 
 class DataLoader
