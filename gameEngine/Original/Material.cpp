@@ -92,6 +92,7 @@ bool Material1::CreatePSO(ID3D12Device* device, ID3DBlob* vsBlob, ID3DBlob* psBl
     pso.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
     pso.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
     pso.SampleDesc.Count = 1;
+    pso.SampleMask = 0;
 
     return SUCCEEDED(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&mPSO)));
 }
