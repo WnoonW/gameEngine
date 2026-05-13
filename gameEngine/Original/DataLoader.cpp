@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <wincodec.h>
 #include <dxgiformat.h>
-
+#include <DirectXMath.h>
+using namespace DirectX;
 #pragma comment(lib, "windowscodecs.lib")
 
 struct DDS_PIXELFORMAT {
@@ -190,12 +191,12 @@ bool DataLoader::LoadOBJ(const std::wstring& filePath, MeshData& outMeshData)
 
     outMeshData.subMeshes.clear();
 
+    std::vector<XMFLOAT3> positions;
+    std::vector<XMFLOAT2> texcoords;
+    std::vector<XMFLOAT3> normals;
+
     SubMesh currentSubMesh;
     currentSubMesh.name = "default";
-
-    std::vector<float> allPositions;
-    std::vector<float> allTexcoords;
-    std::vector<float> allNormals;
     std::string currentMaterial = "";
 
     std::string line;
@@ -204,42 +205,54 @@ bool DataLoader::LoadOBJ(const std::wstring& filePath, MeshData& outMeshData)
         std::string prefix;
         iss >> prefix;
 
-        if (prefix == "o" || prefix == "g") {
-            if (!currentSubMesh.vertices.empty()) {
-                outMeshData.subMeshes.push_back(currentSubMesh);
-            }
-            currentSubMesh = SubMesh();
-            iss >> currentSubMesh.name;
-            currentSubMesh.materialName = currentMaterial;
+        if (prefix == "v") {
+            float x, y, z; iss >> x >> y >> z;
+            positions.emplace_back(x, y, z);
+        }
+        else if (prefix == "vt") {
+            float u, v; iss >> u >> v;
+            texcoords.emplace_back(u, v);
+        }
+        else if (prefix == "vn") {
+            float nx, ny, nz; iss >> nx >> ny >> nz;
+            normals.emplace_back(nx, ny, nz);
         }
         else if (prefix == "usemtl") {
             iss >> currentMaterial;
             currentSubMesh.materialName = currentMaterial;
         }
-        else if (prefix == "v") {
-            float x, y, z; iss >> x >> y >> z;
-            allPositions.push_back(x); allPositions.push_back(y); allPositions.push_back(z);
-        }
-        else if (prefix == "vt") {
-            float u, v; iss >> u >> v;
-            allTexcoords.push_back(u); allTexcoords.push_back(v);
-        }
-        else if (prefix == "vn") {
-            float nx, ny, nz; iss >> nx >> ny >> nz;
-            allNormals.push_back(nx); allNormals.push_back(ny); allNormals.push_back(nz);
-        }
         else if (prefix == "f") {
             std::string token;
+            std::vector<uint32_t> faceIndices;
+
             while (iss >> token) {
                 size_t p1 = token.find('/');
-                std::string vStr = (p1 != std::string::npos) ? token.substr(0, p1) : token;
-                uint32_t idx = std::stoul(vStr) - 1;
+                size_t p2 = token.find('/', p1 + 1);
 
-                if (idx * 3 + 2 < allPositions.size()) {
-                    currentSubMesh.vertices.push_back(allPositions[idx * 3 + 0]);
-                    currentSubMesh.vertices.push_back(allPositions[idx * 3 + 1]);
-                    currentSubMesh.vertices.push_back(allPositions[idx * 3 + 2]);
-                    currentSubMesh.indices.push_back(currentSubMesh.indices.size());
+                std::string vStr = token.substr(0, p1);
+                std::string vtStr = (p1 != std::string::npos && p2 > p1 + 1) ? token.substr(p1 + 1, p2 - p1 - 1) : "";
+                std::string vnStr = (p2 != std::string::npos) ? token.substr(p2 + 1) : "";
+
+                uint32_t vIdx = std::stoul(vStr) - 1;
+                uint32_t vtIdx = vtStr.empty() ? 0 : std::stoul(vtStr) - 1;
+                uint32_t vnIdx = vnStr.empty() ? 0 : std::stoul(vnStr) - 1;
+
+                // Vertex 구조체로 만들어서 추가
+                Vertex vert{};
+                vert.Position = positions[vIdx];
+                if (vtIdx < texcoords.size()) vert.TexCoord = texcoords[vtIdx];
+                if (vnIdx < normals.size())   vert.Normal = normals[vnIdx];
+
+                currentSubMesh.vertices.push_back(vert);
+                faceIndices.push_back((uint32_t)currentSubMesh.vertices.size() - 1);
+            }
+
+            // 삼각형 인덱스 추가 (삼각형 2개 = 6개 인덱스)
+            if (faceIndices.size() >= 3) {
+                for (size_t i = 1; i + 1 < faceIndices.size(); ++i) {
+                    currentSubMesh.indices.push_back(faceIndices[0]);
+                    currentSubMesh.indices.push_back(faceIndices[i]);
+                    currentSubMesh.indices.push_back(faceIndices[i + 1]);
                 }
             }
         }
@@ -254,7 +267,8 @@ bool DataLoader::LoadOBJ(const std::wstring& filePath, MeshData& outMeshData)
         outMeshData.indices = outMeshData.subMeshes[0].indices;
     }
 
-    std::cout << "[DataLoader] OBJ 로드 완료 - 서브메시 수: " << outMeshData.subMeshes.size() << std::endl;
+    std::cout << "[DataLoader] OBJ 로드 완료 - Vertices: " << outMeshData.vertices.size()
+        << ", Indices: " << outMeshData.indices.size() << std::endl;
     return true;
 }
 

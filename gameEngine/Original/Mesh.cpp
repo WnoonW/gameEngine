@@ -9,17 +9,25 @@ bool Mesh::LoadFromFile(const std::wstring& objPath, DataLoader& loader)
 {
     bool success = loader.LoadOBJ(objPath, mMeshData);
     if (!success) {
-        std::cerr << "Mesh 로드 실패: " << std::endl;
+
+        std::wstring text = L"Mesh 로드 실패";
+        text += L"\n";
+        OutputDebugString(text.c_str());
+
         return false;
     }
-    std::cout << "[Mesh] OBJ 로드 성공 - 서브메시 수: " << mMeshData.subMeshes.size() << std::endl;
+
+    std::wstring msg = L"[Mesh] OBJ 로드 성공 - 서브메시 수: "
+        + std::to_wstring(mMeshData.subMeshes.size()) + L"\n";
+    OutputDebugString(msg.c_str());
+
     return true;
 }
 
 bool Mesh::CreateBuffers(ID3D12Device* device)
 {
     if (mMeshData.vertices.empty() || mMeshData.indices.empty()) {
-        std::cerr << "버퍼 생성 실패: 데이터 없음" << std::endl;
+        OutputDebugString(L"버퍼 생성 실패: 데이터 없음\n");
         return false;
     }
 
@@ -55,7 +63,8 @@ bool Mesh::CreateBuffers(ID3D12Device* device)
     memcpy(mappedData, mMeshData.indices.data(), indexBufferSize);
     mIndexBuffer->Unmap(0, nullptr);
 
-    std::cout << "[Mesh] 버퍼 생성 완료 - Vertex: " << mMeshData.vertices.size() 
-              << ", Index: " << mIndexCount << std::endl;
+    std::wstring msg = L"[Mesh] 버퍼 생성 완료 - Vertex: " + std::to_wstring(mMeshData.vertices.size())
+        + L", Index: " + std::to_wstring(mIndexCount) + L"\n";
+    OutputDebugString(msg.c_str());
     return true;
 }

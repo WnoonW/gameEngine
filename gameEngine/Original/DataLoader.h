@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 #include <wincodec.h>
-
+#include <DirectXMath.h>
 using Microsoft::WRL::ComPtr;
-
+using namespace DirectX;
 struct SubMesh {
     std::string name;
     std::string materialName;
@@ -18,6 +18,12 @@ struct MeshData {
     std::vector<SubMesh> subMeshes;
     std::vector<float> vertices;      // 하위 호환용
     std::vector<uint32_t> indices;
+};
+
+struct Vertex {
+    XMFLOAT3 Position;
+    XMFLOAT3 Normal;
+    XMFLOAT2 TexCoord;
 };
 
 class DataLoader
