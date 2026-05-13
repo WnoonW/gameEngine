@@ -8,6 +8,7 @@
 
 #include "Common/d3dApp.h"
 #include <DirectXColors.h>
+#include "Original/Entity.h"
 
 using namespace DirectX;
 
@@ -23,7 +24,9 @@ private:
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
-
+	Entity mEntity;
+	Mesh mMesh;
+	Material1 mMaterial;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -63,6 +66,12 @@ bool InitDirect3DApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 		
+	mMesh.LoadFromFile(L"Assets/box.obj", DataLoader());
+	mMesh.CreateBuffers(md3dDevice.Get());
+	mMaterial.CreateMaterial(md3dDevice.Get(), mCommandQueue.Get(), DataLoader(),
+		L"Shaders\\ColorVS.hlsl", L"Shaders\\ColorPS.hlsl");
+	mEntity.SetMesh(&mMesh);
+	mEntity.SetMaterial(&mMaterial);
 	return true;
 }
 
@@ -104,6 +113,12 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
     // Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+
+
+	mEntity.Draw(mCommandList.Get());
+
+
 
     // Done recording commands.
 	ThrowIfFailed(mCommandList->Close());
