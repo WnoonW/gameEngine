@@ -149,19 +149,11 @@
     <ClCompile Include="Common\d3dUtil.cpp" />
     <ClCompile Include="Common\GameTimer.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
-    <ClCompile Include="Original\DataLoader.cpp" />
-    <ClCompile Include="Original\Entity.cpp" />
-    <ClCompile Include="Original\Material.cpp" />
-    <ClCompile Include="Original\Mesh.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common\d3dApp.h" />
     <ClInclude Include="Common\d3dUtil.h" />
     <ClInclude Include="Common\GameTimer.h" />
-    <ClInclude Include="Original\DataLoader.h" />
-    <ClInclude Include="Original\Entity.h" />
-    <ClInclude Include="Original\Material.h" />
-    <ClInclude Include="Original\Mesh.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

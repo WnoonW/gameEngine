@@ -13,9 +13,6 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Helper">
-      <UniqueIdentifier>{92b641b1-d573-411a-9fbc-fd2c037d41db}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Shaders">
       <UniqueIdentifier>{5064f50b-4999-44af-bf58-1f151088d2e8}</UniqueIdentifier>
     </Filter>
@@ -33,18 +30,6 @@
     <ClCompile Include="Common\d3dUtil.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Original\DataLoader.cpp">
-      <Filter>Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="Original\Mesh.cpp">
-      <Filter>Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="Original\Entity.cpp">
-      <Filter>Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="Original\Material.cpp">
-      <Filter>Helper</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common\d3dApp.h">
@@ -55,18 +40,6 @@
     </ClInclude>
     <ClInclude Include="Common\GameTimer.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Original\DataLoader.h">
-      <Filter>Helper</Filter>
-    </ClInclude>
-    <ClInclude Include="Original\Mesh.h">
-      <Filter>Helper</Filter>
-    </ClInclude>
-    <ClInclude Include="Original\Entity.h">
-      <Filter>Helper</Filter>
-    </ClInclude>
-    <ClInclude Include="Original\Material.h">
-      <Filter>Helper</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

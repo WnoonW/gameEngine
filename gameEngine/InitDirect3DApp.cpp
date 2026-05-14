@@ -8,7 +8,6 @@
 
 #include "Common/d3dApp.h"
 #include <DirectXColors.h>
-#include "Original/Entity.h"
 
 using namespace DirectX;
 
@@ -24,9 +23,6 @@ private:
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
-	Entity mEntity;
-	Mesh mMesh;
-	Material1 mMaterial;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -66,11 +62,6 @@ bool InitDirect3DApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 		
-	mMesh.CreateMesh(L"Assets/bibian.obj", DataLoader(), md3dDevice.Get());
-	mMaterial.CreateMaterial(md3dDevice.Get(), mCommandQueue.Get(), DataLoader(),
-		L"Shaders\\VertexShader.hlsl", L"Shaders\\PixelShader.hlsl");
-	mEntity.SetMesh(&mMesh);
-	mEntity.SetMaterial(&mMaterial);
 	return true;
 }
 
@@ -113,8 +104,6 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 
 
 
-
-	mEntity.Draw(mCommandList.Get());
 
 
 
