@@ -7,6 +7,7 @@
 //***************************************************************************************
 
 #include "Common/d3dApp.h"
+#include "V2/Cube.h"
 #include <DirectXColors.h>
 
 using namespace DirectX;
@@ -20,9 +21,21 @@ public:
 	virtual bool Initialize()override;
 
 private:
+	Cube cube;
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
+
+	virtual void OnMouseDown(WPARAM btnState, int x, int y)override;
+	virtual void OnMouseUp(WPARAM btnState, int x, int y)override;
+	virtual void OnMouseMove(WPARAM btnState, int x, int y)override;
+
+private:
+	float mTheta = 1.5f * XM_PI;
+	float mPhi = XM_PIDIV4;
+	float mRadius = 5.0f;
+
+	POINT mLastMousePos;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -62,17 +75,21 @@ bool InitDirect3DApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 		
+	cube.Initialize(md3dDevice.Get(), mCommandList.Get(), mDirectCmdListAlloc.Get(), mCommandQueue.Get());
+	FlushCommandQueue();
 	return true;
 }
 
 void InitDirect3DApp::OnResize()
 {
 	D3DApp::OnResize();
+
+	cube.OnResize(AspectRatio());
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-
+	cube.Update(gt, mRadius, mTheta, mPhi);
 }
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
@@ -104,7 +121,7 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 
 
 
-
+	cube.Draw(mCommandList.Get());
 
 
 
@@ -129,4 +146,39 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	// done for simplicity.  Later we will show how to organize our rendering code
 	// so we do not have to wait per frame.
 	FlushCommandQueue();
+}
+
+void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
+{
+	mLastMousePos.x = x;
+	mLastMousePos.y = y;
+
+	SetCapture(mhMainWnd);
+}
+
+void InitDirect3DApp::OnMouseUp(WPARAM btnState, int x, int y)
+{
+	ReleaseCapture();
+}
+
+void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
+{
+	if ((btnState & MK_LBUTTON) != 0)
+	{
+		float dx = XMConvertToRadians(0.25f * static_cast<float>(x - mLastMousePos.x));
+		float dy = XMConvertToRadians(0.25f * static_cast<float>(y - mLastMousePos.y));
+
+		mTheta += dx;
+		mPhi += dy;
+	}
+	else if (btnState & MK_RBUTTON)
+	{
+		float dx = 0.05f * static_cast<float>(x - mLastMousePos.x);
+		float dy = 0.05f * static_cast<float>(y - mLastMousePos.y);
+		mRadius += dx - dy;
+		mRadius = MathHelper::Clamp(mRadius, 3.0f, 15.0f);
+	}
+
+	mLastMousePos.x = x;
+	mLastMousePos.y = y;
 }
