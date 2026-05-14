@@ -1,15 +1,13 @@
-//Texture2D gTexture : register(t0);
-//SamplerState gSampler : register(s0);
-
 struct PS_INPUT
 {
     float4 Position : SV_POSITION;
     float2 TexCoord : TEXCOORD0;
+    float3 Normal : NORMAL;
 };
 
 float4 main(PS_INPUT input) : SV_TARGET
 {
-    
-    return float4(input.TexCoord, 0.0f, 1.0f); // 텍스처 좌표를 색상으로 사용 (디버깅용)
-    //return gTexture.Sample(gSampler, input.TexCoord);
+    // 텍스처 없이도 보이게 하기 위한 테스트 코드
+    float3 color = float3(0.8, 0.6, 0.4); // 기본 색상
+    return float4(color, 1.0);
 }

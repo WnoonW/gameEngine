@@ -13,6 +13,8 @@ public:
     Mesh();
     ~Mesh();
 
+	bool CreateMesh(const std::wstring& objPath, DataLoader& loader, ID3D12Device* device);
+
     // DataLoader를 활용한 로드
     bool LoadFromFile(const std::wstring& objPath, DataLoader& loader);
 

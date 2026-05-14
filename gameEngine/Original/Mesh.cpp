@@ -5,9 +5,23 @@
 Mesh::Mesh() = default;
 Mesh::~Mesh() = default;
 
+bool Mesh::CreateMesh(const std::wstring& objPath, DataLoader& loader, ID3D12Device* device)
+{
+    if (!LoadFromFile(objPath, loader)) {
+        OutputDebugString(L"Mesh 생성 실패: 파일 로드 실패\n");
+        return false;
+	}
+
+	if (!CreateBuffers(device)) {
+        OutputDebugString(L"Mesh 생성 실패: 버퍼 생성 실패\n");
+        return false;
+    }
+    return true;
+}
+
 bool Mesh::LoadFromFile(const std::wstring& objPath, DataLoader& loader)
 {
-    bool success = loader.LoadOBJ(objPath, mMeshData);
+    bool success = loader.LoadOBJ(objPath, mMeshData, false, false);
     if (!success) {
 
         std::wstring text = L"Mesh 로드 실패";

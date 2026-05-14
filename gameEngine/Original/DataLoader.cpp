@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <wincodec.h>
 #include <dxgiformat.h>
+#include <array>              
+#include <unordered_map>
+#include <DirectXMath.h>
 
 #pragma comment(lib, "windowscodecs.lib")
 
@@ -185,118 +188,117 @@ bool DataLoader::LoadDDS(ID3D12Device* device, ID3D12CommandQueue* commandQueue,
 }
 
 // ==================== 고성능 OBJ 파서 ====================
-bool DataLoader::LoadOBJ(const std::wstring& filePath, MeshData& outMeshData)
+bool DataLoader::LoadOBJ(const std::wstring& filename, MeshData& outMeshData,
+    bool flipZ, bool reverseWinding)
 {
-    std::ifstream file(filePath);
+    std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "OBJ 파일을 열 수 없습니다." << std::endl;
+        OutputDebugString((L"OBJ 파일 열기 실패: " + filename + L"\n").c_str());
         return false;
     }
 
-    outMeshData.subMeshes.clear();
+    std::vector<XMFLOAT3> positions;
+    std::vector<XMFLOAT2> texcoords;
+    std::vector<XMFLOAT3> normals;
 
-    std::vector<float> positions;
-    std::vector<float> texcoords;
-    std::vector<float> normals;
+    // 중복 제거용 맵 (pos, tex, nor 조합으로 유니크한 vertex 생성)
+    struct VertexKey {
+        int pos, tex, nor;
+        bool operator==(const VertexKey& o) const {
+            return pos == o.pos && tex == o.tex && nor == o.nor;
+        }
+    };
 
-    SubMesh currentSubMesh;
-    currentSubMesh.name = "default";
-    std::string currentMaterial = "";
+    struct KeyHash {
+        size_t operator()(const VertexKey& k) const {
+            return ((size_t)k.pos * 73856093ULL) ^
+                ((size_t)k.tex * 19349663ULL) ^
+                ((size_t)k.nor * 83492791ULL);
+        }
+    };
+
+    std::unordered_map<VertexKey, uint32_t, KeyHash> vertexMap;
 
     std::string line;
     while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#') continue;
-
         std::istringstream iss(line);
         std::string prefix;
         iss >> prefix;
 
-        if (prefix == "o" || prefix == "g") {
-            if (!currentSubMesh.vertices.empty()) {
-                outMeshData.subMeshes.push_back(currentSubMesh);
-            }
-            currentSubMesh = SubMesh();
-            iss >> currentSubMesh.name;
-            currentSubMesh.materialName = currentMaterial;
-        }
-        else if (prefix == "usemtl") {
-            iss >> currentMaterial;
-            currentSubMesh.materialName = currentMaterial;
-        }
-        else if (prefix == "v") {
-            float x, y, z; iss >> x >> y >> z;
-            positions.push_back(x); positions.push_back(y); positions.push_back(z);
+        if (prefix == "v") {
+            float x, y, z;
+            iss >> x >> y >> z;
+            if (flipZ) z = -z;
+            positions.emplace_back(x, y, z);
         }
         else if (prefix == "vt") {
-            float u, v; iss >> u >> v;
-            texcoords.push_back(u); texcoords.push_back(v);
+            float u, v;
+            iss >> u >> v;
+            texcoords.emplace_back(u, v);
         }
         else if (prefix == "vn") {
-            float nx, ny, nz; iss >> nx >> ny >> nz;
-            normals.push_back(nx); normals.push_back(ny); normals.push_back(nz);
+            float x, y, z;
+            iss >> x >> y >> z;
+            normals.emplace_back(x, y, z);
         }
         else if (prefix == "f") {
+            std::vector<std::array<int, 3>> faceCorners; // [pos, tex, nor]
+
             std::string token;
             while (iss >> token) {
-                size_t p1 = token.find('/');
-                size_t p2 = token.find('/', p1 + 1);
+                int p = -1, t = -1, n = -1;
+                std::istringstream tokenStream(token);
+                std::string part;
 
-                uint32_t vIdx = std::stoul(token.substr(0, p1)) - 1;
+                if (std::getline(tokenStream, part, '/')) p = std::stoi(part) - 1;
+                if (std::getline(tokenStream, part, '/')) if (!part.empty()) t = std::stoi(part) - 1;
+                if (std::getline(tokenStream, part, '/')) if (!part.empty()) n = std::stoi(part) - 1;
 
-                uint32_t vtIdx = 0;
-                if (p1 != std::string::npos && p2 > p1 + 1) {
-                    std::string vtStr = token.substr(p1 + 1, p2 - p1 - 1);
-                    if (!vtStr.empty()) vtIdx = std::stoul(vtStr) - 1;
+                faceCorners.push_back({ p, t, n });
+            }
+
+            // Triangle 처리 + Winding
+            if (faceCorners.size() == 3) {
+                std::vector<uint32_t> triIndices;
+
+                for (auto& corner : faceCorners) {
+                    VertexKey key{ corner[0], corner[1], corner[2] };
+
+                    if (vertexMap.find(key) == vertexMap.end()) {
+                        uint32_t newIdx = static_cast<uint32_t>(outMeshData.vertices.size());
+                        vertexMap[key] = newIdx;
+
+                        Vertex vert{};
+                        if (corner[0] >= 0) vert.Position = positions[corner[0]];
+                        if (corner[1] >= 0 && corner[1] < static_cast<int>(texcoords.size()))
+                            vert.TexCoord = texcoords[corner[1]];
+                        if (corner[2] >= 0 && corner[2] < static_cast<int>(normals.size()))
+                            vert.Normal = normals[corner[2]];
+
+                        outMeshData.vertices.push_back(vert);
+                    }
+                    triIndices.push_back(vertexMap[key]);
                 }
 
-                uint32_t vnIdx = 0;
-                if (p2 != std::string::npos) {
-                    std::string vnStr = token.substr(p2 + 1);
-                    if (!vnStr.empty()) vnIdx = std::stoul(vnStr) - 1;
-                }
-
-                Vertex vert = {};
-
-                if (vIdx * 3 + 2 < positions.size()) {
-                    vert.Position = XMFLOAT3(positions[vIdx * 3 + 0],
-                        positions[vIdx * 3 + 1],
-                        positions[vIdx * 3 + 2]);
-                }
-
-                if (vtIdx * 2 + 1 < texcoords.size()) {
-                    vert.TexCoord = XMFLOAT2(texcoords[vtIdx * 2 + 0],
-                        texcoords[vtIdx * 2 + 1]);
+                if (reverseWinding) {
+                    outMeshData.indices.push_back(triIndices[0]);
+                    outMeshData.indices.push_back(triIndices[2]);
+                    outMeshData.indices.push_back(triIndices[1]);
                 }
                 else {
-                    vert.TexCoord = XMFLOAT2(0.0f, 0.0f);
+                    outMeshData.indices.push_back(triIndices[0]);
+                    outMeshData.indices.push_back(triIndices[1]);
+                    outMeshData.indices.push_back(triIndices[2]);
                 }
-
-                if (vnIdx * 3 + 2 < normals.size()) {
-                    vert.Normal = XMFLOAT3(normals[vnIdx * 3 + 0],
-                        normals[vnIdx * 3 + 1],
-                        normals[vnIdx * 3 + 2]);
-                }
-                else {
-                    vert.Normal = XMFLOAT3(0.0f, 0.0f, 1.0f);
-                }
-
-                currentSubMesh.vertices.push_back(vert);
-                currentSubMesh.indices.push_back(currentSubMesh.indices.size());
             }
         }
     }
 
-    if (!currentSubMesh.vertices.empty()) {
-        outMeshData.subMeshes.push_back(currentSubMesh);
-    }
+    std::wstring msg = L"[DataLoader] OBJ Loaded (Normal+Tex+Dedup): " + filename +
+        L" | Vertices: " + std::to_wstring(outMeshData.vertices.size()) +
+        L" | Indices: " + std::to_wstring(outMeshData.indices.size());
+    OutputDebugString(msg.c_str());
 
-    if (!outMeshData.subMeshes.empty()) {
-        outMeshData.vertices = outMeshData.subMeshes[0].vertices;
-        outMeshData.indices = outMeshData.subMeshes[0].indices;
-    }
-
-    std::cout << "[DataLoader] OBJ 파싱 완료 - 서브메시: " << outMeshData.subMeshes.size()
-        << " | Vertex 수: " << outMeshData.vertices.size() << std::endl;
     return true;
 }
 
@@ -307,7 +309,7 @@ bool DataLoader::LoadAsset(ID3D12Device* device, ID3D12CommandQueue* commandQueu
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
     if (ext == L".obj") {
-        return LoadOBJ(filePath, *reinterpret_cast<MeshData*>(outData));
+        return LoadOBJ(filePath, *static_cast<MeshData*>(outData));
     }
     else if (ext == L".png" || ext == L".jpg" || ext == L".bmp" || ext == L".dds") {
         ComPtr<ID3D12Resource> tex, upload;

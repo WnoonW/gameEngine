@@ -66,8 +66,7 @@ bool InitDirect3DApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 		
-	mMesh.LoadFromFile(L"Assets/bibian.obj", DataLoader());
-	mMesh.CreateBuffers(md3dDevice.Get());
+	mMesh.CreateMesh(L"Assets/bibian.obj", DataLoader(), md3dDevice.Get());
 	mMaterial.CreateMaterial(md3dDevice.Get(), mCommandQueue.Get(), DataLoader(),
 		L"Shaders\\VertexShader.hlsl", L"Shaders\\PixelShader.hlsl");
 	mEntity.SetMesh(&mMesh);

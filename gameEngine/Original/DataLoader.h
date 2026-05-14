@@ -41,7 +41,8 @@ public:
         ComPtr<ID3D12Resource>& outTexture,
         ComPtr<ID3D12Resource>& outUploadHeap);
 
-    bool LoadOBJ(const std::wstring& filePath, MeshData& outMeshData);
+    bool LoadOBJ(const std::wstring& filename, MeshData& outMeshData,
+        bool flipZ = true, bool reverseWinding = true);
 
     bool LoadAsset(ID3D12Device* device, ID3D12CommandQueue* commandQueue,
         const std::wstring& filePath, void* outData);
