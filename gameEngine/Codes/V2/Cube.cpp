@@ -114,34 +114,80 @@ void Cube::BuildShadersAndInputLayout()
 void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
 {
 	Model model;
-	MeshLoad(L"Resources/Assets/square.obj", model);
+	if (!MeshLoad(L"Resources/Assets/bibian.obj", model))
+		return;
 
-	const UINT vbByteSize = (UINT)model.vertices.size() * sizeof(Vertex);
-	const UINT ibByteSize = (UINT)model.indices.size() * sizeof(std::uint32_t);
+	if (model.submeshes.empty())
+		return;
+
+	// ============================================
+	// 1. 모든 서브메시를 하나의 큰 버퍼로 합치기
+	// ============================================
+	std::vector<Vertex> allVertices;
+	std::vector<uint32_t> allIndices;
+
+	struct SubmeshOffset
+	{
+		UINT indexCount;
+		UINT startIndexLocation;
+		UINT baseVertexLocation;
+	};
+	std::vector<SubmeshOffset> offsets;
+
+	for (const auto& sub : model.submeshes)
+	{
+		UINT baseVertex = (UINT)allVertices.size();
+		UINT startIndex = (UINT)allIndices.size();
+
+		// 정점 추가
+		allVertices.insert(allVertices.end(), sub.vertices.begin(), sub.vertices.end());
+
+		// 인덱스 추가 (baseVertex를 더해줘야 함)
+		for (auto index : sub.indices)
+		{
+			allIndices.push_back(index + baseVertex);
+		}
+
+		// 오프셋 기록
+		offsets.push_back({ (UINT)sub.indices.size(), startIndex, baseVertex });
+	}
+
+	// ============================================
+	// 2. 버퍼 생성
+	// ============================================
+	const UINT vbByteSize = (UINT)allVertices.size() * sizeof(Vertex);
+	const UINT ibByteSize = (UINT)allIndices.size() * sizeof(uint32_t);
 
 	mBoxGeo = std::make_unique<MeshGeometry>();
-	mBoxGeo->Name = "boxGeo";
+	mBoxGeo->Name = "meshGeo";
 
 	ThrowIfFailed(D3DCreateBlob(vbByteSize, &mBoxGeo->VertexBufferCPU));
-	CopyMemory(mBoxGeo->VertexBufferCPU->GetBufferPointer(), model.vertices.data(), vbByteSize);
+	CopyMemory(mBoxGeo->VertexBufferCPU->GetBufferPointer(), allVertices.data(), vbByteSize);
 
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &mBoxGeo->IndexBufferCPU));
-	CopyMemory(mBoxGeo->IndexBufferCPU->GetBufferPointer(), model.indices.data(), ibByteSize);
+	CopyMemory(mBoxGeo->IndexBufferCPU->GetBufferPointer(), allIndices.data(), ibByteSize);
 
-	mBoxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(device, cmdList, model.vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
-	mBoxGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(device, cmdList, model.indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
+	mBoxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(device, cmdList, allVertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
+	mBoxGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(device, cmdList, allIndices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
 
 	mBoxGeo->VertexByteStride = sizeof(Vertex);
 	mBoxGeo->VertexBufferByteSize = vbByteSize;
 	mBoxGeo->IndexFormat = DXGI_FORMAT_R32_UINT;
 	mBoxGeo->IndexBufferByteSize = ibByteSize;
 
-	SubmeshGeometry submesh;
-	submesh.IndexCount = (UINT)model.indices.size();
-	submesh.StartIndexLocation = 0;
-	submesh.BaseVertexLocation = 0;
+	// ============================================
+	// 3. 각 서브메시 등록 (submesh_0, submesh_1 ...)
+	// ============================================
+	for (size_t i = 0; i < offsets.size(); ++i)
+	{
+		SubmeshGeometry submesh;
+		submesh.IndexCount = offsets[i].indexCount;
+		submesh.StartIndexLocation = offsets[i].startIndexLocation;
+		submesh.BaseVertexLocation = offsets[i].baseVertexLocation;
 
-	mBoxGeo->DrawArgs["box"] = submesh;
+		std::string key = "submesh_" + std::to_string(i);
+		mBoxGeo->DrawArgs[key] = submesh;
+	}
 }
 
 void Cube::BuildPSO(ID3D12Device* device)
@@ -199,7 +245,13 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	cmdList->SetGraphicsRootDescriptorTable(0, mCbvSrvHeap->GetGPUDescriptorHandleForHeapStart());
 	cmdList->SetPipelineState(mPSO.Get());
-	cmdList->DrawIndexedInstanced(mBoxGeo->DrawArgs["box"].IndexCount, 1, 0 ,0 ,0);
+
+	// 모든 서브메시 그리기
+	for (auto& pair : mBoxGeo->DrawArgs)
+	{
+		auto& sub = pair.second;
+		cmdList->DrawIndexedInstanced(sub.IndexCount, 1, sub.StartIndexLocation, sub.BaseVertexLocation, 0);
+	}
 }
 
 void Cube::OnResize(float ratio)

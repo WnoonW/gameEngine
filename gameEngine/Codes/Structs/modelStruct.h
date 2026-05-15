@@ -8,10 +8,17 @@ struct Vertex {
     DirectX::XMFLOAT2 texcoord;
 };
 
-struct Model {
+struct SubMesh
+{
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
+    std::string materialName;           // usemtl 이름 저장
 };
+
+struct Model {
+    std::vector<SubMesh> submeshes;
+};
+
 
 struct FaceVertex {
     int pos = -1;

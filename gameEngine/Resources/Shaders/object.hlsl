@@ -38,6 +38,7 @@ VertexOut VS(VertexIn vin)
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    float4 color = gTexture.Sample(gSampler, pin.TexC);
-    return color;
+    float4 pink = float4(1.0f, 0.0f, 1.0f, 1.0f);
+    //float4 color = gTexture.Sample(gSampler, pin.TexC);
+    return pink;
 }
