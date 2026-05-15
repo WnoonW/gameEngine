@@ -48,7 +48,7 @@ void Cube::BuildConstantBuffers(ID3D12Device* device)
 void Cube::BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue)
 {
 	//TextureLoad(L"Textures/bricks.dds", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
-	TextureLoad(L"Resources/e.png", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
+	TextureLoad(L"Resources/Textures/e.png", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Format = mTexture->GetDesc().Format;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -101,8 +101,8 @@ void Cube::BuildShadersAndInputLayout()
 {
 	HRESULT hr = S_OK;
 
-	mvsByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "VS", "vs_5_0");
-	mpsByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "PS", "ps_5_0");
+	mvsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\texture.hlsl", nullptr, "VS", "vs_5_0");
+	mpsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\texture.hlsl", nullptr, "PS", "ps_5_0");
 
 	mInputLayout = 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

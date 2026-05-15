@@ -145,45 +145,45 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Common\Camera.cpp" />
-    <ClCompile Include="Common\d3dApp.cpp" />
-    <ClCompile Include="Common\d3dUtil.cpp" />
-    <ClCompile Include="Common\DDSTextureLoader.cpp" />
-    <ClCompile Include="Common\GameTimer.cpp" />
-    <ClCompile Include="Common\GeometryGenerator.cpp" />
-    <ClCompile Include="Common\MathHelper.cpp" />
-    <ClCompile Include="InitDirect3DApp.cpp" />
-    <ClCompile Include="V2\Cube.cpp" />
-    <ClCompile Include="V2\ResourceLoader.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Common\Camera.h" />
-    <ClInclude Include="Common\d3dApp.h" />
-    <ClInclude Include="Common\d3dUtil.h" />
-    <ClInclude Include="Common\d3dx12.h" />
-    <ClInclude Include="Common\DDSTextureLoader.h" />
-    <ClInclude Include="Common\GameTimer.h" />
-    <ClInclude Include="Common\GeometryGenerator.h" />
-    <ClInclude Include="Common\MathHelper.h" />
-    <ClInclude Include="Common\UploadBuffer.h" />
-    <ClInclude Include="V2\Cube.h" />
-    <ClInclude Include="V2\ResourceLoader.h" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\color.hlsl">
+    <ClCompile Include="Codes\Common\Camera.cpp" />
+    <ClCompile Include="Codes\Common\d3dApp.cpp" />
+    <ClCompile Include="Codes\Common\d3dUtil.cpp" />
+    <ClCompile Include="Codes\Common\DDSTextureLoader.cpp" />
+    <ClCompile Include="Codes\Common\GameTimer.cpp" />
+    <ClCompile Include="Codes\Common\GeometryGenerator.cpp" />
+    <ClCompile Include="Codes\Common\MathHelper.cpp" />
+    <ClCompile Include="Codes\V2\Cube.cpp" />
+    <ClCompile Include="Codes\V2\ResourceLoader.cpp" />
+    <ClCompile Include="InitDirect3DApp.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Codes\Common\Camera.h" />
+    <ClInclude Include="Codes\Common\d3dApp.h" />
+    <ClInclude Include="Codes\Common\d3dUtil.h" />
+    <ClInclude Include="Codes\Common\d3dx12.h" />
+    <ClInclude Include="Codes\Common\DDSTextureLoader.h" />
+    <ClInclude Include="Codes\Common\GameTimer.h" />
+    <ClInclude Include="Codes\Common\GeometryGenerator.h" />
+    <ClInclude Include="Codes\Common\MathHelper.h" />
+    <ClInclude Include="Codes\Common\UploadBuffer.h" />
+    <ClInclude Include="Codes\V2\Cube.h" />
+    <ClInclude Include="Codes\V2\ResourceLoader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Resources\Shaders\color.hlsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
     </FxCompile>
-    <FxCompile Include="Shaders\texture.hlsl">
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    <FxCompile Include="Resources\Shaders\texture.hlsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -6,8 +6,8 @@
 //
 //***************************************************************************************
 
-#include "Common/d3dApp.h"
-#include "V2/Cube.h"
+#include "Codes/Common/d3dApp.h"
+#include "Codes/V2/Cube.h"
 #include <DirectXColors.h>
 
 using namespace DirectX;
