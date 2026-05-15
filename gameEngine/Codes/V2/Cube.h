@@ -6,20 +6,12 @@
 #include "../Common/MathHelper.h"
 #include "../Common/UploadBuffer.h"
 #include "../Common/GameTimer.h"
+//struct
+#include "../Structs/modelStruct.h"
+#include "../Structs/constantStruct.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
-
-struct Vertex
-{
-	XMFLOAT3 Pos;
-	XMFLOAT2 TexC;
-};
-
-struct ObjectConstants
-{
-	XMFLOAT4X4 WorldViewProj = MathHelper::Identity4x4();
-};
 
 class Cube
 {

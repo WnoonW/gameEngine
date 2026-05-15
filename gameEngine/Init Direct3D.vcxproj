@@ -169,6 +169,8 @@
     <ClInclude Include="Codes\Common\GeometryGenerator.h" />
     <ClInclude Include="Codes\Common\MathHelper.h" />
     <ClInclude Include="Codes\Common\UploadBuffer.h" />
+    <ClInclude Include="Codes\Structs\constantStruct.h" />
+    <ClInclude Include="Codes\Structs\modelStruct.h" />
     <ClInclude Include="Codes\V2\Cube.h" />
     <ClInclude Include="Codes\V2\ResourceLoader.h" />
   </ItemGroup>
