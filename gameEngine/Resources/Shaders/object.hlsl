@@ -28,6 +28,8 @@ VertexOut VS(VertexIn vin)
 	// Transform to homogeneous clip space.
     vout.PosH = mul(float4(vin.PosL, 1.0f), gWorldViewProj);
 
+    // Pass normal.
+    vout.Normal = vin.Normal;
     // Pass texture coordinates.
     vout.TexC = vin.TexC;
     

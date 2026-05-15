@@ -117,7 +117,7 @@ void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmd
 	MeshLoad(L"Resources/Assets/square.obj", model);
 
 	const UINT vbByteSize = (UINT)model.vertices.size() * sizeof(Vertex);
-	const UINT ibByteSize = (UINT)model.indices.size() * sizeof(std::uint16_t);
+	const UINT ibByteSize = (UINT)model.indices.size() * sizeof(std::uint32_t);
 
 	mBoxGeo = std::make_unique<MeshGeometry>();
 	mBoxGeo->Name = "boxGeo";
@@ -133,7 +133,7 @@ void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmd
 
 	mBoxGeo->VertexByteStride = sizeof(Vertex);
 	mBoxGeo->VertexBufferByteSize = vbByteSize;
-	mBoxGeo->IndexFormat = DXGI_FORMAT_R16_UINT;
+	mBoxGeo->IndexFormat = DXGI_FORMAT_R32_UINT;
 	mBoxGeo->IndexBufferByteSize = ibByteSize;
 
 	SubmeshGeometry submesh;
