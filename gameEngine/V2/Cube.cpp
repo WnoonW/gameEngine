@@ -49,19 +49,20 @@ void Cube::BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandL
 {
 	//TextureLoad(L"Textures/bricks.dds", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
 	TextureLoad(L"Resources/e.png", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc;
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Format = mTexture->GetDesc().Format;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	srvDesc.Texture2D.MostDetailedMip = 0;
 	srvDesc.Texture2D.MipLevels = mTexture->GetDesc().MipLevels;
 	srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+	srvDesc.Texture2D.PlaneSlice = 0;
 	device->CreateShaderResourceView(mTexture.Get(), &srvDesc, mCbvSrvHeapHandle);
 }
 
 void Cube::BuildRootSignature(ID3D12Device* device)
 {
-	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+	CD3DX12_ROOT_PARAMETER slotRootParameter[1];
 
 	CD3DX12_DESCRIPTOR_RANGE viewTable[2];
 	viewTable[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
