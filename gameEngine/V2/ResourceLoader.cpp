@@ -9,7 +9,7 @@ bool ResourceLoad(const std::wstring& filepath)
 	return false;
 }
 
-bool TextureLoad(const std::wstring & filepath, Microsoft::WRL::ComPtr<ID3D12Resource> texture, Microsoft::WRL::ComPtr<ID3D12Resource> UploadHeap, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue)
+bool TextureLoad(const std::wstring & filepath, Microsoft::WRL::ComPtr<ID3D12Resource>& texture, Microsoft::WRL::ComPtr<ID3D12Resource>& uploadHeap, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue)
 {
 	if (filepath.empty())
 		return false;
@@ -22,24 +22,30 @@ bool TextureLoad(const std::wstring & filepath, Microsoft::WRL::ComPtr<ID3D12Res
 	std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
 	if (ext == L".dds")
-	{
-		// === DDS 로드 (DirectXTK12) ===
-		HRESULT hr = DirectX::CreateDDSTextureFromFile12(
-			device,                    
-			cmdList,              
-			filepath.c_str(),
-			texture,                    
-			UploadHeap
-		);
+{
+    HRESULT hr = DirectX::CreateDDSTextureFromFile12(
+        device, cmdList, filepath.c_str(),
+        texture, uploadHeap);
 
-		if (FAILED(hr))
-		{
-			OutputDebugStringW(L"Failed to load DDS texture.\n");
-			return false;
-		}
+    if (FAILED(hr))
+    {
+        // ★★★ 여기 추가 ★★★
+        wchar_t buf[256];
+        swprintf_s(buf, L"[TextureLoad] CreateDDSTextureFromFile12 failed. HRESULT=0x%08X, Path=%s\n", 
+                   hr, filepath.c_str());
+        OutputDebugStringW(buf);
 
-		return true;
-	}
+        // GetLastError()도 같이 확인
+        DWORD err = GetLastError();
+        if (err != 0)
+        {
+            swprintf_s(buf, L"  -> GetLastError() = %d (0x%X)\n", err, err);
+            OutputDebugStringW(buf);
+        }
+        return false;
+    }
+    return true;
+}
 	else if (ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".bmp")
 	{
 		// === WIC 로드 (PNG, JPG, BMP) ===

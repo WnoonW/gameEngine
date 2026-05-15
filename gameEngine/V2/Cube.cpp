@@ -47,7 +47,8 @@ void Cube::BuildConstantBuffers(ID3D12Device* device)
 
 void Cube::BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue)
 {
-	TextureLoad(L"../Textures/bricks.dds", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
+	//TextureLoad(L"Textures/bricks.dds", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
+	TextureLoad(L"Resources/e.png", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc;
 	srvDesc.Format = mTexture->GetDesc().Format;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
