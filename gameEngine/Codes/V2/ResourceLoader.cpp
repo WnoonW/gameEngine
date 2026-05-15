@@ -107,7 +107,7 @@ static FaceVertex parseFaceVertex(const std::string& token) {
     return fv;
 }
 
-bool MeshLoad(const std::wstring & filepath, Model outModel)
+bool MeshLoad(const std::wstring & filepath, Model& outModel)
 {
     std::ifstream file(filepath);
     if (!file.is_open()) {
