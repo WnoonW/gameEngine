@@ -671,7 +671,7 @@ void D3DApp::LogAdapterOutputs(IDXGIAdapter* adapter)
         text += L"\n";
         OutputDebugString(text.c_str());
 
-        LogOutputDisplayModes(output, mBackBufferFormat);
+        //LogOutputDisplayModes(output, mBackBufferFormat);
 
         ReleaseCom(output);
 

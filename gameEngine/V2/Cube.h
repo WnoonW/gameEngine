@@ -13,7 +13,7 @@ using Microsoft::WRL::ComPtr;
 struct Vertex
 {
 	XMFLOAT3 Pos;
-	XMFLOAT4 Color;
+	XMFLOAT2 TexC;
 };
 
 struct ObjectConstants
@@ -29,6 +29,7 @@ public:
 
 	void BuildDescriptorHeaps(ID3D12Device* device);
 	void BuildConstantBuffers(ID3D12Device* device);
+	void BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue);
 	void BuildRootSignature(ID3D12Device* device);
 	void BuildShadersAndInputLayout();
 	void BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
@@ -40,7 +41,11 @@ public:
 
 private:
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
-	ComPtr<ID3D12DescriptorHeap> mCbvHeap = nullptr;
+	ComPtr<ID3D12DescriptorHeap> mCbvSrvHeap = nullptr;
+	D3D12_CPU_DESCRIPTOR_HANDLE mCbvSrvHeapHandle;
+
+	ComPtr<ID3D12Resource> mTexture = nullptr;
+	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
 
 	std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 
