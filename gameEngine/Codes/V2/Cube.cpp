@@ -117,10 +117,13 @@ void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmd
 	if (!MeshLoad(L"Resources/Assets/bibian.obj", model))
 		return;
 
-	for (auto& submesh : model.submeshes)
+	for (size_t i = 0; i < model.submeshes.size(); ++i)
 	{
-		OutputDebugStringA(submesh.materialName.c_str());
-		// submesh.vertices, submesh.indices 사용
+		const auto& sub = model.submeshes[i];
+		char buf[256];
+		sprintf_s(buf, "[Submesh %zu] material=%s, vertices=%zu, indices=%zu\n",
+			i, sub.materialName.c_str(), sub.vertices.size(), sub.indices.size());
+		OutputDebugStringA(buf);
 	}
 
 	if (model.submeshes.empty())
@@ -186,10 +189,12 @@ void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmd
 	// ============================================
 	for (size_t i = 0; i < offsets.size(); ++i)
 	{
+		if (offsets[i].indexCount == 0) continue;
+
 		SubmeshGeometry submesh;
 		submesh.IndexCount = offsets[i].indexCount;
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
-		submesh.BaseVertexLocation = offsets[i].baseVertexLocation;
+		submesh.BaseVertexLocation = 0;                    // ← 여기 중요! 0으로 고정
 
 		std::string key = "submesh_" + std::to_string(i);
 		mBoxGeo->DrawArgs[key] = submesh;
@@ -258,10 +263,56 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
 		auto& sub = pair.second;
 		cmdList->DrawIndexedInstanced(sub.IndexCount, 1, sub.StartIndexLocation, sub.BaseVertexLocation, 0);
 	}
+ 
+	//선택된 서브메시만 그리기 (디버그용)
+/*	std::string targetKey = "submesh_" + std::to_string(mSelectedSubmeshIndex);
+	auto it = mBoxGeo->DrawArgs.find(targetKey);
+	if (it != mBoxGeo->DrawArgs.end())
+	{
+		auto& sub = it->second;
+
+		// 디버그용 (원하면 주석 처리)
+		char buf[128];
+		sprintf_s(buf, "Drawing Submesh: %s (IndexCount=%u)\n",
+			targetKey.c_str(), sub.IndexCount);
+		OutputDebugStringA(buf);
+
+		cmdList->DrawIndexedInstanced(
+			sub.IndexCount,
+			1,
+			sub.StartIndexLocation,
+			sub.BaseVertexLocation,
+			0);
+	}*/
 }
 
 void Cube::OnResize(float ratio)
 {
 	XMMATRIX P = XMMatrixPerspectiveFovLH(0.25f * MathHelper::Pi, ratio, 1.0f, 1000.0f);
 	XMStoreFloat4x4(&mProj, P);
+}
+
+
+void Cube::NextSubmesh()
+{
+	if (!mBoxGeo) return;
+
+	size_t total = mBoxGeo->DrawArgs.size();
+	if (total == 0) return;
+
+	mSelectedSubmeshIndex++;
+	if (mSelectedSubmeshIndex >= (int)total)
+		mSelectedSubmeshIndex = 0;   // 마지막에서 처음으로 순환
+}
+
+void Cube::PrevSubmesh()
+{
+	if (!mBoxGeo) return;
+
+	size_t total = mBoxGeo->DrawArgs.size();
+	if (total == 0) return;
+
+	mSelectedSubmeshIndex--;
+	if (mSelectedSubmeshIndex < 0)
+		mSelectedSubmeshIndex = (int)total - 1;   // 처음에서 마지막으로 순환
 }

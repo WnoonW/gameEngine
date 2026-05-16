@@ -30,6 +30,8 @@ private:
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)override;
 	virtual void OnMouseMove(WPARAM btnState, int x, int y)override;
 
+	virtual void OnKeyDown(WPARAM key)override;
+
 private:
 	float mTheta = 1.5f * XM_PI;
 	float mPhi = XM_PIDIV4;
@@ -182,4 +184,26 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 	mLastMousePos.x = x;
 	mLastMousePos.y = y;
+}
+
+void InitDirect3DApp::OnKeyDown(WPARAM wParam)
+{
+	switch (wParam)
+	{
+	case VK_UP:          // ↑ 키
+	case VK_ADD:         // + 키 (숫자패드)
+	case VK_OEM_PLUS:    // + 키
+		cube.NextSubmesh();     // ← Cube 객체가 mCube라고 가정
+		break;
+
+	case VK_DOWN:        // ↓ 키
+	case VK_SUBTRACT:    // - 키 (숫자패드)
+	case VK_OEM_MINUS:   // - 키
+		cube.PrevSubmesh();
+		break;
+
+	case 'R':            // R 키로 리셋 (선택)
+		cube.mSelectedSubmeshIndex = 0;
+		break;
+	}
 }

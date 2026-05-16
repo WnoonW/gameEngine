@@ -53,6 +53,8 @@ protected:
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)  { }
 	virtual void OnMouseMove(WPARAM btnState, int x, int y){ }
 
+	virtual void OnKeyDown(WPARAM key) {}
+
 protected:
 
 	bool InitMainWindow();
