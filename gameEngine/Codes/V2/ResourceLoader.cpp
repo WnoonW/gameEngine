@@ -108,7 +108,7 @@ static FaceVertex parseFaceVertex(const std::string& token) {
     return fv;
 }
 
-bool MeshLoad1(const std::wstring& filepath, Model& outModel)
+bool MeshLoad3(const std::wstring& filepath, Model& outModel)
 {
     std::string path(filepath.begin(), filepath.end());
     std::ifstream file(path, std::ios::binary);
@@ -406,7 +406,7 @@ bool MeshLoad2(const std::wstring& filepath, Model& outModel)
     return true;
 }
 
-bool MeshLoad(const std::wstring& filepath, Model& outModel)
+bool MeshLoad1(const std::wstring& filepath, Model& outModel)
 {
     std::string path(filepath.begin(), filepath.end());
     std::ifstream file(path, std::ios::binary);
@@ -508,6 +508,163 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
                     targetSubmesh.indices.push_back(static_cast<unsigned int>(base + 0));
                     targetSubmesh.indices.push_back(static_cast<unsigned int>(base + i));
                     targetSubmesh.indices.push_back(static_cast<unsigned int>(base + i + 1));
+                }
+            }
+        }
+    }
+
+    file.close();
+    return true;
+}
+
+bool MeshLoad(const std::wstring& filepath, Model& outModel)
+{
+    std::string path(filepath.begin(), filepath.end());
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    // === 파일명 추출 (.obj 제거) ===
+    std::string filename = path;
+
+    // 경로에서 파일명만 추출
+    size_t lastSlash = filename.find_last_of("/\\");
+    if (lastSlash != std::string::npos)
+        filename = filename.substr(lastSlash + 1);
+
+    // .obj 확장자 제거 (대소문자 구분 없이)
+    std::string ext = ".obj";
+    if (filename.size() > ext.size())
+    {
+        std::string lowerPart = filename.substr(filename.size() - ext.size());
+        std::transform(lowerPart.begin(), lowerPart.end(), lowerPart.begin(), ::tolower);
+        if (lowerPart == ext)
+        {
+            filename = filename.substr(0, filename.size() - ext.size());
+        }
+    }
+
+    if (filename.empty())
+        filename = "model";   // 파일명이 없을 경우 대비
+
+    std::vector<DirectX::XMFLOAT3> temp_positions;
+    std::vector<DirectX::XMFLOAT3> temp_normals;
+    std::vector<DirectX::XMFLOAT2> temp_texcoords;
+
+    // 서브메시 카운터
+    int submeshCounter = 0;
+
+    auto createNewSubmesh = [&]() -> size_t {
+        SubMesh newSubmesh;
+
+        if (submeshCounter == 0)
+            newSubmesh.materialName = filename;                    // 첫 번째: 파일명
+        else
+            newSubmesh.materialName = filename + "_" + std::to_string(submeshCounter);  // 이후: 파일명_1, 파일명_2 ...
+
+        outModel.submeshes.push_back(newSubmesh);
+        submeshCounter++;
+        return outModel.submeshes.size() - 1;
+        };
+
+    size_t currentSubmeshIndex = createNewSubmesh();   // 첫 서브메시 (파일명)
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (line.empty()) continue;
+
+        // usemtl 처리 → 새로운 서브메시 생성 (파일명 기반 이름)
+        if (line.rfind("usemtl", 0) == 0)
+        {
+            currentSubmeshIndex = createNewSubmesh();   // 파일명_1, 파일명_2 ...
+            continue;
+        }
+
+        // v, vn, vt 처리
+        if (line[0] == 'v')
+        {
+            if (line[1] == ' ')
+            {
+                DirectX::XMFLOAT3 pos{};
+                if (sscanf_s(line.c_str(), "v %f %f %f", &pos.x, &pos.y, &pos.z) == 3)
+                    temp_positions.push_back(pos);
+            }
+            else if (line[1] == 'n')
+            {
+                DirectX::XMFLOAT3 n{};
+                if (sscanf_s(line.c_str(), "vn %f %f %f", &n.x, &n.y, &n.z) == 3)
+                    temp_normals.push_back(n);
+            }
+            else if (line[1] == 't')
+            {
+                DirectX::XMFLOAT2 uv{};
+                if (sscanf_s(line.c_str(), "vt %f %f", &uv.x, &uv.y) == 2)
+                    temp_texcoords.push_back(uv);
+            }
+            continue;
+        }
+
+        // f (face) 처리
+        if (line[0] == 'f')
+        {
+            SubMesh& currentSubmesh = outModel.submeshes[currentSubmeshIndex];
+
+            std::istringstream iss(line);
+            std::string token;
+            iss >> token; // 'f' skip
+
+            std::vector<Vertex> faceVerts;
+
+            while (iss >> token)
+            {
+                int v = 0, vt = 0, vn = 0;
+                size_t p1 = token.find('/');
+                if (p1 != std::string::npos)
+                {
+                    v = std::atoi(token.substr(0, p1).c_str());
+                    size_t p2 = token.find('/', p1 + 1);
+                    if (p2 != std::string::npos)
+                    {
+                        std::string vtStr = token.substr(p1 + 1, p2 - p1 - 1);
+                        if (!vtStr.empty()) vt = std::atoi(vtStr.c_str());
+                        std::string vnStr = token.substr(p2 + 1);
+                        if (!vnStr.empty()) vn = std::atoi(vnStr.c_str());
+                    }
+                    else
+                    {
+                        std::string vtStr = token.substr(p1 + 1);
+                        if (!vtStr.empty()) vt = std::atoi(vtStr.c_str());
+                    }
+                }
+                else
+                {
+                    v = std::atoi(token.c_str());
+                }
+
+                if (v > 0)  v--;
+                if (vt > 0) vt--;
+                if (vn > 0) vn--;
+
+                Vertex vert{};
+                if (v >= 0 && v < (int)temp_positions.size()) vert.position = temp_positions[v];
+                if (vn >= 0 && vn < (int)temp_normals.size())   vert.normal = temp_normals[vn];
+                if (vt >= 0 && vt < (int)temp_texcoords.size()) vert.texcoord = temp_texcoords[vt];
+
+                faceVerts.push_back(vert);
+            }
+
+            if (faceVerts.size() >= 3)
+            {
+                size_t base = currentSubmesh.vertices.size();
+                for (auto& v : faceVerts)
+                    currentSubmesh.vertices.push_back(v);
+
+                for (size_t i = 1; i + 1 < faceVerts.size(); ++i)
+                {
+                    currentSubmesh.indices.push_back(static_cast<unsigned int>(base + 0));
+                    currentSubmesh.indices.push_back(static_cast<unsigned int>(base + i));
+                    currentSubmesh.indices.push_back(static_cast<unsigned int>(base + i + 1));
                 }
             }
         }

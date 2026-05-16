@@ -117,6 +117,12 @@ void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmd
 	if (!MeshLoad(L"Resources/Assets/bibian.obj", model))
 		return;
 
+	for (auto& submesh : model.submeshes)
+	{
+		OutputDebugStringA(submesh.materialName.c_str());
+		// submesh.vertices, submesh.indices 사용
+	}
+
 	if (model.submeshes.empty())
 		return;
 
