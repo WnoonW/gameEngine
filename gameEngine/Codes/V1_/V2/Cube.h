@@ -6,6 +6,7 @@
 #include "../../Common/MathHelper.h"
 #include "../../Common/UploadBuffer.h"
 #include "../../Common/GameTimer.h"
+#include "../V3/MeshManager.h"
 //struct
 #include "../../Structs/modelStruct.h"
 #include "../../Structs/constantStruct.h"
@@ -31,6 +32,7 @@ public:
 	void Draw(ID3D12GraphicsCommandList* cmdList);
 	void OnResize(float ratio);
 
+	Mesh* mMesh = nullptr;
 private:
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mCbvSrvHeap = nullptr;
@@ -54,7 +56,6 @@ private:
 	XMFLOAT4X4 mView = MathHelper::Identity4x4();
 	XMFLOAT4X4 mProj = MathHelper::Identity4x4();
 
-	Mesh* mMesh = nullptr;
 
 public:
 	void NextSubmesh();

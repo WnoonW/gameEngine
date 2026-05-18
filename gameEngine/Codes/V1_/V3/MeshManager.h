@@ -2,7 +2,12 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
+#include <wrl.h>                    
+#include "../../Common/d3dUtil.h"
 #include "../V2/ResourceLoader.h"
+
+using namespace DirectX;
+using Microsoft::WRL::ComPtr;
 
 struct Mesh
 {
