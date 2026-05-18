@@ -77,9 +77,10 @@ bool InitDirect3DApp::Initialize()
 {
     if(!D3DApp::Initialize())
 		return false;
-		
+
 	MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj", md3dDevice.Get(), mCommandList.Get());
 	cube.Initialize(md3dDevice.Get(), mCommandList.Get(), mDirectCmdListAlloc.Get(), mCommandQueue.Get());
+
 	FlushCommandQueue();
 	return true;
 }
