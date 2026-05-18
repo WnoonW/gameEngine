@@ -75,14 +75,29 @@ InitDirect3DApp::~InitDirect3DApp()
 
 bool InitDirect3DApp::Initialize()
 {
-    if(!D3DApp::Initialize())
-		return false;
+    if (!D3DApp::Initialize())
+        return false;
 
-	MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj", md3dDevice.Get(), mCommandList.Get());
-	cube.Initialize(md3dDevice.Get(), mCommandList.Get(), mDirectCmdListAlloc.Get(), mCommandQueue.Get());
+    // ★★★ Mesh 업로드를 위한 CommandList 준비 ★★★
+    ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 
-	FlushCommandQueue();
-	return true;
+    if (!MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
+        md3dDevice.Get(), mCommandList.Get()))
+    {
+        OutputDebugStringA("[ERROR] CreateMesh 실패!\n");
+        // return false; // 필요시
+    }
+
+    // ★★★ 업로드 명령 실행 ★★★
+    ThrowIfFailed(mCommandList->Close());
+    ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
+    mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
+    FlushCommandQueue();
+
+    cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
+        mDirectCmdListAlloc.Get(), mCommandQueue.Get());
+
+    return true;
 }
 
 void InitDirect3DApp::OnResize()

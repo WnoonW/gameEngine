@@ -114,7 +114,7 @@ void Cube::BuildShadersAndInputLayout()
 
 void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
 {
-	mMesh = MeshManager::Get().GetMesh("bibian.obj");
+	mMesh = MeshManager::Get().GetMesh("bibian");
 /*	Model model;
 	if (!MeshLoad(L"Resources/Assets/bibian.obj", model))
 		return;
