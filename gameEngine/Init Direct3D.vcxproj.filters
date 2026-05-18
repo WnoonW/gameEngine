@@ -16,11 +16,17 @@
     <Filter Include="Shaders">
       <UniqueIdentifier>{5064f50b-4999-44af-bf58-1f151088d2e8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="V2">
-      <UniqueIdentifier>{c1760f81-1a0b-4a0b-97d2-57010e72cf6a}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Common">
       <UniqueIdentifier>{fca99640-0bd6-452e-a953-ca07361fbb3a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_">
+      <UniqueIdentifier>{a9bdc5cd-baa7-4367-9e4e-54df60bf9329}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_\V2">
+      <UniqueIdentifier>{c1760f81-1a0b-4a0b-97d2-57010e72cf6a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_\V3">
+      <UniqueIdentifier>{5c7158cc-1834-4565-a1f6-b802002afe55}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -29,12 +35,6 @@
   <ItemGroup>
     <ClCompile Include="InitDirect3DApp.cpp">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Codes\V2\Cube.cpp">
-      <Filter>V2</Filter>
-    </ClCompile>
-    <ClCompile Include="Codes\V2\ResourceLoader.cpp">
-      <Filter>V2</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Common\Camera.cpp">
       <Filter>Common</Filter>
@@ -57,14 +57,17 @@
     <ClCompile Include="Codes\Common\MathHelper.cpp">
       <Filter>Common</Filter>
     </ClCompile>
+    <ClCompile Include="Codes\V1_\V2\Cube.cpp">
+      <Filter>V1_\V2</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp">
+      <Filter>V1_\V2</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V3\MeshManager.cpp">
+      <Filter>V1_\V3</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Codes\V2\Cube.h">
-      <Filter>V2</Filter>
-    </ClInclude>
-    <ClInclude Include="Codes\V2\ResourceLoader.h">
-      <Filter>V2</Filter>
-    </ClInclude>
     <ClInclude Include="Codes\Common\Camera.h">
       <Filter>Common</Filter>
     </ClInclude>
@@ -92,12 +95,30 @@
     <ClInclude Include="Codes\Common\UploadBuffer.h">
       <Filter>Common</Filter>
     </ClInclude>
+    <ClInclude Include="Codes\Structs\constantStruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Structs\modelStruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V2\Cube.h">
+      <Filter>V1_\V2</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V2\ResourceLoader.h">
+      <Filter>V1_\V2</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V3\MeshManager.h">
+      <Filter>V1_\V3</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Resources\Shaders\texture.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Resources\Shaders\object.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

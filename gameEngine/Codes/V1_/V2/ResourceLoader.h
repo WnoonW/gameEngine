@@ -1,8 +1,8 @@
 #pragma once
 #include <string>
 #include <wrl.h>
-#include "../Common/d3dx12.h"
-#include "../Structs/modelStruct.h"
+#include "../../Common/d3dx12.h"
+#include "../../Structs/modelStruct.h"
 
 
 bool ResourceLoad(const std::wstring& filepath);

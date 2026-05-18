@@ -7,7 +7,8 @@
 //***************************************************************************************
 
 #include "Codes/Common/d3dApp.h"
-#include "Codes/V2/Cube.h"
+#include "Codes/V1_/V2/Cube.h"
+#include "Codes/V1_/V3/MeshManager.h"
 #include <DirectXColors.h>
 
 using namespace DirectX;
@@ -77,6 +78,7 @@ bool InitDirect3DApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 		
+	MeshManager::Get().CreateMesh("bibian", L"../../Assets/bibian.obj", md3dDevice.Get(), mCommandList.Get());
 	cube.Initialize(md3dDevice.Get(), mCommandList.Get(), mDirectCmdListAlloc.Get(), mCommandQueue.Get());
 	FlushCommandQueue();
 	return true;

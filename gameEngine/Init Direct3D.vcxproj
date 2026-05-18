@@ -155,8 +155,9 @@
     <ClCompile Include="Codes\Common\GameTimer.cpp" />
     <ClCompile Include="Codes\Common\GeometryGenerator.cpp" />
     <ClCompile Include="Codes\Common\MathHelper.cpp" />
-    <ClCompile Include="Codes\V2\Cube.cpp" />
-    <ClCompile Include="Codes\V2\ResourceLoader.cpp" />
+    <ClCompile Include="Codes\V1_\V2\Cube.cpp" />
+    <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp" />
+    <ClCompile Include="Codes\V1_\V3\MeshManager.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -171,8 +172,9 @@
     <ClInclude Include="Codes\Common\UploadBuffer.h" />
     <ClInclude Include="Codes\Structs\constantStruct.h" />
     <ClInclude Include="Codes\Structs\modelStruct.h" />
-    <ClInclude Include="Codes\V2\Cube.h" />
-    <ClInclude Include="Codes\V2\ResourceLoader.h" />
+    <ClInclude Include="Codes\V1_\V2\Cube.h" />
+    <ClInclude Include="Codes\V1_\V2\ResourceLoader.h" />
+    <ClInclude Include="Codes\V1_\V3\MeshManager.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">

@@ -1,5 +1,6 @@
 #include "Cube.h"
 #include "ResourceLoader.h"
+#include "../V3/MeshManager.h"
 
 void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue)
 {
@@ -113,7 +114,8 @@ void Cube::BuildShadersAndInputLayout()
 
 void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
 {
-	Model model;
+	mMesh = MeshManager::Get().GetMesh("bibian.obj");
+/*	Model model;
 	if (!MeshLoad(L"Resources/Assets/bibian.obj", model))
 		return;
 
@@ -198,7 +200,7 @@ void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmd
 
 		std::string key = "submesh_" + std::to_string(i);
 		mBoxGeo->DrawArgs[key] = submesh;
-	}
+	}*/
 }
 
 void Cube::BuildPSO(ID3D12Device* device)
@@ -251,14 +253,14 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
 	ID3D12DescriptorHeap* descriptorHeaps[] = { mCbvSrvHeap.Get() };
 	cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	cmdList->SetGraphicsRootSignature(mRootSignature.Get());
-	cmdList->IASetVertexBuffers(0, 1, &mBoxGeo->VertexBufferView());
-	cmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
+	cmdList->IASetVertexBuffers(0, 1, &mMesh->VertexBufferView());
+	cmdList->IASetIndexBuffer(&mMesh->IndexBufferView());
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	cmdList->SetGraphicsRootDescriptorTable(0, mCbvSrvHeap->GetGPUDescriptorHandleForHeapStart());
 	cmdList->SetPipelineState(mPSO.Get());
 
 	// 모든 서브메시 그리기
-	for (auto& pair : mBoxGeo->DrawArgs)
+	for (auto& pair : mMesh->DrawArgs)
 	{
 		auto& sub = pair.second;
 		cmdList->DrawIndexedInstanced(sub.IndexCount, 1, sub.StartIndexLocation, sub.BaseVertexLocation, 0);
@@ -295,9 +297,9 @@ void Cube::OnResize(float ratio)
 
 void Cube::NextSubmesh()
 {
-	if (!mBoxGeo) return;
+	if (!mMesh) return;
 
-	size_t total = mBoxGeo->DrawArgs.size();
+	size_t total = mMesh->DrawArgs.size();
 	if (total == 0) return;
 
 	mSelectedSubmeshIndex++;
@@ -307,9 +309,9 @@ void Cube::NextSubmesh()
 
 void Cube::PrevSubmesh()
 {
-	if (!mBoxGeo) return;
+	if (!mMesh) return;
 
-	size_t total = mBoxGeo->DrawArgs.size();
+	size_t total = mMesh->DrawArgs.size();
 	if (total == 0) return;
 
 	mSelectedSubmeshIndex--;

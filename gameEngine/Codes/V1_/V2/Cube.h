@@ -2,13 +2,13 @@
 #include <DirectXMath.h>
 #include <wrl.h>
 #include <memory>
-#include "../Common/d3dx12.h"
-#include "../Common/MathHelper.h"
-#include "../Common/UploadBuffer.h"
-#include "../Common/GameTimer.h"
+#include "../../Common/d3dx12.h"
+#include "../../Common/MathHelper.h"
+#include "../../Common/UploadBuffer.h"
+#include "../../Common/GameTimer.h"
 //struct
-#include "../Structs/modelStruct.h"
-#include "../Structs/constantStruct.h"
+#include "../../Structs/modelStruct.h"
+#include "../../Structs/constantStruct.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -54,7 +54,7 @@ private:
 	XMFLOAT4X4 mView = MathHelper::Identity4x4();
 	XMFLOAT4X4 mProj = MathHelper::Identity4x4();
 
-	
+	Mesh* mMesh = nullptr;
 
 public:
 	void NextSubmesh();
