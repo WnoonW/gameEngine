@@ -412,7 +412,7 @@ void D3DApp::OnResize()
 {
 	assert(md3dDevice);
 	assert(mSwapChain);
-	assert(mCurrFrameResource->CmdListAlloc.Get());
+	assert(mCurrFrameResource && mCurrFrameResource->CmdListAlloc.Get());
 
 	// Flush before changing any resources.
 	FlushCommandQueue();
@@ -539,6 +539,9 @@ void D3DApp::CreateCommandObjects()
 			D3D12_COMMAND_LIST_TYPE_DIRECT,
 			IID_PPV_ARGS(mFrameResources[i].CmdListAlloc.GetAddressOf())));
 	};
+
+	mCurrFrameResourceIndex = 0;
+	mCurrFrameResource = &mFrameResources[0];
 
 	ThrowIfFailed(md3dDevice->CreateCommandList(
 		0,
