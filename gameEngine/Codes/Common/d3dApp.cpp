@@ -412,7 +412,7 @@ void D3DApp::OnResize()
 {
 	assert(md3dDevice);
 	assert(mSwapChain);
-	assert(mCurrFrameResource && mCurrFrameResource->CmdListAlloc.Get());
+	if (!mCurrFrameResource) return;
 
 	// Flush before changing any resources.
 	FlushCommandQueue();
@@ -538,6 +538,8 @@ void D3DApp::CreateCommandObjects()
 		ThrowIfFailed(md3dDevice->CreateCommandAllocator(
 			D3D12_COMMAND_LIST_TYPE_DIRECT,
 			IID_PPV_ARGS(mFrameResources[i].CmdListAlloc.GetAddressOf())));
+
+		//mFrameResources[i].ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(md3dDevice.Get(), 1, true);
 	};
 
 	mCurrFrameResourceIndex = 0;
@@ -602,10 +604,12 @@ void D3DApp::FlushCommandQueue()
 
         // Fire event when GPU hits current fence.  
         ThrowIfFailed(mFence->SetEventOnCompletion(mCurrentFence, eventHandle));
-
-        // Wait until the GPU hits current fence event is fired.
-		WaitForSingleObject(eventHandle, INFINITE);
-        CloseHandle(eventHandle);
+		if (eventHandle != nullptr)
+		{
+			// 핸들이 안전할 때만 호출
+			WaitForSingleObject(eventHandle, INFINITE);
+			CloseHandle(eventHandle);
+		}
 	}
 }
 

@@ -65,9 +65,6 @@ public:
         ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 
     Mesh* GetMesh(const std::string& name) const;
-    bool HasMesh(const std::string& name) const;
-
-    void Clear();   // 종료 시 or 리로드 시
 
 private:
     std::unordered_map<std::string, std::shared_ptr<Mesh>> mMeshes;

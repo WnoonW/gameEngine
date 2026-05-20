@@ -36,7 +36,7 @@ public:
 private:
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mCbvSrvHeap = nullptr;
-	D3D12_CPU_DESCRIPTOR_HANDLE mCbvSrvHeapHandle;
+	D3D12_CPU_DESCRIPTOR_HANDLE mCbvSrvHeapHandle = {0};
 
 	ComPtr<ID3D12Resource> mTexture = nullptr;
 	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;

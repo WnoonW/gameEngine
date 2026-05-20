@@ -1,5 +1,6 @@
 #pragma once
 #include "constantStruct.h"
+#include "../Common/UploadBuffer.h"
 
 // FrameResource.h 또는 d3dUtil.h에 추가
 struct FrameResource
