@@ -26,6 +26,9 @@ private:
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
+	virtual void BeginFrame()override;
+	virtual void EndFrame()override;
+
 
 	virtual void OnMouseDown(WPARAM btnState, int x, int y)override;
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)override;
@@ -79,7 +82,7 @@ bool InitDirect3DApp::Initialize()
         return false;
 
     // ★★★ Mesh 업로드를 위한 CommandList 준비 ★★★
-    ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+    ThrowIfFailed(mCommandList->Reset(mFrameResources[0].CmdListAlloc.Get(), nullptr));
 
     if (!MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
         md3dDevice.Get(), mCommandList.Get()))
@@ -95,7 +98,7 @@ bool InitDirect3DApp::Initialize()
     FlushCommandQueue();
 
     cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-        mDirectCmdListAlloc.Get(), mCommandQueue.Get());
+        mFrameResources[0].CmdListAlloc.Get(), mCommandQueue.Get());
 
     return true;
 }
@@ -112,60 +115,64 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	cube.Update(gt, mRadius, mTheta, mPhi);
 }
 
-void InitDirect3DApp::Draw(const GameTimer& gt)
+void InitDirect3DApp::BeginFrame()
 {
-    // Reuse the memory associated with command recording.
-    // We can only reset when the associated command lists have finished execution on the GPU.
-	ThrowIfFailed(mDirectCmdListAlloc->Reset());
+	mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
+	mCurrFrameResource = &mFrameResources[mCurrFrameResourceIndex];
 
-	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
-    // Reusing the command list reuses memory.
-    ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+	if (mFence->GetCompletedValue() < mCurrFrameResource->FenceValue)
+	{
+		HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+		WaitForSingleObject(eventHandle, INFINITE);
+		CloseHandle(eventHandle);
+	}
+
+	ThrowIfFailed(mCurrFrameResource->CmdListAlloc->Reset());
+	ThrowIfFailed(mCommandList->Reset(mCurrFrameResource->CmdListAlloc.Get(), nullptr));
+
+	//===========================================================================================================
+	//===========================================================================================================
 
 	// Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
-    // Set the viewport and scissor rect.  This needs to be reset whenever the command list is reset.
-    mCommandList->RSSetViewports(1, &mScreenViewport);
-    mCommandList->RSSetScissorRects(1, &mScissorRect);
+	// Set the viewport and scissor rect.  This needs to be reset whenever the command list is reset.
+	mCommandList->RSSetViewports(1, &mScreenViewport);
+	mCommandList->RSSetScissorRects(1, &mScissorRect);
 
-    // Clear the back buffer and depth buffer.
+	// Clear the back buffer and depth buffer.
 	mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
 	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-	
-    // Specify the buffers we are going to render to.
+
+	// Specify the buffers we are going to render to.
 	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
-	
+}
 
-
-
-
+void InitDirect3DApp::Draw(const GameTimer& gt)
+{
 	cube.Draw(mCommandList.Get());
+}
 
-
-
-
-
-    // Indicate a state transition on the resource usage.
+void InitDirect3DApp::EndFrame()
+{
+	// Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
-    // Done recording commands.
+	// Done recording commands.
 	ThrowIfFailed(mCommandList->Close());
- 
-    // Add the command list to the queue for execution.
+
+	// Add the command list to the queue for execution.
 	ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-	
+
 	// swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(0, 0));
 	mCurrBackBuffer = (mCurrBackBuffer + 1) % SwapChainBufferCount;
 
-	// Wait until frame commands are complete.  This waiting is inefficient and is
-	// done for simplicity.  Later we will show how to organize our rendering code
-	// so we do not have to wait per frame.
-	FlushCommandQueue();
+	mCurrFrameResource->FenceValue = ++mCurrentFence;
+	ThrowIfFailed(mCommandQueue->Signal(mFence.Get(), mCurrFrameResource->FenceValue));
 }
 
 void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)

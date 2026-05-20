@@ -110,6 +110,9 @@
     <ClInclude Include="Codes\V1_\V3\MeshManager.h">
       <Filter>V1_\V3</Filter>
     </ClInclude>
+    <ClInclude Include="Codes\Structs\AppStruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
