@@ -24,7 +24,7 @@ void Cube::BuildDescriptorHeaps(ID3D12Device* device)
 	mCbvSrvHeapHandle = mCbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
-void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>> frameResources, int gNumFrameResources)
+void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources)
 {
 	for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
 	{

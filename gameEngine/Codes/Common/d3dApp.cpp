@@ -33,8 +33,25 @@ D3DApp::D3DApp(HINSTANCE hInstance)
 
 D3DApp::~D3DApp()
 {
-	if(md3dDevice != nullptr)
+	if (md3dDevice != nullptr)
+	{
 		FlushCommandQueue();
+
+		// ==================== 상세 리포트 출력 ====================
+#if defined(_DEBUG)
+		{
+			ComPtr<ID3D12DebugDevice> debugDevice;
+			if (SUCCEEDED(md3dDevice.As(&debugDevice)))
+			{
+				debugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL);
+				// 더 깔끔하게 보고 싶으면 아래도 사용 가능
+				// debugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL);
+			}
+		}
+#endif
+		// FrameResource 정리
+		mFrameResources.clear();
+	}
 }
 
 //GetAndSet=============================================================================================================================================

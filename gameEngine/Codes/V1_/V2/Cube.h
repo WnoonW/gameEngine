@@ -22,7 +22,7 @@ public:
 	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources);
 
 	void BuildDescriptorHeaps(ID3D12Device* device);
-	void BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>> frameResources, int gNumFrameResources);
+	void BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources);
 	void BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue);
 	void BuildRootSignature(ID3D12Device* device);
 	void BuildShadersAndInputLayout();

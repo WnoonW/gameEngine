@@ -19,7 +19,7 @@ struct FrameResource
 };
 
 
-FrameResource::FrameResource(ID3D12Device* device, UINT objectCount)
+inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount)
 {
     ThrowIfFailed(device->CreateCommandAllocator(
         D3D12_COMMAND_LIST_TYPE_DIRECT,
