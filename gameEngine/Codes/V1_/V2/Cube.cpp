@@ -59,13 +59,17 @@ void Cube::BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandL
 
 void Cube::BuildRootSignature(ID3D12Device* device)
 {
-	CD3DX12_ROOT_PARAMETER slotRootParameter[1];
+	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
 
-	CD3DX12_DESCRIPTOR_RANGE viewTable[2];
-	viewTable[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
-	viewTable[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+	// [0] CBV Table (ObjectConstants) - 회전할 부분
+	CD3DX12_DESCRIPTOR_RANGE cbvRange;
+	cbvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
+	slotRootParameter[0].InitAsDescriptorTable(1, &cbvRange);
 
-	slotRootParameter[0].InitAsDescriptorTable(2, viewTable);
+	// [1] SRV Table (Texture) - 고정할 부분
+	CD3DX12_DESCRIPTOR_RANGE srvRange;
+	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
+	slotRootParameter[1].InitAsDescriptorTable(1, &srvRange);
 
 	CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
 		0,                                      // shaderRegister (s0)
@@ -75,7 +79,7 @@ void Cube::BuildRootSignature(ID3D12Device* device)
 		D3D12_TEXTURE_ADDRESS_MODE_WRAP         // W
 	);
 
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(1, slotRootParameter, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 	Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
 	Microsoft::WRL::ComPtr<ID3DBlob> errorBlob = nullptr;
@@ -257,8 +261,12 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
 
 	D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = mCbvGpuHandleStart;
 	cbvHandle.ptr += mCurrFrameIndex * mCbvSrvDescriptorSize;   // 핵심!
-
 	cmdList->SetGraphicsRootDescriptorTable(0, cbvHandle);
+
+	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = mCbvGpuHandleStart;
+	srvHandle.ptr += 3 * mCbvSrvDescriptorSize;
+	cmdList->SetGraphicsRootDescriptorTable(1, srvHandle);
+
 	cmdList->SetPipelineState(mPSO.Get());
 
 	// 모든 서브메시 그리기
