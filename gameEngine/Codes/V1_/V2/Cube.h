@@ -10,6 +10,7 @@
 //struct
 #include "../../Structs/modelStruct.h"
 #include "../../Structs/constantStruct.h"
+#include "../../Structs/AppStruct.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -18,17 +19,17 @@ class Cube
 {
 
 public:
-	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue);
+	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<FrameResource> frameResources, int gNumFrameResources);
 
 	void BuildDescriptorHeaps(ID3D12Device* device);
-	void BuildConstantBuffers(ID3D12Device* device);
+	void BuildConstantBuffers(ID3D12Device* device, std::vector<FrameResource> frameResources, int gNumFrameResources);
 	void BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue);
 	void BuildRootSignature(ID3D12Device* device);
 	void BuildShadersAndInputLayout();
 	void BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 	void BuildPSO(ID3D12Device* device);
 
-	void Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi);
+	void Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource);
 	void Draw(ID3D12GraphicsCommandList* cmdList);
 	void OnResize(float ratio);
 
@@ -40,8 +41,6 @@ private:
 
 	ComPtr<ID3D12Resource> mTexture = nullptr;
 	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
-
-	std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 
 	std::unique_ptr<MeshGeometry> mBoxGeo = nullptr;
 

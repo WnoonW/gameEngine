@@ -11,7 +11,7 @@ struct FrameResource
     UINT64 FenceValue = 0;
 
     // 나중에 추가할 per-frame 리소스들 (강력 추천)
-    // std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
+    std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
     // std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
     // ...
 };

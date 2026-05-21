@@ -97,9 +97,14 @@ bool InitDirect3DApp::Initialize()
     mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
     FlushCommandQueue();
 
-    cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-        mFrameResources[0].CmdListAlloc.Get(), mCommandQueue.Get());
+	ThrowIfFailed(mCommandList->Reset(mFrameResources[0].CmdListAlloc.Get(), nullptr));
 
+    cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
+        mFrameResources[0].CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
+
+	ThrowIfFailed(mCommandList->Close());
+	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
+	FlushCommandQueue();
     return true;
 }
 
@@ -112,7 +117,7 @@ void InitDirect3DApp::OnResize()
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-	cube.Update(gt, mRadius, mTheta, mPhi);
+	cube.Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource);
 }
 
 void InitDirect3DApp::BeginFrame()

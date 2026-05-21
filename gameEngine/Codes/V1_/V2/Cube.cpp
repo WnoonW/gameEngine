@@ -2,27 +2,21 @@
 #include "ResourceLoader.h"
 #include "../V3/MeshManager.h"
 
-void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue)
+void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<FrameResource> frameResources, int gNumFrameResources)
 {
-	ThrowIfFailed(cmdList->Reset(cmdAllocator, nullptr));
-
 	BuildDescriptorHeaps(device);
-	BuildConstantBuffers(device);
+	BuildConstantBuffers(device, frameResources, gNumFrameResources);
 	BuildShaderResourceViews(device, cmdList, cmdQueue);
 	BuildRootSignature(device);
 	BuildShadersAndInputLayout();
 	BuildBoxGeometry(device, cmdList);
 	BuildPSO(device);
-
-	ThrowIfFailed(cmdList->Close());
-	ID3D12CommandList* cmdsLists[] = { cmdList };
-	cmdQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 }
 
 void Cube::BuildDescriptorHeaps(ID3D12Device* device)
 {
 	D3D12_DESCRIPTOR_HEAP_DESC cbvsrvHeapDesc;
-	cbvsrvHeapDesc.NumDescriptors = 2;
+	cbvsrvHeapDesc.NumDescriptors = 4;
 	cbvsrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	cbvsrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	cbvsrvHeapDesc.NodeMask = 0;
@@ -30,20 +24,24 @@ void Cube::BuildDescriptorHeaps(ID3D12Device* device)
 	mCbvSrvHeapHandle = mCbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
-void Cube::BuildConstantBuffers(ID3D12Device* device)
+void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<FrameResource> frameResources, int gNumFrameResources)
 {
-	mObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, 1, true);
-	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-	D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->Resource()->GetGPUVirtualAddress();
-	int boxCBufIndex = 0;
-	cbAddress += boxCBufIndex * objCBByteSize;
+	for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
+	{
+		auto mObjectCB = frameResources[frameIndex].ObjectCB->Resource();
 
-	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-	cbvDesc.BufferLocation = cbAddress;
-	cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+		UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->GetGPUVirtualAddress();
+		int boxCBufIndex = 0;
+		cbAddress += boxCBufIndex * objCBByteSize;
 
-	device->CreateConstantBufferView(&cbvDesc, mCbvSrvHeapHandle);
-	mCbvSrvHeapHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+		cbvDesc.BufferLocation = cbAddress;
+		cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+
+		device->CreateConstantBufferView(&cbvDesc, mCbvSrvHeapHandle);
+		mCbvSrvHeapHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
 }
 
 void Cube::BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue)
@@ -226,7 +224,7 @@ void Cube::BuildPSO(ID3D12Device* device)
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(mPSO.GetAddressOf())));
 }
 
-void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi)
+void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource)
 {
 	float x = mRadius * sinf(mPhi) * cosf(mTheta);
 	float z = mRadius * sinf(mPhi) * sinf(mTheta);
@@ -245,7 +243,7 @@ void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi)
 
 	ObjectConstants objConstants;
 	XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
-	mObjectCB->CopyData(0, objConstants);
+	mCurrFrameResource->ObjectCB->CopyData(0, objConstants);
 }
 
 void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
