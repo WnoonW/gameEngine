@@ -21,22 +21,20 @@ void Cube::BuildDescriptorHeaps(ID3D12Device* device)
 	cbvsrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	cbvsrvHeapDesc.NodeMask = 0;
 	ThrowIfFailed(device->CreateDescriptorHeap(&cbvsrvHeapDesc, IID_PPV_ARGS(&mCbvSrvHeap)));
+
+	mCbvSrvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	mCbvSrvHeapHandle = mCbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
+	mCbvGpuHandleStart = mCbvSrvHeap->GetGPUDescriptorHandleForHeapStart();
 }
 
 void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources)
 {
 	for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
 	{
-		auto mObjectCB = frameResources[frameIndex]->ObjectCB->Resource();
-
-		UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->GetGPUVirtualAddress();
-		int boxCBufIndex = 0;
-		cbAddress += boxCBufIndex * objCBByteSize;
+		auto objectCB = frameResources[frameIndex]->ObjectCB->Resource();
 
 		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-		cbvDesc.BufferLocation = cbAddress;
+		cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress();
 		cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
 		device->CreateConstantBufferView(&cbvDesc, mCbvSrvHeapHandle);
@@ -224,7 +222,7 @@ void Cube::BuildPSO(ID3D12Device* device)
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(mPSO.GetAddressOf())));
 }
 
-void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource)
+void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource, int currFrameIndex)
 {
 	float x = mRadius * sinf(mPhi) * cosf(mTheta);
 	float z = mRadius * sinf(mPhi) * sinf(mTheta);
@@ -241,6 +239,8 @@ void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, 
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 	XMMATRIX worldViewProj = world * view * proj;
 
+	mCurrFrameIndex = currFrameIndex;
+
 	ObjectConstants objConstants;
 	XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
 	mCurrFrameResource->ObjectCB->CopyData(0, objConstants);
@@ -254,7 +254,11 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
 	cmdList->IASetVertexBuffers(0, 1, &mMesh->VertexBufferView());
 	cmdList->IASetIndexBuffer(&mMesh->IndexBufferView());
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	cmdList->SetGraphicsRootDescriptorTable(0, mCbvSrvHeap->GetGPUDescriptorHandleForHeapStart());
+
+	D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = mCbvGpuHandleStart;
+	cbvHandle.ptr += mCurrFrameIndex * mCbvSrvDescriptorSize;   // 핵심!
+
+	cmdList->SetGraphicsRootDescriptorTable(0, cbvHandle);
 	cmdList->SetPipelineState(mPSO.Get());
 
 	// 모든 서브메시 그리기

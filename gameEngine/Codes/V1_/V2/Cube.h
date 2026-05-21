@@ -29,7 +29,7 @@ public:
 	void BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 	void BuildPSO(ID3D12Device* device);
 
-	void Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource);
+	void Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource, int currFrameIndex);
 	void Draw(ID3D12GraphicsCommandList* cmdList);
 	void OnResize(float ratio);
 
@@ -37,7 +37,12 @@ public:
 private:
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mCbvSrvHeap = nullptr;
+
 	D3D12_CPU_DESCRIPTOR_HANDLE mCbvSrvHeapHandle = {0};
+	D3D12_GPU_DESCRIPTOR_HANDLE mCbvGpuHandleStart = {0};
+	UINT mCbvSrvDescriptorSize = 0;
+
+	int mCurrFrameIndex = 0;
 
 	ComPtr<ID3D12Resource> mTexture = nullptr;
 	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;

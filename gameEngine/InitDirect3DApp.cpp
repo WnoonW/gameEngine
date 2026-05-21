@@ -117,7 +117,7 @@ void InitDirect3DApp::OnResize()
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-	cube.Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource);
+	cube.Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource, mCurrFrameResourceIndex);
 }
 
 void InitDirect3DApp::BeginFrame()

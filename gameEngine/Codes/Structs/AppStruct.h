@@ -8,7 +8,7 @@
 struct FrameResource
 {
     FrameResource(ID3D12Device* device, UINT objectCount);   // 생성자 변경
-    //~FrameResource();
+    ~FrameResource();
 
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> CmdListAlloc;
 
@@ -29,4 +29,9 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount)
     // PassCB = std::make_unique<UploadBuffer<PassConstants>>(device, 1, true);
 
     ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, objectCount, true);
+}
+
+inline FrameResource::~FrameResource()
+{
+
 }
