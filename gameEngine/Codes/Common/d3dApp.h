@@ -104,7 +104,7 @@ protected:
     UINT64 mCurrentFence = 0;
 
 	static const int gNumFrameResources = 3;           // 2 또는 3 추천
-	std::vector<FrameResource> mFrameResources;
+	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
 	int mCurrFrameResourceIndex = 0;
 	FrameResource* mCurrFrameResource = nullptr;
 

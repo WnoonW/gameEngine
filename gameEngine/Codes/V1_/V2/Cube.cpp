@@ -2,7 +2,7 @@
 #include "ResourceLoader.h"
 #include "../V3/MeshManager.h"
 
-void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<FrameResource> frameResources, int gNumFrameResources)
+void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>> frameResources, int gNumFrameResources)
 {
 	BuildDescriptorHeaps(device);
 	BuildConstantBuffers(device, frameResources, gNumFrameResources);
@@ -24,11 +24,11 @@ void Cube::BuildDescriptorHeaps(ID3D12Device* device)
 	mCbvSrvHeapHandle = mCbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
-void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<FrameResource> frameResources, int gNumFrameResources)
+void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>> frameResources, int gNumFrameResources)
 {
 	for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
 	{
-		auto mObjectCB = frameResources[frameIndex].ObjectCB->Resource();
+		auto mObjectCB = frameResources[frameIndex]->ObjectCB->Resource();
 
 		UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->GetGPUVirtualAddress();

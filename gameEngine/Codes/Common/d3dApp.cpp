@@ -537,18 +537,18 @@ void D3DApp::CreateCommandObjects()
 	{
 		ThrowIfFailed(md3dDevice->CreateCommandAllocator(
 			D3D12_COMMAND_LIST_TYPE_DIRECT,
-			IID_PPV_ARGS(mFrameResources[i].CmdListAlloc.GetAddressOf())));
+			IID_PPV_ARGS(mFrameResources[i]->CmdListAlloc.GetAddressOf())));
 
-		//mFrameResources[i].ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(md3dDevice.Get(), 1, true);
+		mFrameResources[i]->ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(md3dDevice.Get(), 1, true);
 	};
 
 	mCurrFrameResourceIndex = 0;
-	mCurrFrameResource = &mFrameResources[0];
+	mCurrFrameResource = mFrameResources[0].get();
 
 	ThrowIfFailed(md3dDevice->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		mFrameResources[0].CmdListAlloc.Get(), // Associated command allocator
+		mFrameResources[0]->CmdListAlloc.Get(), // Associated command allocator
 		nullptr,                   // Initial PipelineStateObject
 		IID_PPV_ARGS(mCommandList.GetAddressOf())));
 

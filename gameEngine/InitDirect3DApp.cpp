@@ -82,7 +82,7 @@ bool InitDirect3DApp::Initialize()
         return false;
 
     // ★★★ Mesh 업로드를 위한 CommandList 준비 ★★★
-    ThrowIfFailed(mCommandList->Reset(mFrameResources[0].CmdListAlloc.Get(), nullptr));
+    ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
     if (!MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
         md3dDevice.Get(), mCommandList.Get()))
@@ -97,10 +97,10 @@ bool InitDirect3DApp::Initialize()
     mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
     FlushCommandQueue();
 
-	ThrowIfFailed(mCommandList->Reset(mFrameResources[0].CmdListAlloc.Get(), nullptr));
+	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
     cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-        mFrameResources[0].CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
+        mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
 
 	ThrowIfFailed(mCommandList->Close());
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
@@ -124,7 +124,7 @@ void InitDirect3DApp::BeginFrame()
 {
 	// 1. 다음 프레임으로 이동
 	mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
-	mCurrFrameResource = &mFrameResources[mCurrFrameResourceIndex];
+	mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
 
 	// 2. GPU가 이전 프레임 끝났는지 대기
 	if (mFence->GetCompletedValue() < mCurrFrameResource->FenceValue)
