@@ -535,12 +535,10 @@ void D3DApp::CreateCommandObjects()
 	mFrameResources.resize(gNumFrameResources);
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
-		ThrowIfFailed(md3dDevice->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_DIRECT,
+		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), 1);  // ← 이 줄 수정
+		ThrowIfFailed(md3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
 			IID_PPV_ARGS(mFrameResources[i]->CmdListAlloc.GetAddressOf())));
-
-		mFrameResources[i]->ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(md3dDevice.Get(), 1, true);
-	};
+	}
 
 	mCurrFrameResourceIndex = 0;
 	mCurrFrameResource = mFrameResources[0].get();

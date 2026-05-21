@@ -2,7 +2,7 @@
 #include "ResourceLoader.h"
 #include "../V3/MeshManager.h"
 
-void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>> frameResources, int gNumFrameResources)
+void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources)
 {
 	BuildDescriptorHeaps(device);
 	BuildConstantBuffers(device, frameResources, gNumFrameResources);
