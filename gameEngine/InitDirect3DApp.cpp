@@ -79,34 +79,49 @@ InitDirect3DApp::~InitDirect3DApp()
 
 bool InitDirect3DApp::Initialize()
 {
-    if (!D3DApp::Initialize())
-        return false;
+	if (!D3DApp::Initialize())
+		return false;
 
-    // ★★★ Mesh 업로드를 위한 CommandList 준비 ★★★
-    ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
-
-    if (!MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
-        md3dDevice.Get(), mCommandList.Get()))
-    {
-        OutputDebugStringA("[ERROR] CreateMesh 실패!\n");
-        // return false; // 필요시
-    }
-
-    // ★★★ 업로드 명령 실행 ★★★
-    ThrowIfFailed(mCommandList->Close());
-    ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
-    mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
-    FlushCommandQueue();
+	MessageBoxA(nullptr, "1. D3DApp Initialize Done", "Init Step", MB_OK);
 
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
-    cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-        mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
+	MessageBoxA(nullptr, "2. CommandList Reset Done (For Mesh)", "Init Step", MB_OK);
+
+	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
+		md3dDevice.Get(), mCommandList.Get());
+
+	if (!meshResult)
+	{
+		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
+		return false;
+	}
+
+	MessageBoxA(nullptr, "3. Mesh Creation Done", "Init Step", MB_OK);
+
+	ThrowIfFailed(mCommandList->Close());
+	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
+	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
+	FlushCommandQueue();
+
+	MessageBoxA(nullptr, "4. First FlushCommandQueue Done", "Init Step", MB_OK);
+
+	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
+
+	MessageBoxA(nullptr, "5. CommandList Reset Done (For Cube)", "Init Step", MB_OK);
+
+	cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
+		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
+
+	MessageBoxA(nullptr, "6. Cube Initialize Done", "Init Step", MB_OK);
 
 	ThrowIfFailed(mCommandList->Close());
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
-    return true;
+
+	MessageBoxA(nullptr, "7. All Initialize Success!", "Init Step", MB_OK);
+
+	return true;
 }
 
 void InitDirect3DApp::OnResize()
