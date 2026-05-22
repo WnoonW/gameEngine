@@ -33,5 +33,9 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount)
 
 inline FrameResource::~FrameResource()
 {
+    if (ObjectCB)
+        ObjectCB.reset();
 
+    if (CmdListAlloc)
+        CmdListAlloc.Reset();
 }

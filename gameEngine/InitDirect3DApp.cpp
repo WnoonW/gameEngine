@@ -28,6 +28,7 @@ private:
     virtual void Draw(const GameTimer& gt)override;
 	virtual void BeginFrame()override;
 	virtual void EndFrame()override;
+	virtual void OnDestroy()override;
 
 
 	virtual void OnMouseDown(WPARAM btnState, int x, int y)override;
@@ -239,4 +240,12 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 		cube.mSelectedSubmeshIndex = 0;
 		break;
 	}
+}
+
+
+void InitDirect3DApp::OnDestroy()
+{
+	cube.Shutdown();
+	MeshManager::Get().Shutdown();
+	D3DApp::OnDestroy();
 }

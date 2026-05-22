@@ -328,3 +328,15 @@ void Cube::PrevSubmesh()
 	if (mSelectedSubmeshIndex < 0)
 		mSelectedSubmeshIndex = (int)total - 1;   // 처음에서 마지막으로 순환
 }
+
+
+void Cube::Shutdown()
+{
+	if (mCbvSrvHeap)        mCbvSrvHeap.Reset();
+	if (mTexture)           mTexture.Reset();
+	if (mTextureUploadHeap) mTextureUploadHeap.Reset();
+	if (mRootSignature)     mRootSignature.Reset();
+	if (mPSO)               mPSO.Reset();
+	if (mvsByteCode)        mvsByteCode.Reset();
+	if (mpsByteCode)        mpsByteCode.Reset();
+}

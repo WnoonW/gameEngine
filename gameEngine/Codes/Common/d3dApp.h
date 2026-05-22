@@ -50,6 +50,7 @@ protected:
     virtual void Draw(const GameTimer& gt)=0;
 	virtual void BeginFrame() = 0;
 	virtual void EndFrame() = 0;
+	virtual void OnDestroy();
 
 	// Convenience overrides for handling mouse input.
 	virtual void OnMouseDown(WPARAM btnState, int x, int y){ }

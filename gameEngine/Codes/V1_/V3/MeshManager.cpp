@@ -91,3 +91,8 @@ Mesh* MeshManager::GetMesh(const std::string& name) const
 	}
 	return nullptr;
 }
+
+void MeshManager::Shutdown()
+{
+	mMeshes.clear();
+}

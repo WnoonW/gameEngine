@@ -4,6 +4,7 @@
 
 #include <WindowsX.h>
 #include "d3dApp.h"
+#include <dxgidebug.h>
 
 using Microsoft::WRL::ComPtr;
 using namespace std;
@@ -33,25 +34,6 @@ D3DApp::D3DApp(HINSTANCE hInstance)
 
 D3DApp::~D3DApp()
 {
-	if (md3dDevice != nullptr)
-	{
-		FlushCommandQueue();
-
-		// ==================== 상세 리포트 출력 ====================
-#if defined(_DEBUG)
-		{
-			ComPtr<ID3D12DebugDevice> debugDevice;
-			if (SUCCEEDED(md3dDevice.As(&debugDevice)))
-			{
-				debugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL);
-				// 더 깔끔하게 보고 싶으면 아래도 사용 가능
-				// debugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL);
-			}
-		}
-#endif
-		// FrameResource 정리
-		mFrameResources.clear();
-	}
 }
 
 //GetAndSet=============================================================================================================================================
@@ -146,6 +128,7 @@ int D3DApp::Run()
         }
     }
 
+	OnDestroy();
 	return (int)msg.wParam;
 }
 
@@ -552,9 +535,7 @@ void D3DApp::CreateCommandObjects()
 	mFrameResources.resize(gNumFrameResources);
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
-		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), 1);  // ← 이 줄 수정
-		ThrowIfFailed(md3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-			IID_PPV_ARGS(mFrameResources[i]->CmdListAlloc.GetAddressOf())));
+		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), 1);
 	}
 
 	mCurrFrameResourceIndex = 0;
@@ -736,3 +717,60 @@ void D3DApp::LogOutputDisplayModes(IDXGIOutput* output, DXGI_FORMAT format)
 }
 #pragma endregion
 //===============================================================================================================================================Helpers
+
+
+void D3DApp::OnDestroy()
+{
+	FlushCommandQueue();
+
+	// 1. FrameResource 먼저 정리
+	mFrameResources.clear();
+
+	// 2. CommandList 정리
+	if (mCommandList)
+		mCommandList.Reset();
+
+	// 3. DepthStencilBuffer + SwapChain BackBuffer 정리
+	mDepthStencilBuffer.Reset();
+	for (int i = 0; i < SwapChainBufferCount; ++i)
+		mSwapChainBuffer[i].Reset();
+
+	// 4. Descriptor Heap 정리
+	if (mRtvHeap)
+		mRtvHeap.Reset();
+	if (mDsvHeap)
+		mDsvHeap.Reset();
+
+	// 5. SwapChain 정리 (FullScreen 상태 해제 후)
+	if (mSwapChain)
+	{
+		mSwapChain->SetFullscreenState(false, nullptr);
+		mSwapChain.Reset();
+	}
+
+	// 6. CommandQueue 정리
+	if (mCommandQueue)
+		mCommandQueue.Reset();
+
+	// 7. Fence
+	if (mFence)
+		mFence.Reset();
+
+	// 8. 마지막에 Device
+	if (md3dDevice)
+		md3dDevice.Reset();
+
+#if defined(_DEBUG)
+	{
+		ComPtr<IDXGIDebug1> dxgiDebug;
+		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+		{
+			OutputDebugStringA("\n========== D3DApp::OnDestroy() final Report ==========\n");
+			dxgiDebug->ReportLiveObjects(
+				DXGI_DEBUG_ALL,
+				DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL)
+			);
+		}
+	}
+#endif
+}

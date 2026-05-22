@@ -66,6 +66,8 @@ public:
 
     Mesh* GetMesh(const std::string& name) const;
 
+    void Shutdown();
+
 private:
     std::unordered_map<std::string, std::shared_ptr<Mesh>> mMeshes;
 };

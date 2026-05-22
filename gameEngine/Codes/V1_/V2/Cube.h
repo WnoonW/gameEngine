@@ -17,6 +17,8 @@ using Microsoft::WRL::ComPtr;
 
 class Cube
 {
+public:
+	void Shutdown();
 
 public:
 	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources);
@@ -46,8 +48,6 @@ private:
 
 	ComPtr<ID3D12Resource> mTexture = nullptr;
 	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
-
-	std::unique_ptr<MeshGeometry> mBoxGeo = nullptr;
 
 	ComPtr<ID3DBlob> mvsByteCode = nullptr;
 	ComPtr<ID3DBlob> mpsByteCode = nullptr;
