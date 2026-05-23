@@ -22,29 +22,25 @@ public:
 	void Shutdown();
 
 public:
-	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources);
+	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator);
 
-	void BuildDescriptorHeaps(ID3D12Device* device);
-	void BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources);
+	void BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator);
 	void BuildRootSignature(ID3D12Device* device);
 	void BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 	void BuildPSO(ID3D12Device* device);
 
 	void Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, FrameResource* mCurrFrameResource, int currFrameIndex);
-	void Draw(ID3D12GraphicsCommandList* cmdList);
+	void Draw(ID3D12GraphicsCommandList* cmdList, DescriptorAllocator& descriptorAllocator);
 	void OnResize(float ratio);
 
 	Mesh* mMesh = nullptr;
 	std::shared_ptr<Matarial> mMatarial = nullptr;
 private:
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
-	ComPtr<ID3D12DescriptorHeap> mCbvSrvHeap = nullptr;
-
-	D3D12_CPU_DESCRIPTOR_HANDLE mCbvSrvHeapHandle = {0};
-	D3D12_GPU_DESCRIPTOR_HANDLE mCbvGpuHandleStart = {0};
-	UINT mCbvSrvDescriptorSize = 0;
 
 	int mCurrFrameIndex = 0;
+
+	DescriptorAllocator::DescriptorHandle mCBVHandle;
 
 	ComPtr<ID3D12PipelineState> mPSO = nullptr;
 

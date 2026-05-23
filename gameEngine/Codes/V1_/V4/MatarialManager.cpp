@@ -1,22 +1,13 @@
 #include "MatarialManager.h"
 
-bool MatarialManager::CreateMatarial(const std::string& name, const std::wstring& filePath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue)
+bool MatarialManager::CreateMatarial(const std::string& name, const std::wstring& filePath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue, DescriptorAllocator& descriptorAllocator)
 {
 	Matarial mMatarial;
 	mMatarial.name = name;
 	if (!TextureLoad(filePath, mMatarial.mTexture, mMatarial.mTextureUploadHeap, device, cmdList, commandQueue))
 	{ return false; }
 
-	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
-	srvHeapDesc.NumDescriptors = 1;
-	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	srvHeapDesc.NodeMask = 0;
-	ThrowIfFailed(device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mMatarial.mSrvHeap)));
-
-	mMatarial.mSrvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	mMatarial.mSrvCpuHandle = mMatarial.mSrvHeap->GetCPUDescriptorHandleForHeapStart();
-	mMatarial.mSrvGpuHandle = mMatarial.mSrvHeap->GetGPUDescriptorHandleForHeapStart();
+	mMatarial.mTextureHandle = descriptorAllocator.Allocate();
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Format = mMatarial.mTexture->GetDesc().Format;
@@ -26,7 +17,7 @@ bool MatarialManager::CreateMatarial(const std::string& name, const std::wstring
 	srvDesc.Texture2D.MipLevels = mMatarial.mTexture->GetDesc().MipLevels;
 	srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 	srvDesc.Texture2D.PlaneSlice = 0;
-	device->CreateShaderResourceView(mMatarial.mTexture.Get(), &srvDesc, mMatarial.mSrvCpuHandle);
+	device->CreateShaderResourceView(mMatarial.mTexture.Get(), &srvDesc, mMatarial.mTextureHandle.CPU);
 
 	mMatarial.mvsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\object.hlsl", nullptr, "VS", "vs_5_0");
 	mMatarial.mpsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\object.hlsl", nullptr, "PS", "ps_5_0");
@@ -65,8 +56,6 @@ void MatarialManager::Shutdown()
 			mat->mvsByteCode.Reset();
 			mat->mTextureUploadHeap.Reset();
 			mat->mTexture.Reset();
-			mat->mSrvHeap.Reset();
-
 			mat->mInputLayout.clear();
 		}
 	}

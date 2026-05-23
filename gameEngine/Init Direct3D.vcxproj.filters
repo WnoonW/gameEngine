@@ -72,6 +72,9 @@
     <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp">
       <Filter>V1_\V4</Filter>
     </ClCompile>
+    <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp">
+      <Filter>V1_\V4</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Codes\Common\Camera.h">
@@ -120,6 +123,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Codes\V1_\V4\MatarialManager.h">
+      <Filter>V1_\V4</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V4\DescriptorAllocator.h">
       <Filter>V1_\V4</Filter>
     </ClInclude>
   </ItemGroup>

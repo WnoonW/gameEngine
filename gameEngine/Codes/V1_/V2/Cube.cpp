@@ -1,31 +1,16 @@
 #include "Cube.h"
 #include "ResourceLoader.h"
 
-void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources)
+void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator)
 {
 	mMatarial = MatarialManager::Get().GetMatarial("Test");
-	BuildDescriptorHeaps(device);
-	BuildConstantBuffers(device, frameResources, gNumFrameResources);
+	BuildConstantBuffers(device, frameResources, gNumFrameResources, descriptorAllocator);
 	BuildRootSignature(device);
 	BuildBoxGeometry(device, cmdList);
 	BuildPSO(device);
 }
 
-void Cube::BuildDescriptorHeaps(ID3D12Device* device)
-{
-	D3D12_DESCRIPTOR_HEAP_DESC cbvsrvHeapDesc;
-	cbvsrvHeapDesc.NumDescriptors = 3;
-	cbvsrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	cbvsrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	cbvsrvHeapDesc.NodeMask = 0;
-	ThrowIfFailed(device->CreateDescriptorHeap(&cbvsrvHeapDesc, IID_PPV_ARGS(&mCbvSrvHeap)));
-
-	mCbvSrvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	mCbvSrvHeapHandle = mCbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
-	mCbvGpuHandleStart = mCbvSrvHeap->GetGPUDescriptorHandleForHeapStart();
-}
-
-void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources)
+void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator)
 {
 	for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
 	{
@@ -34,9 +19,8 @@ void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_pt
 		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
 		cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress();
 		cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-
-		device->CreateConstantBufferView(&cbvDesc, mCbvSrvHeapHandle);
-		mCbvSrvHeapHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		if (frameIndex == 0) { mCBVHandle = descriptorAllocator.Allocate(); }
+		device->CreateConstantBufferView(&cbvDesc, descriptorAllocator.Allocate().CPU);
 	}
 }
 
@@ -44,15 +28,15 @@ void Cube::BuildRootSignature(ID3D12Device* device)
 {
 	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
 
-	// [0] CBV Table (ObjectConstants) - 회전할 부분
+
 	CD3DX12_DESCRIPTOR_RANGE cbvRange;
 	cbvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
-	slotRootParameter[0].InitAsDescriptorTable(1, &cbvRange);
+	slotRootParameter[1].InitAsDescriptorTable(1, &cbvRange);
 
-	// [1] SRV Table (Texture) - 고정할 부분
+
 	CD3DX12_DESCRIPTOR_RANGE srvRange;
 	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
-	slotRootParameter[1].InitAsDescriptorTable(1, &srvRange);
+	slotRootParameter[0].InitAsDescriptorTable(1, &srvRange);
 
 	CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
 		0,                                      // shaderRegister (s0)
@@ -219,20 +203,18 @@ void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, 
 	mCurrFrameResource->ObjectCB->CopyData(0, objConstants);
 }
 
-void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
+void Cube::Draw(ID3D12GraphicsCommandList* cmdList, DescriptorAllocator& descriptorAllocator)
 {
-	ID3D12DescriptorHeap* descriptorHeaps[] = { mCbvSrvHeap.Get() };
+	ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator.GetHeap() };
 	cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	cmdList->SetGraphicsRootSignature(mRootSignature.Get());
 	cmdList->IASetVertexBuffers(0, 1, &mMesh->VertexBufferView());
 	cmdList->IASetIndexBuffer(&mMesh->IndexBufferView());
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = mCbvGpuHandleStart;
-	cbvHandle.ptr += mCurrFrameIndex * mCbvSrvDescriptorSize;
-	cmdList->SetGraphicsRootDescriptorTable(0, cbvHandle);
+	cmdList->SetGraphicsRootDescriptorTable(0, mMatarial->mTextureHandle.GPU);
+	cmdList->SetGraphicsRootDescriptorTable(1, mCBVHandle.GPU);
 
-	cmdList->SetGraphicsRootDescriptorTable(1, mMatarial->mSrvGpuHandle);
 
 	cmdList->SetPipelineState(mPSO.Get());
 
@@ -299,7 +281,6 @@ void Cube::PrevSubmesh()
 
 void Cube::Shutdown()
 {
-	if (mCbvSrvHeap)        mCbvSrvHeap.Reset();
 	if (mRootSignature)     mRootSignature.Reset();
 	if (mPSO)               mPSO.Reset();
 }

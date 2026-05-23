@@ -10,6 +10,7 @@
 #include "Codes/V1_/V2/Cube.h"
 #include "Codes/V1_/V3/MeshManager.h"
 #include "Codes/V1_/V4/MatarialManager.h"
+#include "Codes/V1_/V4/DescriptorAllocator.h"
 #include <DirectXColors.h>
 
 using namespace DirectX;
@@ -23,6 +24,7 @@ public:
 	virtual bool Initialize()override;
 
 private:
+	DescriptorAllocator mGlobalDescriptorAllocator;
 	Cube cube;
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
@@ -85,6 +87,10 @@ bool InitDirect3DApp::Initialize()
 
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
+	//디스크립터
+	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
+
+	//메시
 	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
 		md3dDevice.Get(), mCommandList.Get());
 
@@ -93,7 +99,9 @@ bool InitDirect3DApp::Initialize()
 		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
 		return false;
 	}
-	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get());
+
+	//머티리얼
+	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
 
 	ThrowIfFailed(mCommandList->Close());
@@ -104,8 +112,9 @@ bool InitDirect3DApp::Initialize()
 
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
+	//큐브
 	cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
+		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator);
 
 	ThrowIfFailed(mCommandList->Close());
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
@@ -165,7 +174,7 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	cube.Draw(mCommandList.Get());
+	cube.Draw(mCommandList.Get(), mGlobalDescriptorAllocator);
 }
 
 void InitDirect3DApp::EndFrame()
@@ -253,5 +262,6 @@ void InitDirect3DApp::OnDestroy()
 	cube.Shutdown();
 	MeshManager::Get().Shutdown();
 	MatarialManager::Get().Shutdown();
+	mGlobalDescriptorAllocator.Shutdown();
 	D3DApp::OnDestroy();
 }
