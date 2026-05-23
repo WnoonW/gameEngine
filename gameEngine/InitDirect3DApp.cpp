@@ -26,6 +26,10 @@ public:
 private:
 	DescriptorAllocator mGlobalDescriptorAllocator;
 	Cube cube;
+	std::vector<std::unique_ptr<Cube>> mCubes;
+	float CubeCount = 0.0f;
+	void CreateCube();
+
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
@@ -114,7 +118,7 @@ bool InitDirect3DApp::Initialize()
 
 	//큐브
 	cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator);
+		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, XMFLOAT3(0.0f, 0.0f, 0.0f));
 
 	ThrowIfFailed(mCommandList->Close());
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
@@ -128,11 +132,19 @@ void InitDirect3DApp::OnResize()
 	D3DApp::OnResize();
 
 	cube.OnResize(AspectRatio());
+	for (auto& c : mCubes)
+	{
+		c->OnResize(AspectRatio());
+	}
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	cube.Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource, mCurrFrameResourceIndex);
+	for (auto& c : mCubes)
+	{
+		c->Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource, mCurrFrameResourceIndex);
+	}
 }
 
 void InitDirect3DApp::BeginFrame()
@@ -175,6 +187,10 @@ void InitDirect3DApp::BeginFrame()
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
 	cube.Draw(mCommandList.Get(), mGlobalDescriptorAllocator);
+	for(auto& c : mCubes)
+	{
+		c->Draw(mCommandList.Get(), mGlobalDescriptorAllocator);
+	}
 }
 
 void InitDirect3DApp::EndFrame()
@@ -234,6 +250,16 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 	mLastMousePos.y = y;
 }
 
+void InitDirect3DApp::CreateCube() 
+{
+	++CubeCount;
+	auto newCube = std::make_unique<Cube>();
+	newCube->Initialize(md3dDevice.Get(), mCommandList.Get(),
+		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), 
+		mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, XMFLOAT3(CubeCount, 0.0f, 0.0f));
+	mCubes.push_back(std::move(newCube));
+}
+
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 {
 	switch (wParam)
@@ -241,7 +267,8 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 	case VK_UP:          // ↑ 키
 	case VK_ADD:         // + 키 (숫자패드)
 	case VK_OEM_PLUS:    // + 키
-		cube.NextSubmesh();     // ← Cube 객체가 mCube라고 가정
+		cube.NextSubmesh();
+		CreateCube();
 		break;
 
 	case VK_DOWN:        // ↓ 키

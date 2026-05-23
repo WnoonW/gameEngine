@@ -1,13 +1,14 @@
 #include "Cube.h"
 #include "ResourceLoader.h"
 
-void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator)
+void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator, XMFLOAT3 position)
 {
 	mMatarial = MatarialManager::Get().GetMatarial("Test");
 	BuildConstantBuffers(device, frameResources, gNumFrameResources, descriptorAllocator);
 	BuildRootSignature(device);
 	BuildBoxGeometry(device, cmdList);
 	BuildPSO(device);
+	mPosition = position;
 }
 
 void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator)
@@ -194,7 +195,7 @@ void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, 
 	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
 	XMStoreFloat4x4(&mView, view);
 
-	XMMATRIX world = XMLoadFloat4x4(&mWorld);
+	XMMATRIX world = XMMatrixTranslation(mPosition.x, mPosition.y, mPosition.z);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 	XMMATRIX worldViewProj = world * view * proj;
 
