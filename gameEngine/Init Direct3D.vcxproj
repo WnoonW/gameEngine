@@ -158,6 +158,7 @@
     <ClCompile Include="Codes\V1_\V2\Cube.cpp" />
     <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp" />
     <ClCompile Include="Codes\V1_\V3\MeshManager.cpp" />
+    <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -176,6 +177,7 @@
     <ClInclude Include="Codes\V1_\V2\Cube.h" />
     <ClInclude Include="Codes\V1_\V2\ResourceLoader.h" />
     <ClInclude Include="Codes\V1_\V3\MeshManager.h" />
+    <ClInclude Include="Codes\V1_\V4\MatarialManager.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">

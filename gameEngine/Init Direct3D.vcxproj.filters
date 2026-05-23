@@ -28,6 +28,9 @@
     <Filter Include="V1_\V3">
       <UniqueIdentifier>{5c7158cc-1834-4565-a1f6-b802002afe55}</UniqueIdentifier>
     </Filter>
+    <Filter Include="V1_\V4">
+      <UniqueIdentifier>{54cbb866-b670-441d-a8b1-3e37b40ed261}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -65,6 +68,9 @@
     </ClCompile>
     <ClCompile Include="Codes\V1_\V3\MeshManager.cpp">
       <Filter>V1_\V3</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp">
+      <Filter>V1_\V4</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -112,6 +118,9 @@
     </ClInclude>
     <ClInclude Include="Codes\Structs\AppStruct.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V4\MatarialManager.h">
+      <Filter>V1_\V4</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
