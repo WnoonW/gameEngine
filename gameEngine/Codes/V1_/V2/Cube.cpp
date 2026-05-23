@@ -16,11 +16,13 @@ void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_pt
 	{
 		auto objectCB = frameResources[frameIndex]->ObjectCB->Resource();
 
+		auto handle = descriptorAllocator.Allocate();           
+		mCBVHandles.push_back(handle);
+
 		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
 		cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress();
 		cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-		if (frameIndex == 0) { mCBVHandle = descriptorAllocator.Allocate(); }
-		device->CreateConstantBufferView(&cbvDesc, descriptorAllocator.Allocate().CPU);
+		device->CreateConstantBufferView(&cbvDesc, handle.CPU);
 	}
 }
 
@@ -213,7 +215,7 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList, DescriptorAllocator& descrip
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	cmdList->SetGraphicsRootDescriptorTable(0, mMatarial->mTextureHandle.GPU);
-	cmdList->SetGraphicsRootDescriptorTable(1, mCBVHandle.GPU);
+	cmdList->SetGraphicsRootDescriptorTable(1, mCBVHandles[mCurrFrameIndex].GPU);
 
 
 	cmdList->SetPipelineState(mPSO.Get());

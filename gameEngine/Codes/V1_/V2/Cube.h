@@ -40,7 +40,8 @@ private:
 
 	int mCurrFrameIndex = 0;
 
-	DescriptorAllocator::DescriptorHandle mCBVHandle;
+	// Cube.h에 추가 추천
+	std::vector<DescriptorAllocator::DescriptorHandle> mCBVHandles;  // frame 수만큼 저장
 
 	ComPtr<ID3D12PipelineState> mPSO = nullptr;
 
