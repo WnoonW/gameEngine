@@ -7,6 +7,7 @@
 #include "../../Common/UploadBuffer.h"
 #include "../../Common/GameTimer.h"
 #include "../V3/MeshManager.h"
+#include "../V4/MatarialManager.h"
 //struct
 #include "../../Structs/modelStruct.h"
 #include "../../Structs/constantStruct.h"
@@ -25,9 +26,7 @@ public:
 
 	void BuildDescriptorHeaps(ID3D12Device* device);
 	void BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources);
-	void BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue);
 	void BuildRootSignature(ID3D12Device* device);
-	void BuildShadersAndInputLayout();
 	void BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 	void BuildPSO(ID3D12Device* device);
 
@@ -36,6 +35,7 @@ public:
 	void OnResize(float ratio);
 
 	Mesh* mMesh = nullptr;
+	std::shared_ptr<Matarial> mMatarial = nullptr;
 private:
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mCbvSrvHeap = nullptr;
@@ -45,14 +45,6 @@ private:
 	UINT mCbvSrvDescriptorSize = 0;
 
 	int mCurrFrameIndex = 0;
-
-	ComPtr<ID3D12Resource> mTexture = nullptr;
-	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
-
-	ComPtr<ID3DBlob> mvsByteCode = nullptr;
-	ComPtr<ID3DBlob> mpsByteCode = nullptr;
-
-	std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
 
 	ComPtr<ID3D12PipelineState> mPSO = nullptr;
 

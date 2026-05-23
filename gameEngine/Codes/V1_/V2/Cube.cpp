@@ -1,14 +1,12 @@
 #include "Cube.h"
 #include "ResourceLoader.h"
-#include "../V3/MeshManager.h"
 
 void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources)
 {
+	mMatarial = MatarialManager::Get().GetMatarial("Test");
 	BuildDescriptorHeaps(device);
 	BuildConstantBuffers(device, frameResources, gNumFrameResources);
-	BuildShaderResourceViews(device, cmdList, cmdQueue);
 	BuildRootSignature(device);
-	BuildShadersAndInputLayout();
 	BuildBoxGeometry(device, cmdList);
 	BuildPSO(device);
 }
@@ -16,7 +14,7 @@ void Cube::Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, 
 void Cube::BuildDescriptorHeaps(ID3D12Device* device)
 {
 	D3D12_DESCRIPTOR_HEAP_DESC cbvsrvHeapDesc;
-	cbvsrvHeapDesc.NumDescriptors = 4;
+	cbvsrvHeapDesc.NumDescriptors = 3;
 	cbvsrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	cbvsrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	cbvsrvHeapDesc.NodeMask = 0;
@@ -40,21 +38,6 @@ void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_pt
 		device->CreateConstantBufferView(&cbvDesc, mCbvSrvHeapHandle);
 		mCbvSrvHeapHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	}
-}
-
-void Cube::BuildShaderResourceViews(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue)
-{
-	//TextureLoad(L"Textures/bricks.dds", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
-	TextureLoad(L"Resources/Textures/e.png", mTexture, mTextureUploadHeap, device, cmdList, cmdQueue);
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-	srvDesc.Format = mTexture->GetDesc().Format;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Texture2D.MostDetailedMip = 0;
-	srvDesc.Texture2D.MipLevels = mTexture->GetDesc().MipLevels;
-	srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-	srvDesc.Texture2D.PlaneSlice = 0;
-	device->CreateShaderResourceView(mTexture.Get(), &srvDesc, mCbvSrvHeapHandle);
 }
 
 void Cube::BuildRootSignature(ID3D12Device* device)
@@ -96,20 +79,6 @@ void Cube::BuildRootSignature(ID3D12Device* device)
 		serializedRootSig->GetBufferPointer(),
 		serializedRootSig->GetBufferSize(),
 		IID_PPV_ARGS(&mRootSignature)));
-}
-
-void Cube::BuildShadersAndInputLayout()
-{
-	HRESULT hr = S_OK;
-
-	mvsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\object.hlsl", nullptr, "VS", "vs_5_0");
-	mpsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\object.hlsl", nullptr, "PS", "ps_5_0");
-
-	mInputLayout = 	{
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-	};
 }
 
 void Cube::BuildBoxGeometry(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
@@ -207,10 +176,10 @@ void Cube::BuildPSO(ID3D12Device* device)
 {
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc;
 	ZeroMemory(&psoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
-	psoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
+	psoDesc.InputLayout = { mMatarial->mInputLayout.data(), (UINT)mMatarial->mInputLayout.size() };
 	psoDesc.pRootSignature = mRootSignature.Get();
-	psoDesc.VS = { reinterpret_cast<BYTE*>(mvsByteCode->GetBufferPointer()), mvsByteCode->GetBufferSize() };
-	psoDesc.PS = { reinterpret_cast<BYTE*>(mpsByteCode->GetBufferPointer()), mpsByteCode->GetBufferSize() };
+	psoDesc.VS = { reinterpret_cast<BYTE*>(mMatarial->mvsByteCode->GetBufferPointer()), mMatarial->mvsByteCode->GetBufferSize() };
+	psoDesc.PS = { reinterpret_cast<BYTE*>(mMatarial->mpsByteCode->GetBufferPointer()), mMatarial->mpsByteCode->GetBufferSize() };
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -260,12 +229,10 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList)
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = mCbvGpuHandleStart;
-	cbvHandle.ptr += mCurrFrameIndex * mCbvSrvDescriptorSize;   // 핵심!
+	cbvHandle.ptr += mCurrFrameIndex * mCbvSrvDescriptorSize;
 	cmdList->SetGraphicsRootDescriptorTable(0, cbvHandle);
 
-	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = mCbvGpuHandleStart;
-	srvHandle.ptr += 3 * mCbvSrvDescriptorSize;
-	cmdList->SetGraphicsRootDescriptorTable(1, srvHandle);
+	cmdList->SetGraphicsRootDescriptorTable(1, mMatarial->mSrvGpuHandle);
 
 	cmdList->SetPipelineState(mPSO.Get());
 
@@ -333,10 +300,6 @@ void Cube::PrevSubmesh()
 void Cube::Shutdown()
 {
 	if (mCbvSrvHeap)        mCbvSrvHeap.Reset();
-	if (mTexture)           mTexture.Reset();
-	if (mTextureUploadHeap) mTextureUploadHeap.Reset();
 	if (mRootSignature)     mRootSignature.Reset();
 	if (mPSO)               mPSO.Reset();
-	if (mvsByteCode)        mvsByteCode.Reset();
-	if (mpsByteCode)        mpsByteCode.Reset();
 }

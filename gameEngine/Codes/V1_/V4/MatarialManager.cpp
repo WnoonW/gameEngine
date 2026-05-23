@@ -53,4 +53,23 @@ std::shared_ptr<Matarial> MatarialManager::GetMatarial(const std::string& name)
 }
 
 void MatarialManager::Shutdown()
-{}
+{
+	for (auto& pair : mMatarials)
+	{
+		if (pair.second)
+		{
+			auto& mat = pair.second;
+
+			// ComPtr 명시적 해제 (순서 중요)
+			mat->mpsByteCode.Reset();
+			mat->mvsByteCode.Reset();
+			mat->mTextureUploadHeap.Reset();
+			mat->mTexture.Reset();
+			mat->mSrvHeap.Reset();
+
+			mat->mInputLayout.clear();
+		}
+	}
+
+	mMatarials.clear();
+}

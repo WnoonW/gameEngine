@@ -9,6 +9,7 @@
 #include "Codes/Common/d3dApp.h"
 #include "Codes/V1_/V2/Cube.h"
 #include "Codes/V1_/V3/MeshManager.h"
+#include "Codes/V1_/V4/MatarialManager.h"
 #include <DirectXColors.h>
 
 using namespace DirectX;
@@ -82,11 +83,7 @@ bool InitDirect3DApp::Initialize()
 	if (!D3DApp::Initialize())
 		return false;
 
-	MessageBoxA(nullptr, "1. D3DApp Initialize Done", "Init Step", MB_OK);
-
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
-
-	MessageBoxA(nullptr, "2. CommandList Reset Done (For Mesh)", "Init Step", MB_OK);
 
 	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
 		md3dDevice.Get(), mCommandList.Get());
@@ -96,30 +93,23 @@ bool InitDirect3DApp::Initialize()
 		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
 		return false;
 	}
+	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get());
 
-	MessageBoxA(nullptr, "3. Mesh Creation Done", "Init Step", MB_OK);
 
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
 
-	MessageBoxA(nullptr, "4. First FlushCommandQueue Done", "Init Step", MB_OK);
 
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
-
-	MessageBoxA(nullptr, "5. CommandList Reset Done (For Cube)", "Init Step", MB_OK);
 
 	cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
 		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources);
 
-	MessageBoxA(nullptr, "6. Cube Initialize Done", "Init Step", MB_OK);
-
 	ThrowIfFailed(mCommandList->Close());
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
-
-	MessageBoxA(nullptr, "7. All Initialize Success!", "Init Step", MB_OK);
 
 	return true;
 }
@@ -262,5 +252,6 @@ void InitDirect3DApp::OnDestroy()
 {
 	cube.Shutdown();
 	MeshManager::Get().Shutdown();
+	MatarialManager::Get().Shutdown();
 	D3DApp::OnDestroy();
 }
