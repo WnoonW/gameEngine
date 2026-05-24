@@ -27,7 +27,6 @@ private:
 	DescriptorAllocator mGlobalDescriptorAllocator;
 	Cube cube;
 	std::vector<std::unique_ptr<Cube>> mCubes;
-	float CubeCount = 0.0f;
 	void CreateCube();
 
     virtual void OnResize()override;
@@ -252,11 +251,13 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::CreateCube() 
 {
-	++CubeCount;
+	static int nextObjCBIndex = 1;
 	auto newCube = std::make_unique<Cube>();
+	newCube->mObjCBIndex = nextObjCBIndex++;
 	newCube->Initialize(md3dDevice.Get(), mCommandList.Get(),
 		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), 
-		mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, XMFLOAT3(CubeCount, 0.0f, 0.0f));
+		mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, XMFLOAT3(float(newCube->mObjCBIndex), 0.0f, 0.0f));
+	newCube->OnResize(AspectRatio());
 	mCubes.push_back(std::move(newCube));
 }
 

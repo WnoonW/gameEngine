@@ -20,7 +20,7 @@ class Cube
 {
 public:
 	void Shutdown();
-
+	int mObjCBIndex = 0;
 public:
 	void Initialize(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandAllocator* cmdAllocator, ID3D12CommandQueue* cmdQueue, std::vector<std::unique_ptr<FrameResource>>& frameResources, int gNumFrameResources, DescriptorAllocator& descriptorAllocator, XMFLOAT3 position);
 

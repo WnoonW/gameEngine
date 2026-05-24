@@ -19,10 +19,10 @@ void Cube::BuildConstantBuffers(ID3D12Device* device, std::vector<std::unique_pt
 
 		auto handle = descriptorAllocator.Allocate();           
 		mCBVHandles.push_back(handle);
-
+		UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-		cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress();
-		cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+		cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress() + (UINT64)mObjCBIndex * objCBByteSize;
+		cbvDesc.SizeInBytes = objCBByteSize;
 		device->CreateConstantBufferView(&cbvDesc, handle.CPU);
 	}
 }
@@ -203,7 +203,7 @@ void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, 
 
 	ObjectConstants objConstants;
 	XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
-	mCurrFrameResource->ObjectCB->CopyData(0, objConstants);
+	mCurrFrameResource->ObjectCB->CopyData(mObjCBIndex, objConstants);
 }
 
 void Cube::Draw(ID3D12GraphicsCommandList* cmdList, DescriptorAllocator& descriptorAllocator)
