@@ -155,6 +155,7 @@
     <ClCompile Include="Codes\Common\GameTimer.cpp" />
     <ClCompile Include="Codes\Common\GeometryGenerator.cpp" />
     <ClCompile Include="Codes\Common\MathHelper.cpp" />
+    <ClCompile Include="Codes\ECS\RenderSystem.cpp" />
     <ClCompile Include="Codes\V1_\V2\Cube.cpp" />
     <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp" />
     <ClCompile Include="Codes\V1_\V3\MeshManager.cpp" />
@@ -172,6 +173,10 @@
     <ClInclude Include="Codes\Common\GeometryGenerator.h" />
     <ClInclude Include="Codes\Common\MathHelper.h" />
     <ClInclude Include="Codes\Common\UploadBuffer.h" />
+    <ClInclude Include="Codes\ECS\ComponentStruct.h" />
+    <ClInclude Include="Codes\ECS\Entity.h" />
+    <ClInclude Include="Codes\ECS\Registry.h" />
+    <ClInclude Include="Codes\ECS\RenderSystem.h" />
     <ClInclude Include="Codes\Structs\AppStruct.h" />
     <ClInclude Include="Codes\Structs\constantStruct.h" />
     <ClInclude Include="Codes\Structs\modelStruct.h" />

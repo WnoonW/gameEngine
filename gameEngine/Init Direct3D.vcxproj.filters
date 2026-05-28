@@ -31,6 +31,9 @@
     <Filter Include="V1_\V4">
       <UniqueIdentifier>{54cbb866-b670-441d-a8b1-3e37b40ed261}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ECS">
+      <UniqueIdentifier>{1b04ff59-0acb-416e-b5b2-e0150610010e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -74,6 +77,9 @@
     </ClCompile>
     <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp">
       <Filter>V1_\V4</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\ECS\RenderSystem.cpp">
+      <Filter>ECS</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -127,6 +133,18 @@
     </ClInclude>
     <ClInclude Include="Codes\V1_\V4\DescriptorAllocator.h">
       <Filter>V1_\V4</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\ComponentStruct.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Entity.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Registry.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\RenderSystem.h">
+      <Filter>ECS</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

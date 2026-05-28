@@ -12,13 +12,21 @@ using Microsoft::WRL::ComPtr;
 
 struct Matarial
 {
-	std::string name;
-	ComPtr<ID3D12Resource> mTexture = nullptr;
-	ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
-	DescriptorAllocator::DescriptorHandle mTextureHandle;
-	ComPtr<ID3DBlob> mvsByteCode = nullptr;
-	ComPtr<ID3DBlob> mpsByteCode = nullptr;
-	std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
+    std::string name;
+
+    // Texture
+    ComPtr<ID3D12Resource> mTexture = nullptr;
+    ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
+    DescriptorAllocator::DescriptorHandle mTextureHandle;
+
+    // Shader
+    ComPtr<ID3DBlob> mvsByteCode = nullptr;
+    ComPtr<ID3DBlob> mpsByteCode = nullptr;
+    std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
+
+    //
+    ComPtr<ID3D12RootSignature> mRootSignature;
+    ComPtr<ID3D12PipelineState> mPSO;
 };
 
 class MatarialManager

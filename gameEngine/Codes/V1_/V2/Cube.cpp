@@ -210,16 +210,16 @@ void Cube::Draw(ID3D12GraphicsCommandList* cmdList, DescriptorAllocator& descrip
 {
 	ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator.GetHeap() };
 	cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-	cmdList->SetGraphicsRootSignature(mRootSignature.Get());
+	cmdList->SetGraphicsRootSignature(mMatarial->mRootSignature.Get());
 	cmdList->IASetVertexBuffers(0, 1, &mMesh->VertexBufferView());
 	cmdList->IASetIndexBuffer(&mMesh->IndexBufferView());
 	cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	cmdList->SetGraphicsRootDescriptorTable(0, mMatarial->mTextureHandle.GPU);
-	cmdList->SetGraphicsRootDescriptorTable(1, mCBVHandles[mCurrFrameIndex].GPU);
+	cmdList->SetGraphicsRootDescriptorTable(0, mCBVHandles[mCurrFrameIndex].GPU);
+	cmdList->SetGraphicsRootDescriptorTable(1, mMatarial->mTextureHandle.GPU);
 
 
-	cmdList->SetPipelineState(mPSO.Get());
+	cmdList->SetPipelineState(mMatarial->mPSO.Get());
 
 	// 모든 서브메시 그리기
 	for (auto& pair : mMesh->DrawArgs)
