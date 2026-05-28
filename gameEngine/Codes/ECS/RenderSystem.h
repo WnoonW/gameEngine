@@ -1,7 +1,6 @@
 #pragma once
-#include "../Registry.h"
-#include "TransformComponent.h"
-#include "RenderableComponent.h"
+#include "Registry.h"
+#include "ComponentStruct.h"
 #include <d3d12.h>
 #include <DirectXMath.h>
 
