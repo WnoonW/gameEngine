@@ -63,9 +63,6 @@
     <ClCompile Include="Codes\Common\MathHelper.cpp">
       <Filter>Common</Filter>
     </ClCompile>
-    <ClCompile Include="Codes\V1_\V2\Cube.cpp">
-      <Filter>V1_\V2</Filter>
-    </ClCompile>
     <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp">
       <Filter>V1_\V2</Filter>
     </ClCompile>
@@ -115,9 +112,6 @@
     </ClInclude>
     <ClInclude Include="Codes\Structs\modelStruct.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Codes\V1_\V2\Cube.h">
-      <Filter>V1_\V2</Filter>
     </ClInclude>
     <ClInclude Include="Codes\V1_\V2\ResourceLoader.h">
       <Filter>V1_\V2</Filter>

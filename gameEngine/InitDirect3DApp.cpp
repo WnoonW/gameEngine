@@ -7,7 +7,6 @@
 //***************************************************************************************
 
 #include "Codes/Common/d3dApp.h"
-#include "Codes/V1_/V2/Cube.h"
 #include "Codes/V1_/V3/MeshManager.h"
 #include "Codes/V1_/V4/MatarialManager.h"
 #include "Codes/V1_/V4/DescriptorAllocator.h"
@@ -25,9 +24,6 @@ public:
 
 private:
 	DescriptorAllocator mGlobalDescriptorAllocator;
-	Cube cube;
-	std::vector<std::unique_ptr<Cube>> mCubes;
-	void CreateCube();
 
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
@@ -111,39 +107,17 @@ bool InitDirect3DApp::Initialize()
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
-
-
-	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
-
-	//큐브
-	cube.Initialize(md3dDevice.Get(), mCommandList.Get(),
-		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, XMFLOAT3(0.0f, 0.0f, 0.0f));
-
-	ThrowIfFailed(mCommandList->Close());
-	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
-	FlushCommandQueue();
-
 	return true;
 }
 
 void InitDirect3DApp::OnResize()
 {
 	D3DApp::OnResize();
-
-	cube.OnResize(AspectRatio());
-	for (auto& c : mCubes)
-	{
-		c->OnResize(AspectRatio());
-	}
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-	cube.Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource, mCurrFrameResourceIndex);
-	for (auto& c : mCubes)
-	{
-		c->Update(gt, mRadius, mTheta, mPhi, mCurrFrameResource, mCurrFrameResourceIndex);
-	}
+
 }
 
 void InitDirect3DApp::BeginFrame()
@@ -185,11 +159,7 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	cube.Draw(mCommandList.Get(), mGlobalDescriptorAllocator);
-	for(auto& c : mCubes)
-	{
-		c->Draw(mCommandList.Get(), mGlobalDescriptorAllocator);
-	}
+
 }
 
 void InitDirect3DApp::EndFrame()
@@ -249,17 +219,6 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 	mLastMousePos.y = y;
 }
 
-void InitDirect3DApp::CreateCube() 
-{
-	static int nextObjCBIndex = 1;
-	auto newCube = std::make_unique<Cube>();
-	newCube->mObjCBIndex = nextObjCBIndex++;
-	newCube->Initialize(md3dDevice.Get(), mCommandList.Get(),
-		mFrameResources[0]->CmdListAlloc.Get(), mCommandQueue.Get(), 
-		mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, XMFLOAT3(float(newCube->mObjCBIndex), 0.0f, 0.0f));
-	newCube->OnResize(AspectRatio());
-	mCubes.push_back(std::move(newCube));
-}
 
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 {
@@ -268,18 +227,14 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 	case VK_UP:          // ↑ 키
 	case VK_ADD:         // + 키 (숫자패드)
 	case VK_OEM_PLUS:    // + 키
-		cube.NextSubmesh();
-		CreateCube();
 		break;
 
 	case VK_DOWN:        // ↓ 키
 	case VK_SUBTRACT:    // - 키 (숫자패드)
 	case VK_OEM_MINUS:   // - 키
-		cube.PrevSubmesh();
 		break;
 
-	case 'R':            // R 키로 리셋 (선택)
-		cube.mSelectedSubmeshIndex = 0;
+	case 'R': 
 		break;
 	}
 }
@@ -287,7 +242,6 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 
 void InitDirect3DApp::OnDestroy()
 {
-	cube.Shutdown();
 	MeshManager::Get().Shutdown();
 	MatarialManager::Get().Shutdown();
 	mGlobalDescriptorAllocator.Shutdown();
