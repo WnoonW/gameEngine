@@ -30,7 +30,13 @@ private:
 	Registry mRegistry = {};
 	RenderSystem mRenderSystem = {};
 	Entity mEntity = {};
+	std::vector<Entity> mEntities;
 	uint32_t mNextObjectCBIndex = 0;
+
+	Entity CreateRenderableEntity(
+		const std::string& meshName,
+		const std::string& materialName,
+		XMFLOAT3 position = { 0, 0, 0 });
 
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
@@ -126,6 +132,29 @@ bool InitDirect3DApp::Initialize()
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
 	return true;
+}
+
+Entity InitDirect3DApp::CreateRenderableEntity(
+	const std::string& meshName,
+	const std::string& materialName,
+	XMFLOAT3 position)
+{
+	Entity entity = mRegistry.createEntity();
+
+	mRegistry.addComponent(entity, TransformComponent{ .position = position });
+	mRegistry.addComponent(entity, RenderableComponent{
+		.meshName = meshName,
+		.materialName = materialName,
+		.objectCBIndex = mNextObjectCBIndex++
+		});
+
+	// CBV 생성
+	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
+		mGlobalDescriptorAllocator, entity, mRegistry);
+
+	mEntities.push_back(entity);   // 관리 목록에 추가
+
+	return entity;
 }
 
 void InitDirect3DApp::OnResize()
@@ -268,6 +297,8 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 	switch (wParam)
 	{
 	case VK_UP:          // ↑ 키
+		CreateRenderableEntity("bibian","Test", {(float)mNextObjectCBIndex,0,0});
+		break;
 	case VK_ADD:         // + 키 (숫자패드)
 	case VK_OEM_PLUS:    // + 키
 		break;
