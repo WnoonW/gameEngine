@@ -43,6 +43,7 @@ private:
 	virtual void OnMouseDown(WPARAM btnState, int x, int y)override;
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)override;
 	virtual void OnMouseMove(WPARAM btnState, int x, int y)override;
+	virtual void OnMouseWheel(short wheelDelta, int x, int y) override;
 
 	virtual void OnKeyDown(WPARAM key)override;
 
@@ -50,7 +51,8 @@ private:
 	float mTheta = 1.5f * XM_PI;
 	float mPhi = XM_PIDIV4;
 	float mRadius = 5.0f;
-
+	XMFLOAT4X4 mView = {};
+	XMFLOAT4X4 mProj = {};
 	POINT mLastMousePos = {0, 0};
 };
 
@@ -129,6 +131,14 @@ bool InitDirect3DApp::Initialize()
 void InitDirect3DApp::OnResize()
 {
 	D3DApp::OnResize();
+
+	XMMATRIX proj = XMMatrixPerspectiveFovLH(
+		XM_PIDIV4,
+		AspectRatio(),           // ← 중요
+		0.1f,
+		1000.0f
+	);
+	XMStoreFloat4x4(&mProj, proj);
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
@@ -175,19 +185,26 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	XMMATRIX mView = XMMatrixLookAtLH(
-		XMVectorSet(0, 5, -10, 0),   // eye
-		XMVectorSet(0, 0, 0, 0),     // target
-		XMVectorSet(0, 1, 0, 0)      // up
-	);
+	// ==========================================
+	// 1. 구면 좌표로 View 행렬 계산
+	// ==========================================
+	float x = mRadius * sinf(mPhi) * cosf(mTheta);
+	float z = mRadius * sinf(mPhi) * sinf(mTheta);
+	float y = mRadius * cosf(mPhi);
 
-	XMMATRIX mProj = XMMatrixPerspectiveFovLH(
-		XM_PIDIV4,
-		16.0f / 9.0f,
-		0.1f,
-		1000.0f
-	);
-	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mView, mProj);
+	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
+	XMVECTOR target = XMVectorZero();
+	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
+	XMStoreFloat4x4(&mView, view);
+
+	// ==========================================
+	// 2. Projection
+	// ==========================================
+	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+
+	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
 }
 
 void InitDirect3DApp::EndFrame()
@@ -235,18 +252,16 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 		mPhi -= dy;
 		mPhi = MathHelper::Clamp(mPhi, 0.1f, XM_PI - 0.1f);
 	}
-	else if (btnState & MK_RBUTTON)
-	{
-		float dx = 0.05f * static_cast<float>(x - mLastMousePos.x);
-		float dy = 0.05f * static_cast<float>(y - mLastMousePos.y);
-		mRadius += dx - dy;
-		//mRadius = MathHelper::Clamp(mRadius, 3.0f, 15.0f);
-	}
 
 	mLastMousePos.x = x;
 	mLastMousePos.y = y;
 }
 
+void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
+{
+	mRadius -= wheelDelta * 0.002f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
+	mRadius = MathHelper::Clamp(mRadius, 2.0f, 150.0f);
+}
 
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 {

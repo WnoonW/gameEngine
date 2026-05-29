@@ -16,9 +16,10 @@ public:
     void render(Registry& registry,
         ID3D12GraphicsCommandList* cmdList,
         class FrameResource* currentFrameResource,
-        class DescriptorAllocator* descriptorAllocator, // 필요시 사용
+        class DescriptorAllocator* descriptorAllocator,
+        int currentFrameIndex,
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);
 
-    std::vector<DescriptorAllocator::DescriptorHandle> mCBVHandles;
+    std::vector<std::vector<DescriptorAllocator::DescriptorHandle>> mEntityCBVHandles;
 };

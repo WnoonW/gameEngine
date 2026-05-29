@@ -7,20 +7,33 @@
 
 using namespace DirectX;
 
-void RenderSystem::createCBV(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources,
-    int gNumFrameResources, DescriptorAllocator& descriptorAllocator, Entity entity, Registry& registry)
+void RenderSystem::createCBV(ID3D12Device* device,
+    std::vector<std::unique_ptr<FrameResource>>& frameResources,
+    int gNumFrameResources,
+    DescriptorAllocator& descriptorAllocator,
+    Entity entity,
+    Registry& registry)
 {
-	auto& rend = registry.getComponent<RenderableComponent>(entity);
+    auto& rend = registry.getComponent<RenderableComponent>(entity);
+
+    // 엔티티 인덱스에 맞춰 벡터 크기 확장
+    if (mEntityCBVHandles.size() <= entity)
+        mEntityCBVHandles.resize(entity + 1);
+
+    mEntityCBVHandles[entity].resize(gNumFrameResources);
+
     for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
     {
         auto objectCB = frameResources[frameIndex]->ObjectCB->Resource();
 
         auto handle = descriptorAllocator.Allocate();
-        mCBVHandles.push_back(handle);
+        mEntityCBVHandles[entity][frameIndex] = handle;
+
         UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc{};
         cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress() + (UINT64)rend.objectCBIndex * objCBByteSize;
         cbvDesc.SizeInBytes = objCBByteSize;
+
         device->CreateConstantBufferView(&cbvDesc, handle.CPU);
     }
 }
@@ -29,6 +42,7 @@ void RenderSystem::render(Registry& registry,
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
     DescriptorAllocator* descriptorAllocator,
+    int currentFrameIndex,                    // ← 추가
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
@@ -41,69 +55,70 @@ void RenderSystem::render(Registry& registry,
 
         if (!rend.visible) continue;
 
-        // ==========================================
-        // 1. World + ViewProj 계산
-        // ==========================================
+        // 1. 행렬 계산
         XMMATRIX world = tf.GetWorldMatrix();
         XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
         XMMATRIX wvp = XMMatrixMultiply(world, viewProj);
 
-        // ==========================================
-        // 2. ObjectConstants 업데이트 (실제 멤버에 맞춤)
-        // ==========================================
         ObjectConstants objConst{};
         XMStoreFloat4x4(&objConst.WorldViewProj, XMMatrixTranspose(wvp));
 
         currentFrameResource->ObjectCB->CopyData(rend.objectCBIndex, objConst);
 
-        // ==========================================
-        // 3. Mesh & Material 가져오기
-        // ==========================================
+        // 2. Mesh & Material
         Mesh* mesh = MeshManager::Get().GetMesh(rend.meshName);
         auto material = MatarialManager::Get().GetMatarial(rend.materialName);
-
         if (!mesh || !material) continue;
 
-        // ==========================================
-        // 4. RootSignature & PSO 설정
-        // ==========================================
+        // 3. RootSignature & PSO
         cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
         cmdList->SetPipelineState(material->mPSO.Get());
 
-        // ==========================================
-        // 5. Vertex / Index Buffer 설정 (함수 호출로 수정!)
-        // ==========================================
-        auto vbv = mesh->VertexBufferView();   // 함수 호출
-        auto ibv = mesh->IndexBufferView();    // 함수 호출
-
+        // 4. Vertex/Index Buffer
+        auto vbv = mesh->VertexBufferView();
+        auto ibv = mesh->IndexBufferView();
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        // ==========================================
-		// 6. descriptor heap 설정 (필요시)
-        // ==========================================
+        // 5. Descriptor Heap 설정
         ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
         cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-        //cmdList->SetGraphicsRootDescriptorTable(0, mCBVHandles[mCurrFrameIndex].GPU);
+
+        // CBV 바인딩 (Root Parameter 0)
+        if (!mEntityCBVHandles.empty() &&
+            e < mEntityCBVHandles.size() &&
+            currentFrameIndex < mEntityCBVHandles[e].size())
+        {
+            cmdList->SetGraphicsRootDescriptorTable(0, mEntityCBVHandles[e][currentFrameIndex].GPU);
+        }
+
+        // Texture 바인딩 (Root Parameter 1)
         cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
 
         // ==========================================
-        // 7. Draw (indexCount 직접 사용 가능)
+        // 6. Draw (모든 서브메시 그리기)
         // ==========================================
-        UINT indexCount = mesh->indexCount;
-
-        // DrawArgs에 서브메시 정보가 있으면 우선 사용 (더 정확)
         if (!mesh->DrawArgs.empty())
         {
-            // 첫 번째 서브메시 사용 (나중에 선택 기능 추가 가능)
-            const auto& submesh = mesh->DrawArgs.begin()->second;
-            indexCount = submesh.IndexCount;
-        }
+            // 여러 개의 서브메시가 있는 경우 모두 그리기
+            for (auto& pair : mesh->DrawArgs)
+            {
+                const auto& sub = pair.second;
 
-        if (indexCount > 0)
+                cmdList->DrawIndexedInstanced(
+                    sub.IndexCount,
+                    1,
+                    sub.StartIndexLocation,
+                    sub.BaseVertexLocation,
+                    0
+                );
+            }
+        }
+        else if (mesh->indexCount > 0)
         {
-            cmdList->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
+            // DrawArgs가 없는 경우 (단일 메시)
+            cmdList->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
         }
     }
 }
