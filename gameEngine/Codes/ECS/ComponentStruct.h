@@ -25,3 +25,12 @@ struct RenderableComponent {
     bool        visible = true;
 };
 
+
+struct CameraComponent {
+    float fov = DirectX::XM_PIDIV4;      // 45도 (기본값)
+    float nearZ = 0.1f;
+    float farZ = 1000.0f;
+    bool useWindowAspect = true;         // true면 창 크기에 맞춰 aspect 자동 계산
+    float aspectRatio = 16.0f / 9.0f;    // useWindowAspect가 false일 때 사용
+    bool isMainCamera = true;            // 여러 카메라 중 메인 카메라 구분용
+};

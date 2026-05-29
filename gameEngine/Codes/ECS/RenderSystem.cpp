@@ -9,6 +9,24 @@
 
 using namespace DirectX;
 
+void RenderSystem::createCBV(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources,
+    int gNumFrameResources, DescriptorAllocator& descriptorAllocator, Entity entity, Registry& registry)
+{
+	auto& rend = registry.getComponent<RenderableComponent>(entity);
+    for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
+    {
+        auto objectCB = frameResources[frameIndex]->ObjectCB->Resource();
+
+        auto handle = descriptorAllocator.Allocate();
+        mCBVHandles.push_back(handle);
+        UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+        cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress() + (UINT64)rend.objectCBIndex * objCBByteSize;
+        cbvDesc.SizeInBytes = objCBByteSize;
+        device->CreateConstantBufferView(&cbvDesc, handle.CPU);
+    }
+}
+
 void RenderSystem::render(Registry& registry,
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
@@ -50,14 +68,9 @@ void RenderSystem::render(Registry& registry,
 
         // ==========================================
         // 4. RootSignature & PSO 설정
-        //    → Matarial에 mRootSignature/mPSO가 없으므로
-        //      일단 주석. 나중에 Material이나 RenderPass에서 관리 예정
         // ==========================================
-        // cmdList->SetGraphicsRootSignature(???);
-        // cmdList->SetPipelineState(???);
-
-        // TODO: 현재는 RenderSystem 바깥에서 미리 SetGraphicsRootSignature + SetPipelineState 해두는 걸 추천
-        //       (같은 Material끼리 묶어서 한 번만 설정하면 더 효율적)
+        cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
+        cmdList->SetPipelineState(material->mPSO.Get());
 
         // ==========================================
         // 5. Vertex / Index Buffer 설정 (함수 호출로 수정!)
@@ -70,7 +83,15 @@ void RenderSystem::render(Registry& registry,
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         // ==========================================
-        // 6. Draw (indexCount 직접 사용 가능)
+		// 6. descriptor heap 설정 (필요시)
+        // ==========================================
+        ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
+        cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+        //cmdList->SetGraphicsRootDescriptorTable(0, mCBVHandles[mCurrFrameIndex].GPU);
+        cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
+
+        // ==========================================
+        // 7. Draw (indexCount 직접 사용 가능)
         // ==========================================
         UINT indexCount = mesh->indexCount;
 

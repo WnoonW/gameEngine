@@ -6,11 +6,14 @@
 //
 //***************************************************************************************
 
+#include <DirectXColors.h>
 #include "Codes/Common/d3dApp.h"
 #include "Codes/V1_/V3/MeshManager.h"
 #include "Codes/V1_/V4/MatarialManager.h"
 #include "Codes/V1_/V4/DescriptorAllocator.h"
-#include <DirectXColors.h>
+#include "Codes/ECS/Registry.h"
+#include "Codes/ECS/ComponentStruct.h"
+#include "Codes/ECS/RenderSystem.h"
 
 using namespace DirectX;
 
@@ -24,6 +27,10 @@ public:
 
 private:
 	DescriptorAllocator mGlobalDescriptorAllocator;
+	Registry mRegistry = {};
+	RenderSystem mRenderSystem = {};
+	Entity mEntity = {};
+	uint32_t mNextObjectCBIndex = 0;
 
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
@@ -102,6 +109,15 @@ bool InitDirect3DApp::Initialize()
 	//머티리얼
 	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
+	Entity entity = mRegistry.createEntity();
+
+	mRegistry.addComponent(entity, TransformComponent{ .position = {0, 0, 0} });
+	mRegistry.addComponent(entity, RenderableComponent{
+		.meshName = "bibian",
+		.materialName = "Test",
+		.objectCBIndex = mNextObjectCBIndex++
+		});
+	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, entity, mRegistry);
 
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
@@ -159,7 +175,19 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
+	XMMATRIX mView = XMMatrixLookAtLH(
+		XMVectorSet(0, 5, -10, 0),   // eye
+		XMVectorSet(0, 0, 0, 0),     // target
+		XMVectorSet(0, 1, 0, 0)      // up
+	);
 
+	XMMATRIX mProj = XMMatrixPerspectiveFovLH(
+		XM_PIDIV4,
+		16.0f / 9.0f,
+		0.1f,
+		1000.0f
+	);
+	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mView, mProj);
 }
 
 void InitDirect3DApp::EndFrame()
