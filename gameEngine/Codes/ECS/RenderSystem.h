@@ -1,8 +1,13 @@
 #pragma once
-#include "Registry.h"
-#include "ComponentStruct.h"
 #include <d3d12.h>
 #include <DirectXMath.h>
+#include <vector>
+#include <memory>
+
+#include "Registry.h"
+#include "ComponentStruct.h"
+#include "../V1_/V4/DescriptorAllocator.h"
+#include "../Structs/AppStruct.h"
 
 class RenderSystem {
 public:

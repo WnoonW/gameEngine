@@ -1,6 +1,4 @@
 #include "RenderSystem.h"
-
-// === 네 프로젝트 실제 경로에 맞게 include 수정 ===
 #include "../V1_/V4/MatarialManager.h"
 #include "../V1_/V3/MeshManager.h"
 #include "../Structs/constantStruct.h"
