@@ -15,8 +15,8 @@ public:
                                     int gNumFrameResources, DescriptorAllocator& descriptorAllocator, Entity entity, Registry& registry);
     void render(Registry& registry,
         ID3D12GraphicsCommandList* cmdList,
-        class FrameResource* currentFrameResource,
-        class DescriptorAllocator* descriptorAllocator,
+        FrameResource* currentFrameResource,
+        DescriptorAllocator* descriptorAllocator,
         int currentFrameIndex,
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);

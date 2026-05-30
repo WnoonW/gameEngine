@@ -60,6 +60,26 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 	//============================================================================
 
 
+#ifdef _DEBUG
+	OutputDebugStringW(L"\n========================================\n");
+	OutputDebugStringW((L"[MeshManager] Loaded: " + std::wstring(name.begin(), name.end()) + L"\n").c_str());
+	OutputDebugStringW((L"  Total SubMeshes: " + std::to_wstring(mMesh.cpuModel.submeshes.size()) + L"\n").c_str());
+
+	for (size_t i = 0; i < mMesh.cpuModel.submeshes.size(); ++i)
+	{
+		const SubMesh& sub = mMesh.cpuModel.submeshes[i];
+
+		int len = MultiByteToWideChar(CP_UTF8, 0, sub.materialName.c_str(), -1, nullptr, 0);
+		std::wstring wMaterialName(len, L'\0');
+		MultiByteToWideChar(CP_UTF8, 0, sub.materialName.c_str(), -1, &wMaterialName[0], len);
+
+		std::wstring msg = L"  [" + std::to_wstring(i) + L"] materialName = [" + wMaterialName + L"]\n";
+		OutputDebugStringW(msg.c_str());
+	}
+	OutputDebugStringW(L"========================================\n\n");
+#endif
+
+
 	//각 서브메시 등록 (submesh_0, submesh_1 ...)
 	for (size_t i = 0; i < offsets.size(); ++i)
 	{
@@ -69,7 +89,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		submesh.IndexCount = offsets[i].indexCount;
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
 		submesh.BaseVertexLocation = 0;                    // ← 여기 중요! 0으로 고정
-
+		submesh.materialName = mMesh.cpuModel.submeshes[i].materialName;
 		std::string key = "submesh_" + std::to_string(i);
 		mMesh.DrawArgs[key] = submesh;
 	}

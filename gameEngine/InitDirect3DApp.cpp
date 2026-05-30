@@ -57,6 +57,7 @@ private:
 	float mTheta = 1.5f * XM_PI;
 	float mPhi = XM_PIDIV4;
 	float mRadius = 5.0f;
+	float mTargetY = 0.0f;
 	XMFLOAT4X4 mView = {};
 	XMFLOAT4X4 mProj = {};
 	POINT mLastMousePos = {0, 0};
@@ -107,8 +108,10 @@ bool InitDirect3DApp::Initialize()
 	//메시
 	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
 		md3dDevice.Get(), mCommandList.Get());
+	bool meshResult1 = MeshManager::Get().CreateMesh("box", L"Resources/Assets/square.obj",
+		md3dDevice.Get(), mCommandList.Get());
 
-	if (!meshResult)
+	if (!meshResult || !meshResult1)
 	{
 		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
 		return false;
@@ -116,6 +119,30 @@ bool InitDirect3DApp::Initialize()
 
 	//머티리얼
 	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	
+	MatarialManager::Get().CreateMatarial("颜", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("颜2", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("眉睫", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("目光", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("白目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("口线", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("口舌", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("齿", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("目影", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+	MatarialManager::Get().CreateMatarial("体", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("肌", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	
+	MatarialManager::Get().CreateMatarial("体2", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("足", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MatarialManager::Get().CreateMatarial("髮", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	
+	MatarialManager::Get().CreateMatarial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	
+	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/结晶.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/武器金属.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/武器.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
 	Entity entity = mRegistry.createEntity();
 
@@ -154,6 +181,7 @@ Entity InitDirect3DApp::CreateRenderableEntity(
 
 	mEntities.push_back(entity);   // 관리 목록에 추가
 
+	OutputDebugStringA(("Created Entity " + std::to_string(entity) + " with Mesh: " + meshName + ", Material: " + materialName + "\n").c_str());
 	return entity;
 }
 
@@ -219,10 +247,10 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	// ==========================================
 	float x = mRadius * sinf(mPhi) * cosf(mTheta);
 	float z = mRadius * sinf(mPhi) * sinf(mTheta);
-	float y = mRadius * cosf(mPhi);
+	float y = mRadius * cosf(mPhi) + mTargetY;   // ← 높이 보정
 
 	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR target = XMVectorZero();
+	XMVECTOR target = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);   // 타겟도 같이 이동
 	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
 	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
@@ -274,12 +302,21 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
+		// === 기존 왼쪽 드래그: 공전 ===
 		float dx = XMConvertToRadians(0.25f * static_cast<float>(x - mLastMousePos.x));
 		float dy = XMConvertToRadians(0.25f * static_cast<float>(y - mLastMousePos.y));
 
 		mTheta -= dx;
 		mPhi -= dy;
+
+		// mPhi 제한 (너무 위아래로 가지 않게)
 		mPhi = MathHelper::Clamp(mPhi, 0.1f, XM_PI - 0.1f);
+	}
+	else if ((btnState & MK_RBUTTON) != 0)
+	{
+		float dy = 0.005f * static_cast<float>(y - mLastMousePos.y);
+		mTargetY += dy;                    // 타겟 Y 이동
+		mTargetY = MathHelper::Clamp(mTargetY, -50.0f, 50.0f);
 	}
 
 	mLastMousePos.x = x;
@@ -288,8 +325,8 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
 {
-	mRadius -= wheelDelta * 0.002f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
-	mRadius = MathHelper::Clamp(mRadius, 2.0f, 150.0f);
+	mRadius -= wheelDelta * 0.001f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
+	mRadius = MathHelper::Clamp(mRadius, 0.0f, 150.0f);
 }
 
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)

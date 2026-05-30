@@ -64,7 +64,7 @@ bool TextureLoad(const std::wstring& filepath, Microsoft::WRL::ComPtr<ID3D12Reso
             resourceUpload,
             filepath.c_str(),
             texture.GetAddressOf(),
-            true   // Mipmap 자동 생성
+            false   // Mipmap 자동 생성
         );
 
         if (FAILED(hr))
@@ -135,16 +135,15 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
     std::vector<DirectX::XMFLOAT3> temp_normals;
     std::vector<DirectX::XMFLOAT2> temp_texcoords;
 
+    std::string currentMaterialName = baseName;
+
     int submeshCounter = 0;
     bool firstSubmeshCreated = false;
     size_t currentSubmeshIndex = 0;
 
     auto createNewSubmesh = [&]() -> size_t {
         SubMesh newSubmesh;
-        if (submeshCounter == 0)
-            newSubmesh.materialName = baseName;
-        else
-            newSubmesh.materialName = baseName + "_" + std::to_string(submeshCounter);
+        newSubmesh.materialName = currentMaterialName;
 
         outModel.submeshes.push_back(newSubmesh);
         submeshCounter++;
@@ -159,7 +158,18 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
         // usemtl이 나오면 새로운 서브메시 생성 신호
         if (line.rfind("usemtl", 0) == 0)
         {
-            // face가 나오기 전까지는 만들지 않고, 다음 face에서 생성
+            currentMaterialName = (line.length() > 7) ? line.substr(7) : "default";
+
+            // 앞쪽 공백 + 따옴표 제거
+            size_t startPos = currentMaterialName.find_first_not_of(" \t\"");
+            if (startPos != std::string::npos)
+                currentMaterialName = currentMaterialName.substr(startPos);
+
+            // 뒤쪽 공백 + 따옴표 제거
+            size_t endPos = currentMaterialName.find_last_not_of(" \t\"");
+            if (endPos != std::string::npos)
+                currentMaterialName = currentMaterialName.substr(0, endPos + 1);
+
             firstSubmeshCreated = false;
             continue;
         }
@@ -236,9 +246,18 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
                 if (vn > 0) vn--;
 
                 Vertex vert{};
-                if (v >= 0 && v < (int)temp_positions.size()) vert.position = temp_positions[v];
-                if (vn >= 0 && vn < (int)temp_normals.size()) vert.normal = temp_normals[vn];
-                if (vt >= 0 && vt < (int)temp_texcoords.size()) vert.texcoord = temp_texcoords[vt];
+                if (v >= 0 && v < (int)temp_positions.size())
+                    vert.position = temp_positions[v];
+
+                if (vn >= 0 && vn < (int)temp_normals.size())
+                    vert.normal = temp_normals[vn];
+
+                // texcoord 안전하게 처리 + UV 뒤집기
+                if (vt > 0 && vt < (int)temp_texcoords.size())
+                {
+                    vert.texcoord = temp_texcoords[vt];
+                    vert.texcoord.y = 1.0f - vert.texcoord.y;   // ← UV Flip
+                }
 
                 faceVerts.push_back(vert);
             }

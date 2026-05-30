@@ -42,7 +42,7 @@ void RenderSystem::render(Registry& registry,
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
     DescriptorAllocator* descriptorAllocator,
-    int currentFrameIndex,                    // ← 추가
+    int currentFrameIndex,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
@@ -55,70 +55,68 @@ void RenderSystem::render(Registry& registry,
 
         if (!rend.visible) continue;
 
-        // 1. 행렬 계산
+        // 1. 행렬 계산 및 CB 데이터 업데이트
         XMMATRIX world = tf.GetWorldMatrix();
         XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
         XMMATRIX wvp = XMMatrixMultiply(world, viewProj);
 
         ObjectConstants objConst{};
         XMStoreFloat4x4(&objConst.WorldViewProj, XMMatrixTranspose(wvp));
-
         currentFrameResource->ObjectCB->CopyData(rend.objectCBIndex, objConst);
 
-        // 2. Mesh & Material
+        // 2. Mesh
         Mesh* mesh = MeshManager::Get().GetMesh(rend.meshName);
-        auto material = MatarialManager::Get().GetMatarial(rend.materialName);
-        if (!mesh || !material) continue;
+        if (!mesh || mesh->DrawArgs.empty()) continue;
 
-        // 3. RootSignature & PSO
-        cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
-        cmdList->SetPipelineState(material->mPSO.Get());
-
-        // 4. Vertex/Index Buffer
         auto vbv = mesh->VertexBufferView();
         auto ibv = mesh->IndexBufferView();
+
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        // 5. Descriptor Heap 설정
+        // Descriptor Heap 설정
         ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
         cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-        // CBV 바인딩 (Root Parameter 0)
-        if (!mEntityCBVHandles.empty() &&
-            e < mEntityCBVHandles.size() &&
-            currentFrameIndex < mEntityCBVHandles[e].size())
+        // =====================================================
+        // 서브메시별 Material 바인딩 + 그리기
+        // =====================================================
+        for (auto& pair : mesh->DrawArgs)
         {
-            cmdList->SetGraphicsRootDescriptorTable(0, mEntityCBVHandles[e][currentFrameIndex].GPU);
-        }
+            const auto& sub = pair.second;
 
-        // Texture 바인딩 (Root Parameter 1)
-        cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
-
-        // ==========================================
-        // 6. Draw (모든 서브메시 그리기)
-        // ==========================================
-        if (!mesh->DrawArgs.empty())
-        {
-            // 여러 개의 서브메시가 있는 경우 모두 그리기
-            for (auto& pair : mesh->DrawArgs)
+            // 서브메시 전용 material 가져오기
+            auto material = MatarialManager::Get().GetMatarial(sub.materialName);
+            if (!material)
             {
-                const auto& sub = pair.second;
-
-                cmdList->DrawIndexedInstanced(
-                    sub.IndexCount,
-                    1,
-                    sub.StartIndexLocation,
-                    sub.BaseVertexLocation,
-                    0
-                );
+                material = MatarialManager::Get().GetMatarial(rend.materialName); // fallback
+                if (!material) continue;
             }
-        }
-        else if (mesh->indexCount > 0)
-        {
-            // DrawArgs가 없는 경우 (단일 메시)
-            cmdList->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
+
+            // ★ 중요: RootSignature를 가장 먼저 설정
+            cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
+            cmdList->SetPipelineState(material->mPSO.Get());
+
+            // CBV 바인딩 (Root Parameter 0)
+            if (!mEntityCBVHandles.empty() &&
+                e < mEntityCBVHandles.size() &&
+                currentFrameIndex < mEntityCBVHandles[e].size())
+            {
+                cmdList->SetGraphicsRootDescriptorTable(0, mEntityCBVHandles[e][currentFrameIndex].GPU);
+            }
+
+            // Texture 바인딩 (Root Parameter 1)
+            cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
+
+            // 서브메시 그리기
+            cmdList->DrawIndexedInstanced(
+                sub.IndexCount,
+                1,
+                sub.StartIndexLocation,
+                sub.BaseVertexLocation,
+                0
+            );
         }
     }
 }
