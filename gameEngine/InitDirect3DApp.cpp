@@ -326,7 +326,7 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
 {
 	mRadius -= wheelDelta * 0.001f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
-	mRadius = MathHelper::Clamp(mRadius, 0.0f, 150.0f);
+	mRadius = MathHelper::Clamp(mRadius, 0.1f, 150.0f);
 }
 
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)
