@@ -15,6 +15,7 @@
 #include "Codes/ECS/ComponentStruct.h"
 #include "Codes/ECS/RenderSystem.h"
 
+
 using namespace DirectX;
 
 class InitDirect3DApp : public D3DApp
