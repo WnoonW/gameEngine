@@ -408,35 +408,6 @@ bool D3DApp::InitDirect3D()
 
 	return true;
 }
-
-bool D3DApp::InitImGui()
-{
-	// Setup Dear ImGui context
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // IF using Docking Branch
-
-	// Setup Platform/Renderer backends
-	ImGui_ImplDX12_InitInfo init_info = {};
-	init_info.Device = md3dDevice.Get();
-	init_info.CommandQueue = mCommandQueue.Get();
-	init_info.NumFramesInFlight = gNumFrameResources;
-	init_info.RTVFormat = mBackBufferFormat; // Or your render target format.
-
-	// Allocating SRV descriptors (for textures) is up to the application, so we provide callbacks.
-	// The example_win32_directx12/main.cpp application include a simple free-list based allocator.
-	init_info.SrvDescriptorHeap = YOUR_SRV_DESC_HEAP;
-	init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle) { return YOUR_ALLOCATOR_FUNCTION_FOR_SRV_DESCRIPTORS(...); };
-	init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle) { return YOUR_FREE_FUNCTION_FOR_SRV_DESCRIPTORS(...); };
-
-	// (before 1.91.6 the DirectX12 backend required a single SRV descriptor passed)
-	// (there is a legacy version of ImGui_ImplDX12_Init() that supports those, but a future version of Dear ImGuii will requires more descriptors to be allocated)
-
-	return true;
-}
 #pragma endregion
 //============================================================================================================================================Initialize
 

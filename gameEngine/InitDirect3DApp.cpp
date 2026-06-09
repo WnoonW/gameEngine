@@ -14,7 +14,9 @@
 #include "Codes/ECS/Registry.h"
 #include "Codes/ECS/ComponentStruct.h"
 #include "Codes/ECS/RenderSystem.h"
-
+#include <imgui.h>
+#include <backends/imgui_impl_win32.h>
+#include <backends/imgui_impl_dx12.h>
 
 using namespace DirectX;
 
@@ -25,7 +27,7 @@ public:
 	~InitDirect3DApp();
 
 	virtual bool Initialize()override;
-
+	bool InitImGui() override;
 private:
 	DescriptorAllocator mGlobalDescriptorAllocator;
 	Registry mRegistry = {};
@@ -106,6 +108,9 @@ bool InitDirect3DApp::Initialize()
 	//디스크립터
 	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
 
+	//UI
+	InitImGui();
+
 	//메시
 	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
 		md3dDevice.Get(), mCommandList.Get());
@@ -159,6 +164,32 @@ bool InitDirect3DApp::Initialize()
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
+	return true;
+}
+
+bool InitDirect3DApp::InitImGui()
+{
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+	// io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+	ImGui_ImplDX12_InitInfo init_info = {};
+	init_info.Device = md3dDevice.Get();
+	init_info.CommandQueue = mCommandQueue.Get();
+	init_info.NumFramesInFlight = gNumFrameResources;
+	init_info.RTVFormat = mBackBufferFormat;
+
+	// === Descriptor Heap 연결 ===
+	init_info.SrvDescriptorHeap = mGlobalDescriptorAllocator.GetHeap();
+
+
+	if (!ImGui_ImplDX12_Init(&init_info))
+		return false;
+
+	ImGui_ImplWin32_Init(MainWnd());
 	return true;
 }
 
