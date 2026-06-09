@@ -17,6 +17,7 @@
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_dx12.h>
+#include "Codes/Structs/AppStruct.h"
 
 using namespace DirectX;
 
@@ -29,7 +30,7 @@ public:
 	virtual bool Initialize()override;
 	bool InitImGui() override;
 private:
-	DescriptorAllocator mGlobalDescriptorAllocator;
+	static DescriptorAllocator mGlobalDescriptorAllocator;
 	Registry mRegistry = {};
 	RenderSystem mRenderSystem = {};
 	Entity mEntity = {};
@@ -65,6 +66,8 @@ private:
 	XMFLOAT4X4 mProj = {};
 	POINT mLastMousePos = {0, 0};
 };
+
+DescriptorAllocator InitDirect3DApp::mGlobalDescriptorAllocator;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 				   PSTR cmdLine, int showCmd)
@@ -107,9 +110,6 @@ bool InitDirect3DApp::Initialize()
 
 	//디스크립터
 	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
-
-	//UI
-	InitImGui();
 
 	//메시
 	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
@@ -169,27 +169,55 @@ bool InitDirect3DApp::Initialize()
 
 bool InitDirect3DApp::InitImGui()
 {
+	// Setup Dear ImGui context
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-	// io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+	//io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // IF using Docking Branch
 
+	// Setup Platform/Renderer backends
 	ImGui_ImplDX12_InitInfo init_info = {};
 	init_info.Device = md3dDevice.Get();
 	init_info.CommandQueue = mCommandQueue.Get();
 	init_info.NumFramesInFlight = gNumFrameResources;
 	init_info.RTVFormat = mBackBufferFormat;
 
-	// === Descriptor Heap 연결 ===
+	// Allocating SRV descriptors (for textures) is up to the application, so we provide callbacks.
+	// The example_win32_directx12/main.cpp application include a simple free-list based allocator.
 	init_info.SrvDescriptorHeap = mGlobalDescriptorAllocator.GetHeap();
+	// ★ Allocate 콜백 (람다로 감싸기)
+	init_info.SrvDescriptorAllocFn = [](
+		ImGui_ImplDX12_InitInfo*,
+		D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle,
+		D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle)
+		{
+			DescriptorAllocator::DescriptorHandle h = mGlobalDescriptorAllocator.Allocate();
+			*out_cpu_handle = h.CPU;
+			*out_gpu_handle = h.GPU;
+		};
+
+	// ★ Free 콜백
+	init_info.SrvDescriptorFreeFn = [](
+		ImGui_ImplDX12_InitInfo*,
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle,
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle)
+		{
+			DescriptorAllocator::DescriptorHandle h;
+			h.CPU = cpu_handle;
+			h.GPU = gpu_handle;
+
+			// Index를 모르기 때문에 Free 함수를 아래처럼 개선해야 제대로 동작합니다.
+			mGlobalDescriptorAllocator.Free(h);
+		};
 
 
-	if (!ImGui_ImplDX12_Init(&init_info))
-		return false;
+	ImGui_ImplWin32_Init(mhMainWnd);           // Win32 입력 처리 초기화
+	ImGui_ImplDX12_Init(&init_info);           // DX12 백엔드 초기화  ← 이게 제일 중요!
+	// (before 1.91.6 the DirectX12 backend required a single SRV descriptor passed)
+	// (there is a legacy version of ImGui_ImplDX12_Init() that supports those, but a future version of Dear ImGuii will requires more descriptors to be allocated)
 
-	ImGui_ImplWin32_Init(MainWnd());
 	return true;
 }
 
@@ -232,7 +260,12 @@ void InitDirect3DApp::OnResize()
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-
+	// (Your code process and dispatch Win32 messages)
+	// Start the Dear ImGui frame
+	ImGui_ImplDX12_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+	ImGui::ShowDemoWindow(); // Show demo window! :)
 }
 
 void InitDirect3DApp::BeginFrame()
@@ -294,6 +327,10 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
 	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
+
+	// Rendering
+	ImGui::Render();
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
 }
 
 void InitDirect3DApp::EndFrame()
@@ -382,11 +419,16 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 	}
 }
 
-
 void InitDirect3DApp::OnDestroy()
 {
+	// === ImGui 종료 (추가) ===
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+
 	MeshManager::Get().Shutdown();
 	MatarialManager::Get().Shutdown();
 	mGlobalDescriptorAllocator.Shutdown();
+
 	D3DApp::OnDestroy();
 }

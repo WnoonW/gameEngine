@@ -34,6 +34,9 @@
     <Filter Include="ECS">
       <UniqueIdentifier>{1b04ff59-0acb-416e-b5b2-e0150610010e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="IMGUI">
+      <UniqueIdentifier>{72a4a3b7-340c-4be4-84ad-6581fed1f0ab}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -77,6 +80,27 @@
     </ClCompile>
     <ClCompile Include="Codes\ECS\RenderSystem.cpp">
       <Filter>ECS</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp">
+      <Filter>IMGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp">
+      <Filter>IMGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp">
+      <Filter>IMGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp">
+      <Filter>IMGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp">
+      <Filter>IMGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp">
+      <Filter>IMGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp">
+      <Filter>IMGUI</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -139,6 +163,18 @@
     </ClInclude>
     <ClInclude Include="Codes\ECS\RenderSystem.h">
       <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h">
+      <Filter>IMGUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h">
+      <Filter>IMGUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h">
+      <Filter>IMGUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h">
+      <Filter>IMGUI</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

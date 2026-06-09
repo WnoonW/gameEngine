@@ -2,6 +2,7 @@
 #include "../Common/d3dUtil.h"
 #include "constantStruct.h"
 #include "../Common/UploadBuffer.h"
+#include <imgui.h>
 
 // FrameResource.h / .cpp
 

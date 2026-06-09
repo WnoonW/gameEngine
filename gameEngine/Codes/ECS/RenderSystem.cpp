@@ -48,6 +48,10 @@ void RenderSystem::render(Registry& registry,
 {
     auto entities = registry.view<TransformComponent, RenderableComponent>();
 
+    // Descriptor Heap 설정
+    ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
+    cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
     for (Entity e : entities)
     {
         auto& tf = registry.getComponent<TransformComponent>(e);
@@ -74,10 +78,6 @@ void RenderSystem::render(Registry& registry,
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-        // Descriptor Heap 설정
-        ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
-        cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
         // =====================================================
         // 서브메시별 Material 바인딩 + 그리기

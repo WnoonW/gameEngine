@@ -62,25 +62,6 @@ void DescriptorAllocator::Free(const DescriptorHandle& handle)
     mFreeList.push(handle.Index);
 }
 
-void DescriptorAllocator::Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle)
-{
-    for (UINT i = 0; i < mNumDescriptors; ++i)
-    {
-        if (mIsUsed[i])
-        {
-            D3D12_CPU_DESCRIPTOR_HANDLE h = mHeap->GetCPUDescriptorHandleForHeapStart();
-            h.ptr += i * mDescriptorSize;
-
-            if (h.ptr == cpuHandle.ptr)
-            {
-                mIsUsed[i] = false;
-                mFreeList.push(i);
-                return;
-            }
-        }
-    }
-}
-
 UINT DescriptorAllocator::GetUsedCount() const
 {
     return mNumDescriptors - (UINT)mFreeList.size();

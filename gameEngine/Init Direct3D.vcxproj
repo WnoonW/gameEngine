@@ -102,6 +102,7 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
+      <AdditionalIncludeDirectories>D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -136,6 +137,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
+      <AdditionalIncludeDirectories>D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -148,6 +150,13 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp" />
     <ClCompile Include="Codes\Common\Camera.cpp" />
     <ClCompile Include="Codes\Common\d3dApp.cpp" />
     <ClCompile Include="Codes\Common\d3dUtil.cpp" />
@@ -163,6 +172,10 @@
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h" />
     <ClInclude Include="Codes\Common\Camera.h" />
     <ClInclude Include="Codes\Common\d3dApp.h" />
     <ClInclude Include="Codes\Common\d3dUtil.h" />

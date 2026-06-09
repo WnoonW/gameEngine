@@ -26,7 +26,6 @@ public:
 
     // descriptor 반환 (오브젝트 삭제 시 호출)
     void Free(const DescriptorHandle& handle);
-    void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle);   // ImGui용 간편 Free
 
     // 현재 사용 중인 descriptor 개수
     UINT GetUsedCount() const;
