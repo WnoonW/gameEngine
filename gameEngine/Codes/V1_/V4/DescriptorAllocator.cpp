@@ -55,11 +55,19 @@ DescriptorAllocator::DescriptorHandle DescriptorAllocator::Allocate()
 
 void DescriptorAllocator::Free(const DescriptorHandle& handle)
 {
-    if (handle.Index >= mNumDescriptors || !mIsUsed[handle.Index])
-        return; // 이미 해제되었거나 잘못된 인덱스
+    UINT index = handle.Index;
 
-    mIsUsed[handle.Index] = false;
-    mFreeList.push(handle.Index);
+    if (index == UINT_MAX && mHeap)
+    {
+        auto cpuStart = mHeap->GetCPUDescriptorHandleForHeapStart();
+        index = (UINT)((handle.CPU.ptr - cpuStart.ptr) / mDescriptorSize);
+    }
+
+    if (index < mNumDescriptors && mIsUsed[index])
+    {
+        mIsUsed[index] = false;
+        mFreeList.push(index);
+    }
 }
 
 UINT DescriptorAllocator::GetUsedCount() const

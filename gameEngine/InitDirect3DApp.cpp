@@ -260,12 +260,10 @@ void InitDirect3DApp::OnResize()
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-	// (Your code process and dispatch Win32 messages)
-	// Start the Dear ImGui frame
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
-	ImGui::ShowDemoWindow(); // Show demo window! :)
+	ImGui::ShowDemoWindow();
 }
 
 void InitDirect3DApp::BeginFrame()
