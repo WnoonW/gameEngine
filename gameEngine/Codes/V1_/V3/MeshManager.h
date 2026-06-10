@@ -64,6 +64,8 @@ public:
     bool CreateMesh(const std::string& name, const std::wstring& filepath,
         ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 
+    void ResolveMeshMaterials(Mesh* mesh);
+
     Mesh* GetMesh(const std::string& name) const;
 
     void Shutdown();

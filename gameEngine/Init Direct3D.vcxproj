@@ -165,6 +165,7 @@
     <ClCompile Include="Codes\Common\GeometryGenerator.cpp" />
     <ClCompile Include="Codes\Common\MathHelper.cpp" />
     <ClCompile Include="Codes\ECS\RenderSystem.cpp" />
+    <ClCompile Include="Codes\IMGUI\ImGuiManager.cpp" />
     <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp" />
     <ClCompile Include="Codes\V1_\V3\MeshManager.cpp" />
     <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp" />
@@ -189,6 +190,7 @@
     <ClInclude Include="Codes\ECS\Entity.h" />
     <ClInclude Include="Codes\ECS\Registry.h" />
     <ClInclude Include="Codes\ECS\RenderSystem.h" />
+    <ClInclude Include="Codes\IMGUI\ImGuiManager.h" />
     <ClInclude Include="Codes\Structs\AppStruct.h" />
     <ClInclude Include="Codes\Structs\constantStruct.h" />
     <ClInclude Include="Codes\Structs\modelStruct.h" />

@@ -37,6 +37,12 @@
     <Filter Include="IMGUI">
       <UniqueIdentifier>{72a4a3b7-340c-4be4-84ad-6581fed1f0ab}</UniqueIdentifier>
     </Filter>
+    <Filter Include="IMGUI\Custom">
+      <UniqueIdentifier>{d2ef96c3-d5d3-44ff-9d9f-50dba216d937}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IMGUI\ect">
+      <UniqueIdentifier>{a346a4b9-15b3-4efe-b269-252250d0ebf1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -81,26 +87,29 @@
     <ClCompile Include="Codes\ECS\RenderSystem.cpp">
       <Filter>ECS</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp">
-      <Filter>IMGUI</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp">
-      <Filter>IMGUI</Filter>
+    <ClCompile Include="Codes\IMGUI\ImGuiManager.cpp">
+      <Filter>IMGUI\Custom</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp">
-      <Filter>IMGUI</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp">
-      <Filter>IMGUI</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp">
-      <Filter>IMGUI</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp">
-      <Filter>IMGUI</Filter>
+      <Filter>IMGUI\ect</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp">
-      <Filter>IMGUI</Filter>
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp">
+      <Filter>IMGUI\ect</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -164,17 +173,20 @@
     <ClInclude Include="Codes\ECS\RenderSystem.h">
       <Filter>ECS</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h">
-      <Filter>IMGUI</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h">
-      <Filter>IMGUI</Filter>
+    <ClInclude Include="Codes\IMGUI\ImGuiManager.h">
+      <Filter>IMGUI\Custom</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h">
-      <Filter>IMGUI</Filter>
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h">
+      <Filter>IMGUI\ect</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h">
-      <Filter>IMGUI</Filter>
+      <Filter>IMGUI\ect</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

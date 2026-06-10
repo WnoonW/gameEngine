@@ -142,11 +142,7 @@ bool D3DApp::Initialize()
 	if(!InitDirect3D())
 		return false;
 
-    // Do the initial resize code.
     OnResize();
-
-	if(!InitImGui())
-		return false;
 
 	return true;
 }

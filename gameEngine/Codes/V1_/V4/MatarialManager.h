@@ -40,6 +40,7 @@ class MatarialManager
 
 	bool CreateMatarial(const std::string& name, const std::wstring& filePath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue, DescriptorAllocator& descriptorAllocator);
 	std::shared_ptr<Matarial> GetMatarial(const std::string& name);
+    std::shared_ptr<Matarial> GetDefaultMaterial();
 	void Shutdown();
 
 private:

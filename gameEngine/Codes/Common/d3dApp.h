@@ -61,8 +61,6 @@ protected:
 	virtual void OnKeyDown(WPARAM key) {}
 
 protected:
-	virtual bool InitImGui() { return true; }
-
 	bool InitMainWindow();
 	bool InitDirect3D();
 	void CreateCommandObjects();

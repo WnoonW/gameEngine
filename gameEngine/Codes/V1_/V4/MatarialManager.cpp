@@ -119,6 +119,13 @@ std::shared_ptr<Matarial> MatarialManager::GetMatarial(const std::string& name)
 	return nullptr;
 }
 
+std::shared_ptr<Matarial> MatarialManager::GetDefaultMaterial()
+{
+    static std::string defaultName = "Default";
+    auto mat = GetMatarial(defaultName);
+    return mat;
+}
+
 void MatarialManager::Shutdown()
 {
 	for (auto& pair : mMatarials)

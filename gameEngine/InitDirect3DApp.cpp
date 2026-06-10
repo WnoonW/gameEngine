@@ -14,10 +14,8 @@
 #include "Codes/ECS/Registry.h"
 #include "Codes/ECS/ComponentStruct.h"
 #include "Codes/ECS/RenderSystem.h"
-#include <imgui.h>
-#include <backends/imgui_impl_win32.h>
-#include <backends/imgui_impl_dx12.h>
 #include "Codes/Structs/AppStruct.h"
+#include "Codes/IMGUI/ImGuiManager.h"
 
 using namespace DirectX;
 
@@ -28,9 +26,9 @@ public:
 	~InitDirect3DApp();
 
 	virtual bool Initialize()override;
-	bool InitImGui() override;
 private:
 	static DescriptorAllocator mGlobalDescriptorAllocator;
+	ImGuiManager mImGuiManager;
 	Registry mRegistry = {};
 	RenderSystem mRenderSystem = {};
 	Entity mEntity = {};
@@ -111,21 +109,12 @@ bool InitDirect3DApp::Initialize()
 	//디스크립터
 	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
 
-	//메시
-	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
-		md3dDevice.Get(), mCommandList.Get());
-	bool meshResult1 = MeshManager::Get().CreateMesh("box", L"Resources/Assets/square.obj",
-		md3dDevice.Get(), mCommandList.Get());
-
-	if (!meshResult || !meshResult1)
-	{
-		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
-		return false;
-	}
+	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator);
 
 	//머티리얼
+	MatarialManager::Get().CreateMatarial("Default", L"Resources/Textures/bricks.dds", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	
+
 	MatarialManager::Get().CreateMatarial("颜", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	MatarialManager::Get().CreateMatarial("颜2", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	MatarialManager::Get().CreateMatarial("眉睫", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
@@ -139,16 +128,29 @@ bool InitDirect3DApp::Initialize()
 
 	MatarialManager::Get().CreateMatarial("体", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	MatarialManager::Get().CreateMatarial("肌", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	
+
 	MatarialManager::Get().CreateMatarial("体2", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	MatarialManager::Get().CreateMatarial("足", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	MatarialManager::Get().CreateMatarial("髮", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	
+
 	MatarialManager::Get().CreateMatarial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	
+
 	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/结晶.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/武器金属.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/武器.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+
+	//메시
+	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
+		md3dDevice.Get(), mCommandList.Get());
+	bool meshResult1 = MeshManager::Get().CreateMesh("box", L"Resources/Assets/square.obj",
+		md3dDevice.Get(), mCommandList.Get());
+
+	if (!meshResult || !meshResult1)
+	{
+		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
+		return false;
+	}
 
 	Entity entity = mRegistry.createEntity();
 
@@ -164,60 +166,6 @@ bool InitDirect3DApp::Initialize()
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
-	return true;
-}
-
-bool InitDirect3DApp::InitImGui()
-{
-	// Setup Dear ImGui context
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-	//io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // IF using Docking Branch
-
-	// Setup Platform/Renderer backends
-	ImGui_ImplDX12_InitInfo init_info = {};
-	init_info.Device = md3dDevice.Get();
-	init_info.CommandQueue = mCommandQueue.Get();
-	init_info.NumFramesInFlight = gNumFrameResources;
-	init_info.RTVFormat = mBackBufferFormat;
-
-	// Allocating SRV descriptors (for textures) is up to the application, so we provide callbacks.
-	// The example_win32_directx12/main.cpp application include a simple free-list based allocator.
-	init_info.SrvDescriptorHeap = mGlobalDescriptorAllocator.GetHeap();
-	// ★ Allocate 콜백 (람다로 감싸기)
-	init_info.SrvDescriptorAllocFn = [](
-		ImGui_ImplDX12_InitInfo*,
-		D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle,
-		D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle)
-		{
-			DescriptorAllocator::DescriptorHandle h = mGlobalDescriptorAllocator.Allocate();
-			*out_cpu_handle = h.CPU;
-			*out_gpu_handle = h.GPU;
-		};
-
-	// ★ Free 콜백
-	init_info.SrvDescriptorFreeFn = [](
-		ImGui_ImplDX12_InitInfo*,
-		D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle,
-		D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle)
-		{
-			DescriptorAllocator::DescriptorHandle h;
-			h.CPU = cpu_handle;
-			h.GPU = gpu_handle;
-
-			// Index를 모르기 때문에 Free 함수를 아래처럼 개선해야 제대로 동작합니다.
-			mGlobalDescriptorAllocator.Free(h);
-		};
-
-
-	ImGui_ImplWin32_Init(mhMainWnd);           // Win32 입력 처리 초기화
-	ImGui_ImplDX12_Init(&init_info);           // DX12 백엔드 초기화  ← 이게 제일 중요!
-	// (before 1.91.6 the DirectX12 backend required a single SRV descriptor passed)
-	// (there is a legacy version of ImGui_ImplDX12_Init() that supports those, but a future version of Dear ImGuii will requires more descriptors to be allocated)
-
 	return true;
 }
 
@@ -260,10 +208,8 @@ void InitDirect3DApp::OnResize()
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
-	ImGui_ImplDX12_NewFrame();
-	ImGui_ImplWin32_NewFrame();
-	ImGui::NewFrame();
-	ImGui::ShowDemoWindow();
+	mImGuiManager.NewFrame();
+	mImGuiManager.CustomUI();
 }
 
 void InitDirect3DApp::BeginFrame()
@@ -326,9 +272,7 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 
 	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
 
-	// Rendering
-	ImGui::Render();
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
+	mImGuiManager.Render(mCommandList.Get());
 }
 
 void InitDirect3DApp::EndFrame()

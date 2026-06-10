@@ -85,16 +85,8 @@ void RenderSystem::render(Registry& registry,
         for (auto& pair : mesh->DrawArgs)
         {
             const auto& sub = pair.second;
+            Matarial* material = sub.material;
 
-            // 서브메시 전용 material 가져오기
-            auto material = MatarialManager::Get().GetMatarial(sub.materialName);
-            if (!material)
-            {
-                material = MatarialManager::Get().GetMatarial(rend.materialName); // fallback
-                if (!material) continue;
-            }
-
-            // ★ 중요: RootSignature를 가장 먼저 설정
             cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
             cmdList->SetPipelineState(material->mPSO.Get());
 

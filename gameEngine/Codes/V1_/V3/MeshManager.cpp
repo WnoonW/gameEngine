@@ -1,6 +1,7 @@
 #include "MeshManager.h"
 #include "../../Common/d3dUtil.h"
 #include "../V2/ResourceLoader.h"
+#include "../V4/MatarialManager.h"
 
 bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
 {
@@ -95,12 +96,43 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 	}
 	//============================================================================
 
+	ResolveMeshMaterials(&mMesh);
 
 	//해시 테이블에 메시 저장
 	mMeshes.emplace(name, std::make_shared<Mesh>(std::move(mMesh)));
 	//============================================================================
 	return true;
 }
+
+
+void MeshManager::ResolveMeshMaterials(Mesh* mesh)
+{
+	if (!mesh) return;
+
+	for (auto& [key, submesh] : mesh->DrawArgs)
+	{
+		if (!submesh.materialName.empty())
+		{
+			// 1. 이름으로 Material 찾기
+			auto mat = MatarialManager::Get().GetMatarial(submesh.materialName);
+
+			if (mat)
+			{
+				submesh.material = mat.get();           // 연결 성공
+			}
+			else
+			{
+				submesh.material = MatarialManager::Get().GetDefaultMaterial().get();
+			}
+		}
+		else
+		{
+			// materialName이 비어있으면 Default
+			submesh.material = MatarialManager::Get().GetDefaultMaterial().get();
+		}
+	}
+}
+
 
 Mesh* MeshManager::GetMesh(const std::string& name) const
 {
