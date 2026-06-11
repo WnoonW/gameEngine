@@ -171,6 +171,7 @@
     <ClCompile Include="Codes\Managers\MeshManager.cpp" />
     <ClCompile Include="Codes\Managers\PipelineStateManager.cpp" />
     <ClCompile Include="Codes\Managers\RootSignatureManager.cpp" />
+    <ClCompile Include="Codes\Managers\ShaderManager.cpp" />
     <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
@@ -198,6 +199,7 @@
     <ClInclude Include="Codes\Managers\MeshManager.h" />
     <ClInclude Include="Codes\Managers\PipelineStateManager.h" />
     <ClInclude Include="Codes\Managers\RootSignatureManager.h" />
+    <ClInclude Include="Codes\Managers\ShaderManager.h" />
     <ClInclude Include="Codes\Memory\DescriptorAllocator.h" />
     <ClInclude Include="Codes\Structs\AppStruct.h" />
     <ClInclude Include="Codes\Structs\constantStruct.h" />

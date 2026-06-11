@@ -5,12 +5,15 @@
 #include "d3dApp.h"
 #include "MeshManager.h"
 #include "MaterialManager.h"
+#include "RootsignatureManager.h"
 #include "DescriptorAllocator.h"
 #include "Registry.h"
 #include "ComponentStruct.h"
 #include "RenderSystem.h"
 #include "AppStruct.h"
 #include "ImGuiManager.h"
+#include "PipelineStateManager.h"
+#include "ShaderManager.h"
 
 
 using namespace DirectX;
@@ -106,6 +109,9 @@ bool InitDirect3DApp::Initialize()
 	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
 
 	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator);
+	ShaderManager::Get().Initialize();
+	RootSignatureManager::Get().Initialize(md3dDevice.Get());
+	PipelineStateManager::Get().Initialize(md3dDevice.Get());
 
 	//머티리얼
 	MaterialManager::Get().CreateMaterial("Default", L"Resources/Textures/bricks.dds", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);

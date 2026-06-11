@@ -1,9 +1,11 @@
+#include <DirectXMath.h>
 #include "RenderSystem.h"
 #include "MaterialManager.h"
 #include "MeshManager.h"
+#include "RootSignatureManager.h"
+#include "PipelineStateManager.h"
 #include "constantStruct.h"
 #include "AppStruct.h"
-#include <DirectXMath.h>
 
 using namespace DirectX;
 
@@ -79,6 +81,17 @@ void RenderSystem::render(Registry& registry,
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+        ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
+        cmdList->SetGraphicsRootSignature(sceneRS);
+
+        PSOKey key;
+        key.shaderName = "object";
+        key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        key.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(key, sceneRS);
+        cmdList->SetPipelineState(pso);
+
         // =====================================================
         // 서브메시별 Material 바인딩 + 그리기
         // =====================================================
@@ -86,9 +99,8 @@ void RenderSystem::render(Registry& registry,
         {
             const auto& sub = pair.second;
             Material* material = sub.material;
+            
 
-            cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
-            cmdList->SetPipelineState(material->mPSO.Get());
 
             // CBV 바인딩 (Root Parameter 0)
             if (!mEntityCBVHandles.empty() &&
