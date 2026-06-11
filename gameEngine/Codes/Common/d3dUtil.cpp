@@ -122,4 +122,15 @@ std::wstring DxException::ToString()const
     return FunctionName + L" failed in " + Filename + L"; line " + std::to_wstring(LineNumber) + L"; error: " + msg;
 }
 
+std::string d3dUtil::ToString(HRESULT hr)
+{
+    _com_error err(hr);
+    std::wstring msg = err.ErrorMessage();
+
+    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, msg.c_str(), (int)msg.size(), nullptr, 0, nullptr, nullptr);
+    std::string result(sizeNeeded, 0);
+    WideCharToMultiByte(CP_UTF8, 0, msg.c_str(), (int)msg.size(), &result[0], sizeNeeded, nullptr, nullptr);
+
+    return result;
+}
 

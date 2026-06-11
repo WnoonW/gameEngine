@@ -1,8 +1,8 @@
 #include "RenderSystem.h"
-#include "../V1_/V4/MatarialManager.h"
-#include "../V1_/V3/MeshManager.h"
-#include "../Structs/constantStruct.h"
-#include "../Structs/AppStruct.h"
+#include "MaterialManager.h"
+#include "MeshManager.h"
+#include "constantStruct.h"
+#include "AppStruct.h"
 #include <DirectXMath.h>
 
 using namespace DirectX;
@@ -85,7 +85,7 @@ void RenderSystem::render(Registry& registry,
         for (auto& pair : mesh->DrawArgs)
         {
             const auto& sub = pair.second;
-            Matarial* material = sub.material;
+            Material* material = sub.material;
 
             cmdList->SetGraphicsRootSignature(material->mRootSignature.Get());
             cmdList->SetPipelineState(material->mPSO.Get());

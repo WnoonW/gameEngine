@@ -1,7 +1,7 @@
 #include "MeshManager.h"
-#include "../../Common/d3dUtil.h"
-#include "../V2/ResourceLoader.h"
-#include "../V4/MatarialManager.h"
+#include "d3dUtil.h"
+#include "ResourceLoader.h"
+#include "MaterialManager.h"
 
 bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
 {
@@ -12,7 +12,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 
 
 	//모델 로드
-	MeshLoad(filepath, mMesh.cpuModel);
+	MeshLoad(std::filesystem::path(filepath), mMesh.cpuModel);
 	//============================================================================
 
 
@@ -114,7 +114,7 @@ void MeshManager::ResolveMeshMaterials(Mesh* mesh)
 		if (!submesh.materialName.empty())
 		{
 			// 1. 이름으로 Material 찾기
-			auto mat = MatarialManager::Get().GetMatarial(submesh.materialName);
+			auto mat = MaterialManager::Get().GetMaterial(submesh.materialName);
 
 			if (mat)
 			{
@@ -122,13 +122,13 @@ void MeshManager::ResolveMeshMaterials(Mesh* mesh)
 			}
 			else
 			{
-				submesh.material = MatarialManager::Get().GetDefaultMaterial().get();
+				submesh.material = MaterialManager::Get().GetDefaultMaterial().get();
 			}
 		}
 		else
 		{
 			// materialName이 비어있으면 Default
-			submesh.material = MatarialManager::Get().GetDefaultMaterial().get();
+			submesh.material = MaterialManager::Get().GetDefaultMaterial().get();
 		}
 	}
 }

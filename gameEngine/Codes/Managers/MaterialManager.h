@@ -3,14 +3,14 @@
 #include <memory>
 #include <string>
 #include <wrl.h>                    
-#include "../../Common/d3dUtil.h"
-#include "../V2/ResourceLoader.h"
+#include "d3dUtil.h"
+#include "ResourceLoader.h"
 #include "DescriptorAllocator.h"
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 //힙 생성, 텍스쳐 로드, SRV 생성, 셰이더 로드,
 
-struct Matarial
+struct Material
 {
     std::string name;
 
@@ -29,20 +29,20 @@ struct Matarial
     ComPtr<ID3D12PipelineState> mPSO;
 };
 
-class MatarialManager
+class MaterialManager
 {
 	public:
-	static MatarialManager& Get()
+	static MaterialManager& Get()
 	{
-		static MatarialManager instance;
+		static MaterialManager instance;
 		return instance;
 	}
 
-	bool CreateMatarial(const std::string& name, const std::wstring& filePath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue, DescriptorAllocator& descriptorAllocator);
-	std::shared_ptr<Matarial> GetMatarial(const std::string& name);
-    std::shared_ptr<Matarial> GetDefaultMaterial();
+	bool CreateMaterial(const std::string& name, const std::wstring& filePath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue, DescriptorAllocator& descriptorAllocator);
+	std::shared_ptr<Material> GetMaterial(const std::string& name);
+    std::shared_ptr<Material> GetDefaultMaterial();
 	void Shutdown();
 
 private:
-	std::unordered_map<std::string, std::shared_ptr<Matarial>> mMatarials;
+	std::unordered_map<std::string, std::shared_ptr<Material>> mMaterials;
 };

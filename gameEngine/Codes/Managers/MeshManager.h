@@ -3,8 +3,8 @@
 #include <memory>
 #include <string>
 #include <wrl.h>                    
-#include "../../Common/d3dUtil.h"
-#include "../V2/ResourceLoader.h"
+#include "d3dUtil.h"
+#include "ResourceLoader.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;

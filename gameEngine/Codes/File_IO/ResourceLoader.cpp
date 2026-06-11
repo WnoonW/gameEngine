@@ -1,6 +1,6 @@
 #include "ResourceLoader.h"
 #include <algorithm>
-#include "../../Common/DDSTextureLoader.h"
+#include "Common/DDSTextureLoader.h"
 #include "WICTextureLoader.h"
 #include <ResourceUploadBatch.h>
 #include <fstream>
@@ -108,27 +108,19 @@ static FaceVertex parseFaceVertex(const std::string& token) {
     return fv;
 }
 
-bool MeshLoad(const std::wstring& filepath, Model& outModel)
+bool MeshLoad(const std::filesystem::path& filepath, Model& outModel)
 {
-    std::string path(filepath.begin(), filepath.end());
-    std::ifstream file(path, std::ios::binary);
+    // === 1. 안전한 파일 경로 처리 (경고 제거 핵심) ===
+    std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open())
-        return false;
-
-    // === 파일명 기반 이름 준비 ===
-    std::string baseName = path;
-    size_t lastSlash = baseName.find_last_of("/\\");
-    if (lastSlash != std::string::npos)
-        baseName = baseName.substr(lastSlash + 1);
-
-    std::string ext = ".obj";
-    if (baseName.size() > ext.size())
     {
-        std::string lower = baseName.substr(baseName.size() - ext.size());
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        if (lower == ext)
-            baseName = baseName.substr(0, baseName.size() - ext.size());
+        // 디버그용 로그 (나중에 Logger로 교체)
+        OutputDebugStringW((L"Failed to open: " + filepath.wstring() + L"\n").c_str());
+        return false;
     }
+
+    // === 파일명 기반 baseName 추출 ===
+    std::string baseName = filepath.stem().string();  // 확장자 제외한 파일명
     if (baseName.empty()) baseName = "model";
 
     std::vector<DirectX::XMFLOAT3> temp_positions;
@@ -137,16 +129,13 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
 
     std::string currentMaterialName = baseName;
 
-    int submeshCounter = 0;
-    bool firstSubmeshCreated = false;
+    bool hasActiveSubmesh = false;
     size_t currentSubmeshIndex = 0;
 
     auto createNewSubmesh = [&]() -> size_t {
         SubMesh newSubmesh;
         newSubmesh.materialName = currentMaterialName;
-
         outModel.submeshes.push_back(newSubmesh);
-        submeshCounter++;
         return outModel.submeshes.size() - 1;
         };
 
@@ -155,26 +144,25 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
     {
         if (line.empty()) continue;
 
-        // usemtl이 나오면 새로운 서브메시 생성 신호
+        // === usemtl 처리 ===
         if (line.rfind("usemtl", 0) == 0)
         {
             currentMaterialName = (line.length() > 7) ? line.substr(7) : "default";
 
-            // 앞쪽 공백 + 따옴표 제거
-            size_t startPos = currentMaterialName.find_first_not_of(" \t\"");
-            if (startPos != std::string::npos)
-                currentMaterialName = currentMaterialName.substr(startPos);
+            // 공백/따옴표 정리
+            size_t start = currentMaterialName.find_first_not_of(" \t\"");
+            if (start != std::string::npos)
+                currentMaterialName = currentMaterialName.substr(start);
 
-            // 뒤쪽 공백 + 따옴표 제거
-            size_t endPos = currentMaterialName.find_last_not_of(" \t\"");
-            if (endPos != std::string::npos)
-                currentMaterialName = currentMaterialName.substr(0, endPos + 1);
+            size_t end = currentMaterialName.find_last_not_of(" \t\"");
+            if (end != std::string::npos)
+                currentMaterialName = currentMaterialName.substr(0, end + 1);
 
-            firstSubmeshCreated = false;
+            hasActiveSubmesh = false;   // 다음 face에서 새 SubMesh 생성
             continue;
         }
 
-        // v, vn, vt
+        // === v / vn / vt ===
         if (line[0] == 'v')
         {
             if (line[1] == ' ')
@@ -198,30 +186,33 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
             continue;
         }
 
-        // f (face)
+        // === f (face) ===
         if (line[0] == 'f')
         {
-            if (!firstSubmeshCreated)
+            if (!hasActiveSubmesh)
             {
                 currentSubmeshIndex = createNewSubmesh();
-                firstSubmeshCreated = true;
+                hasActiveSubmesh = true;
             }
 
             SubMesh& current = outModel.submeshes[currentSubmeshIndex];
 
             std::istringstream iss(line);
             std::string token;
-            iss >> token;
+            iss >> token; // "f" 버리기
 
             std::vector<Vertex> faceVerts;
 
             while (iss >> token)
             {
                 int v = 0, vt = 0, vn = 0;
+
+                // v/vt/vn 또는 v//vn 또는 v/vt 형식 파싱
                 size_t p1 = token.find('/');
                 if (p1 != std::string::npos)
                 {
                     v = std::atoi(token.substr(0, p1).c_str());
+
                     size_t p2 = token.find('/', p1 + 1);
                     if (p2 != std::string::npos)
                     {
@@ -241,38 +232,37 @@ bool MeshLoad(const std::wstring& filepath, Model& outModel)
                     v = std::atoi(token.c_str());
                 }
 
-                if (v > 0) v--;
+                // OBJ 인덱스는 1-based, 음수도 가능하지만 일단 양수만 처리
+                if (v > 0)  v--;
                 if (vt > 0) vt--;
                 if (vn > 0) vn--;
 
                 Vertex vert{};
                 if (v >= 0 && v < (int)temp_positions.size())
                     vert.position = temp_positions[v];
-
                 if (vn >= 0 && vn < (int)temp_normals.size())
                     vert.normal = temp_normals[vn];
-
-                // texcoord 안전하게 처리 + UV 뒤집기
-                if (vt > 0 && vt < (int)temp_texcoords.size())
+                if (vt >= 0 && vt < (int)temp_texcoords.size())
                 {
                     vert.texcoord = temp_texcoords[vt];
-                    vert.texcoord.y = 1.0f - vert.texcoord.y;   // ← UV Flip
+                    vert.texcoord.y = 1.0f - vert.texcoord.y; // DirectX UV Flip
                 }
 
                 faceVerts.push_back(vert);
             }
 
+            // Triangle Fan 방식으로 인덱스 생성
             if (faceVerts.size() >= 3)
             {
                 size_t base = current.vertices.size();
-                for (auto& v : faceVerts)
-                    current.vertices.push_back(v);
+                for (auto& vert : faceVerts)
+                    current.vertices.push_back(vert);
 
                 for (size_t i = 1; i + 1 < faceVerts.size(); ++i)
                 {
-                    current.indices.push_back(static_cast<unsigned int>(base + 0));
-                    current.indices.push_back(static_cast<unsigned int>(base + i));
-                    current.indices.push_back(static_cast<unsigned int>(base + i + 1));
+                    current.indices.push_back(static_cast<uint32_t>(base + 0));
+                    current.indices.push_back(static_cast<uint32_t>(base + i));
+                    current.indices.push_back(static_cast<uint32_t>(base + i + 1));
                 }
             }
         }

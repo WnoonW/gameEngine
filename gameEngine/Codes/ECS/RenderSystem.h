@@ -6,8 +6,8 @@
 
 #include "Registry.h"
 #include "ComponentStruct.h"
-#include "../V1_/V4/DescriptorAllocator.h"
-#include "../Structs/AppStruct.h"
+#include "DescriptorAllocator.h"
+#include "AppStruct.h"
 
 class RenderSystem {
 public:
