@@ -102,6 +102,7 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
+      <AdditionalIncludeDirectories>D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -136,6 +137,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
+      <AdditionalIncludeDirectories>D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -145,27 +147,72 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Common\d3dApp.cpp" />
-    <ClCompile Include="Common\d3dUtil.cpp" />
-    <ClCompile Include="Common\GameTimer.cpp" />
-    <ClCompile Include="InitDirect3DApp.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Common\d3dApp.h" />
-    <ClInclude Include="Common\d3dUtil.h" />
-    <ClInclude Include="Common\GameTimer.h" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\PixelShader.hlsl">
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp" />
+    <ClCompile Include="Codes\Common\Camera.cpp" />
+    <ClCompile Include="Codes\Common\d3dApp.cpp" />
+    <ClCompile Include="Codes\Common\d3dUtil.cpp" />
+    <ClCompile Include="Codes\Common\DDSTextureLoader.cpp" />
+    <ClCompile Include="Codes\Common\GameTimer.cpp" />
+    <ClCompile Include="Codes\Common\GeometryGenerator.cpp" />
+    <ClCompile Include="Codes\Common\MathHelper.cpp" />
+    <ClCompile Include="Codes\ECS\RenderSystem.cpp" />
+    <ClCompile Include="Codes\IMGUI\ImGuiManager.cpp" />
+    <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp" />
+    <ClCompile Include="Codes\V1_\V3\MeshManager.cpp" />
+    <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp" />
+    <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp" />
+    <ClCompile Include="InitDirect3DApp.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h" />
+    <ClInclude Include="Codes\Common\Camera.h" />
+    <ClInclude Include="Codes\Common\d3dApp.h" />
+    <ClInclude Include="Codes\Common\d3dUtil.h" />
+    <ClInclude Include="Codes\Common\d3dx12.h" />
+    <ClInclude Include="Codes\Common\DDSTextureLoader.h" />
+    <ClInclude Include="Codes\Common\GameTimer.h" />
+    <ClInclude Include="Codes\Common\GeometryGenerator.h" />
+    <ClInclude Include="Codes\Common\MathHelper.h" />
+    <ClInclude Include="Codes\Common\UploadBuffer.h" />
+    <ClInclude Include="Codes\ECS\ComponentStruct.h" />
+    <ClInclude Include="Codes\ECS\Entity.h" />
+    <ClInclude Include="Codes\ECS\Registry.h" />
+    <ClInclude Include="Codes\ECS\RenderSystem.h" />
+    <ClInclude Include="Codes\IMGUI\ImGuiManager.h" />
+    <ClInclude Include="Codes\Structs\AppStruct.h" />
+    <ClInclude Include="Codes\Structs\constantStruct.h" />
+    <ClInclude Include="Codes\Structs\modelStruct.h" />
+    <ClInclude Include="Codes\V1_\V2\ResourceLoader.h" />
+    <ClInclude Include="Codes\V1_\V3\MeshManager.h" />
+    <ClInclude Include="Codes\V1_\V4\DescriptorAllocator.h" />
+    <ClInclude Include="Codes\V1_\V4\MatarialManager.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Resources\Shaders\color.hlsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
     </FxCompile>
-    <FxCompile Include="Shaders\VertexShader.hlsl">
+    <FxCompile Include="Resources\Shaders\object.hlsl">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="Resources\Shaders\texture.hlsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>

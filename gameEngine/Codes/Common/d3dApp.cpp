@@ -4,7 +4,10 @@
 
 #include <WindowsX.h>
 #include "d3dApp.h"
-
+#include <dxgidebug.h>
+#include <imgui.h>
+#include <backends/imgui_impl_win32.h>
+#include <backends/imgui_impl_dx12.h>
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
@@ -33,8 +36,6 @@ D3DApp::D3DApp(HINSTANCE hInstance)
 
 D3DApp::~D3DApp()
 {
-	if(md3dDevice != nullptr)
-		FlushCommandQueue();
 }
 
 //GetAndSet=============================================================================================================================================
@@ -117,8 +118,10 @@ int D3DApp::Run()
 			if( !mAppPaused )
 			{
 				CalculateFrameStats();
+				BeginFrame();
 				Update(mTimer);	
                 Draw(mTimer);
+				EndFrame();
 			}
 			else
 			{
@@ -127,6 +130,7 @@ int D3DApp::Run()
         }
     }
 
+	OnDestroy();
 	return (int)msg.wParam;
 }
 
@@ -138,7 +142,6 @@ bool D3DApp::Initialize()
 	if(!InitDirect3D())
 		return false;
 
-    // Do the initial resize code.
     OnResize();
 
 	return true;
@@ -152,6 +155,10 @@ bool D3DApp::Initialize()
 
 LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+	extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+		return true;
+
 	switch( msg )
 	{
 	// WM_ACTIVATE is sent when the window is activated or deactivated.  
@@ -272,6 +279,12 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		return 0;
 	case WM_MOUSEMOVE:
 		OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		return 0;
+	case WM_KEYDOWN:
+		OnKeyDown(wParam);
+		return 0;
+	case WM_MOUSEWHEEL:
+		OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam), GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
     case WM_KEYUP:
         if(wParam == VK_ESCAPE)
@@ -407,12 +420,12 @@ void D3DApp::OnResize()
 {
 	assert(md3dDevice);
 	assert(mSwapChain);
-	assert(mDirectCmdListAlloc);
+	if (!mCurrFrameResource) return;
 
 	// Flush before changing any resources.
 	FlushCommandQueue();
 
-	ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+	ThrowIfFailed(mCommandList->Reset(mCurrFrameResource->CmdListAlloc.Get(), nullptr));
 
 	// Release the previous resources we will be recreating.
 	for (int i = 0; i < SwapChainBufferCount; ++i)
@@ -527,14 +540,19 @@ void D3DApp::CreateCommandObjects()
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	ThrowIfFailed(md3dDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&mCommandQueue)));
 
-	ThrowIfFailed(md3dDevice->CreateCommandAllocator(
-		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		IID_PPV_ARGS(mDirectCmdListAlloc.GetAddressOf())));
+	mFrameResources.resize(gNumFrameResources);
+	for (int i = 0; i < gNumFrameResources; ++i)
+	{
+		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), 1024);
+	}
+
+	mCurrFrameResourceIndex = 0;
+	mCurrFrameResource = mFrameResources[0].get();
 
 	ThrowIfFailed(md3dDevice->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		mDirectCmdListAlloc.Get(), // Associated command allocator
+		mFrameResources[0]->CmdListAlloc.Get(), // Associated command allocator
 		nullptr,                   // Initial PipelineStateObject
 		IID_PPV_ARGS(mCommandList.GetAddressOf())));
 
@@ -590,10 +608,12 @@ void D3DApp::FlushCommandQueue()
 
         // Fire event when GPU hits current fence.  
         ThrowIfFailed(mFence->SetEventOnCompletion(mCurrentFence, eventHandle));
-
-        // Wait until the GPU hits current fence event is fired.
-		WaitForSingleObject(eventHandle, INFINITE);
-        CloseHandle(eventHandle);
+		if (eventHandle != nullptr)
+		{
+			// 핸들이 안전할 때만 호출
+			WaitForSingleObject(eventHandle, INFINITE);
+			CloseHandle(eventHandle);
+		}
 	}
 }
 
@@ -671,7 +691,7 @@ void D3DApp::LogAdapterOutputs(IDXGIAdapter* adapter)
         text += L"\n";
         OutputDebugString(text.c_str());
 
-        LogOutputDisplayModes(output, mBackBufferFormat);
+        //LogOutputDisplayModes(output, mBackBufferFormat);
 
         ReleaseCom(output);
 
@@ -705,3 +725,60 @@ void D3DApp::LogOutputDisplayModes(IDXGIOutput* output, DXGI_FORMAT format)
 }
 #pragma endregion
 //===============================================================================================================================================Helpers
+
+
+void D3DApp::OnDestroy()
+{
+	FlushCommandQueue();
+
+	// 1. FrameResource 먼저 정리
+	mFrameResources.clear();
+
+	// 2. CommandList 정리
+	if (mCommandList)
+		mCommandList.Reset();
+
+	// 3. DepthStencilBuffer + SwapChain BackBuffer 정리
+	mDepthStencilBuffer.Reset();
+	for (int i = 0; i < SwapChainBufferCount; ++i)
+		mSwapChainBuffer[i].Reset();
+
+	// 4. Descriptor Heap 정리
+	if (mRtvHeap)
+		mRtvHeap.Reset();
+	if (mDsvHeap)
+		mDsvHeap.Reset();
+
+	// 5. SwapChain 정리 (FullScreen 상태 해제 후)
+	if (mSwapChain)
+	{
+		mSwapChain->SetFullscreenState(false, nullptr);
+		mSwapChain.Reset();
+	}
+
+	// 6. CommandQueue 정리
+	if (mCommandQueue)
+		mCommandQueue.Reset();
+
+	// 7. Fence
+	if (mFence)
+		mFence.Reset();
+
+	// 8. 마지막에 Device
+	if (md3dDevice)
+		md3dDevice.Reset();
+
+#if defined(_DEBUG)
+	{
+		ComPtr<IDXGIDebug1> dxgiDebug;
+		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+		{
+			OutputDebugStringA("\n========== D3DApp::OnDestroy() final Report ==========\n");
+			dxgiDebug->ReportLiveObjects(
+				DXGI_DEBUG_ALL,
+				DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL)
+			);
+		}
+	}
+#endif
+}

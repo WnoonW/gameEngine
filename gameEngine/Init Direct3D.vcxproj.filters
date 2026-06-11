@@ -16,40 +16,187 @@
     <Filter Include="Shaders">
       <UniqueIdentifier>{5064f50b-4999-44af-bf58-1f151088d2e8}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="InitDirect3DApp.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Common\GameTimer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Common\d3dApp.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Common\d3dUtil.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Common\d3dApp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Common\d3dUtil.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Common\GameTimer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <Filter Include="Common">
+      <UniqueIdentifier>{fca99640-0bd6-452e-a953-ca07361fbb3a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_">
+      <UniqueIdentifier>{a9bdc5cd-baa7-4367-9e4e-54df60bf9329}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_\V2">
+      <UniqueIdentifier>{c1760f81-1a0b-4a0b-97d2-57010e72cf6a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_\V3">
+      <UniqueIdentifier>{5c7158cc-1834-4565-a1f6-b802002afe55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="V1_\V4">
+      <UniqueIdentifier>{54cbb866-b670-441d-a8b1-3e37b40ed261}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ECS">
+      <UniqueIdentifier>{1b04ff59-0acb-416e-b5b2-e0150610010e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IMGUI">
+      <UniqueIdentifier>{72a4a3b7-340c-4be4-84ad-6581fed1f0ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IMGUI\Custom">
+      <UniqueIdentifier>{d2ef96c3-d5d3-44ff-9d9f-50dba216d937}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IMGUI\ect">
+      <UniqueIdentifier>{a346a4b9-15b3-4efe-b269-252250d0ebf1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\PixelShader.hlsl">
+    <ClCompile Include="InitDirect3DApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\Camera.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\d3dApp.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\d3dUtil.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\DDSTextureLoader.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\GameTimer.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\GeometryGenerator.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Common\MathHelper.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp">
+      <Filter>V1_\V2</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V3\MeshManager.cpp">
+      <Filter>V1_\V3</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp">
+      <Filter>V1_\V4</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp">
+      <Filter>V1_\V4</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\ECS\RenderSystem.cpp">
+      <Filter>ECS</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\IMGUI\ImGuiManager.cpp">
+      <Filter>IMGUI\Custom</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Codes\Common\Camera.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\d3dApp.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\d3dUtil.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\d3dx12.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\DDSTextureLoader.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\GameTimer.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\GeometryGenerator.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\MathHelper.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Common\UploadBuffer.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Structs\constantStruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Structs\modelStruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V2\ResourceLoader.h">
+      <Filter>V1_\V2</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V3\MeshManager.h">
+      <Filter>V1_\V3</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Structs\AppStruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V4\MatarialManager.h">
+      <Filter>V1_\V4</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\V1_\V4\DescriptorAllocator.h">
+      <Filter>V1_\V4</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\ComponentStruct.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Entity.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Registry.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\RenderSystem.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\IMGUI\ImGuiManager.h">
+      <Filter>IMGUI\Custom</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Resources\Shaders\color.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="Shaders\VertexShader.hlsl">
+    <FxCompile Include="Resources\Shaders\texture.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Resources\Shaders\object.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

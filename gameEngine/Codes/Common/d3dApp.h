@@ -11,6 +11,7 @@
 
 #include "d3dUtil.h"
 #include "GameTimer.h"
+#include "../Structs/AppStruct.h"
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
@@ -47,14 +48,19 @@ protected:
 	virtual void OnResize(); 
 	virtual void Update(const GameTimer& gt)=0;
     virtual void Draw(const GameTimer& gt)=0;
+	virtual void BeginFrame() = 0;
+	virtual void EndFrame() = 0;
+	virtual void OnDestroy();
 
 	// Convenience overrides for handling mouse input.
 	virtual void OnMouseDown(WPARAM btnState, int x, int y){ }
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)  { }
 	virtual void OnMouseMove(WPARAM btnState, int x, int y){ }
+	virtual void OnMouseWheel(short wheelDelta, int x, int y) {}
+
+	virtual void OnKeyDown(WPARAM key) {}
 
 protected:
-
 	bool InitMainWindow();
 	bool InitDirect3D();
 	void CreateCommandObjects();
@@ -97,9 +103,13 @@ protected:
 
     Microsoft::WRL::ComPtr<ID3D12Fence> mFence;
     UINT64 mCurrentFence = 0;
-	
+
+	static const int gNumFrameResources = 3;           // 2 또는 3 추천
+	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
+	int mCurrFrameResourceIndex = 0;
+	FrameResource* mCurrFrameResource = nullptr;
+
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> mDirectCmdListAlloc;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;
 
 	static const int SwapChainBufferCount = 2;
@@ -110,8 +120,8 @@ protected:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mRtvHeap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mDsvHeap;
 
-    D3D12_VIEWPORT mScreenViewport; 
-    D3D12_RECT mScissorRect;
+	D3D12_VIEWPORT mScreenViewport{};
+	D3D12_RECT mScissorRect{};
 
 	UINT mRtvDescriptorSize = 0;
 	UINT mDsvDescriptorSize = 0;
@@ -124,5 +134,7 @@ protected:
     DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	int mClientWidth = 800;
 	int mClientHeight = 600;
+
+
 };
 

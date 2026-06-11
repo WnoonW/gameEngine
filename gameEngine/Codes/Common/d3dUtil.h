@@ -28,6 +28,7 @@
 #include "d3dx12.h"
 #include "DDSTextureLoader.h"
 #include "MathHelper.h"
+#include "../V1_/V4/MatarialManager.h"
 
 extern const int gNumFrameResources;
 
@@ -146,14 +147,15 @@ public:
 // geometries are stored in one vertex and index buffer.  It provides the offsets
 // and data needed to draw a subset of geometry stores in the vertex and index 
 // buffers so that we can implement the technique described by Figure 6.3.
+struct Matarial;
 struct SubmeshGeometry
 {
 	UINT IndexCount = 0;
 	UINT StartIndexLocation = 0;
 	INT BaseVertexLocation = 0;
 
-    // Bounding box of the geometry defined by this submesh. 
-    // This is used in later chapters of the book.
+    std::string materialName;
+    Matarial* material = nullptr;
 	DirectX::BoundingBox Bounds;
 };
 
@@ -176,7 +178,7 @@ struct MeshGeometry
     // Data about the buffers.
 	UINT VertexByteStride = 0;
 	UINT VertexBufferByteSize = 0;
-	DXGI_FORMAT IndexFormat = DXGI_FORMAT_R16_UINT;
+	DXGI_FORMAT IndexFormat = DXGI_FORMAT_R32_UINT;
 	UINT IndexBufferByteSize = 0;
 
 	// A MeshGeometry may store multiple geometries in one vertex/index buffer.
@@ -236,7 +238,7 @@ struct MaterialConstants
 
 // Simple struct to represent a material for our demos.  A production 3D engine
 // would likely create a class hierarchy of Materials.
-struct Material
+struct Material2
 {
 	// Unique material name for lookup.
 	std::string Name;
