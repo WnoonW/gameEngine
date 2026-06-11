@@ -1,21 +1,17 @@
-﻿//***************************************************************************************
-// Init Direct3D.cpp by Frank Luna (C) 2015 All Rights Reserved.
-//
-// Demonstrates the sample framework by initializing Direct3D, clearing 
-// the screen, and displaying frame stats.
-//
-//***************************************************************************************
-
+﻿#pragma warning(disable: 4005)
+#pragma warning(disable: 28251)
+#pragma warning(disable: 6387)
 #include <DirectXColors.h>
-#include "Codes/Common/d3dApp.h"
-#include "Codes/V1_/V3/MeshManager.h"
-#include "Codes/V1_/V4/MatarialManager.h"
-#include "Codes/V1_/V4/DescriptorAllocator.h"
-#include "Codes/ECS/Registry.h"
-#include "Codes/ECS/ComponentStruct.h"
-#include "Codes/ECS/RenderSystem.h"
-#include "Codes/Structs/AppStruct.h"
-#include "Codes/IMGUI/ImGuiManager.h"
+#include "d3dApp.h"
+#include "MeshManager.h"
+#include "MaterialManager.h"
+#include "DescriptorAllocator.h"
+#include "Registry.h"
+#include "ComponentStruct.h"
+#include "RenderSystem.h"
+#include "AppStruct.h"
+#include "ImGuiManager.h"
+
 
 using namespace DirectX;
 
@@ -112,32 +108,32 @@ bool InitDirect3DApp::Initialize()
 	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator);
 
 	//머티리얼
-	MatarialManager::Get().CreateMatarial("Default", L"Resources/Textures/bricks.dds", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("Default", L"Resources/Textures/bricks.dds", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
-	MatarialManager::Get().CreateMatarial("颜", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("颜2", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("眉睫", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("目光", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("白目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("口线", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("口舌", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("齿", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("目影", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("颜", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("颜2", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("眉睫", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("目光", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("白目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("口线", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("口舌", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("齿", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("目影", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
-	MatarialManager::Get().CreateMatarial("体", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("肌", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("体", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("肌", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
-	MatarialManager::Get().CreateMatarial("体2", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("足", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MatarialManager::Get().CreateMatarial("髮", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("体2", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("足", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("髮", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
-	MatarialManager::Get().CreateMatarial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
-	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/结晶.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/武器金属.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	//MatarialManager::Get().CreateMatarial("Test", L"Resources/Textures/武器.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	//MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/结晶.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	//MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/武器金属.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	//MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/武器.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
 
 	//메시
@@ -369,7 +365,7 @@ void InitDirect3DApp::OnDestroy()
 	ImGui::DestroyContext();
 
 	MeshManager::Get().Shutdown();
-	MatarialManager::Get().Shutdown();
+	MaterialManager::Get().Shutdown();
 	mGlobalDescriptorAllocator.Shutdown();
 
 	D3DApp::OnDestroy();

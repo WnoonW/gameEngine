@@ -1,5 +1,5 @@
 #include "DescriptorAllocator.h"
-#include "../../Common/d3dUtil.h"
+#include "d3dUtil.h"
 #include <stdexcept>
 
 void DescriptorAllocator::Initialize(ID3D12Device* device, UINT numDescriptors)

@@ -102,7 +102,7 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\ECS;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Managers;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Common;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\File_IO;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Memory;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Structs;D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -137,7 +137,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\ECS;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Managers;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Common;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\File_IO;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Memory;D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes\Structs;D:\Study\API\imgui-master\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -165,11 +165,13 @@
     <ClCompile Include="Codes\Common\GeometryGenerator.cpp" />
     <ClCompile Include="Codes\Common\MathHelper.cpp" />
     <ClCompile Include="Codes\ECS\RenderSystem.cpp" />
-    <ClCompile Include="Codes\IMGUI\ImGuiManager.cpp" />
-    <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp" />
-    <ClCompile Include="Codes\V1_\V3\MeshManager.cpp" />
-    <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp" />
-    <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp" />
+    <ClCompile Include="Codes\File_IO\ResourceLoader.cpp" />
+    <ClCompile Include="Codes\Managers\ImGuiManager.cpp" />
+    <ClCompile Include="Codes\Managers\MaterialManager.cpp" />
+    <ClCompile Include="Codes\Managers\MeshManager.cpp" />
+    <ClCompile Include="Codes\Managers\PipelineStateManager.cpp" />
+    <ClCompile Include="Codes\Managers\RootSignatureManager.cpp" />
+    <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -190,14 +192,16 @@
     <ClInclude Include="Codes\ECS\Entity.h" />
     <ClInclude Include="Codes\ECS\Registry.h" />
     <ClInclude Include="Codes\ECS\RenderSystem.h" />
-    <ClInclude Include="Codes\IMGUI\ImGuiManager.h" />
+    <ClInclude Include="Codes\File_IO\ResourceLoader.h" />
+    <ClInclude Include="Codes\Managers\ImGuiManager.h" />
+    <ClInclude Include="Codes\Managers\MaterialManager.h" />
+    <ClInclude Include="Codes\Managers\MeshManager.h" />
+    <ClInclude Include="Codes\Managers\PipelineStateManager.h" />
+    <ClInclude Include="Codes\Managers\RootSignatureManager.h" />
+    <ClInclude Include="Codes\Memory\DescriptorAllocator.h" />
     <ClInclude Include="Codes\Structs\AppStruct.h" />
     <ClInclude Include="Codes\Structs\constantStruct.h" />
     <ClInclude Include="Codes\Structs\modelStruct.h" />
-    <ClInclude Include="Codes\V1_\V2\ResourceLoader.h" />
-    <ClInclude Include="Codes\V1_\V3\MeshManager.h" />
-    <ClInclude Include="Codes\V1_\V4\DescriptorAllocator.h" />
-    <ClInclude Include="Codes\V1_\V4\MatarialManager.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">

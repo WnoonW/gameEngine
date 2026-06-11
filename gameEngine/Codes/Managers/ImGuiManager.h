@@ -8,7 +8,7 @@
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_dx12.h>
 
-#include "../V1_/V4/DescriptorAllocator.h"
+#include "DescriptorAllocator.h"
 
 class ImGuiManager
 {

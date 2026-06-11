@@ -5,10 +5,6 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
-    <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
-    </Filter>
     <Filter Include="Resource Files">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
@@ -18,18 +14,6 @@
     </Filter>
     <Filter Include="Common">
       <UniqueIdentifier>{fca99640-0bd6-452e-a953-ca07361fbb3a}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="V1_">
-      <UniqueIdentifier>{a9bdc5cd-baa7-4367-9e4e-54df60bf9329}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="V1_\V2">
-      <UniqueIdentifier>{c1760f81-1a0b-4a0b-97d2-57010e72cf6a}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="V1_\V3">
-      <UniqueIdentifier>{5c7158cc-1834-4565-a1f6-b802002afe55}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="V1_\V4">
-      <UniqueIdentifier>{54cbb866-b670-441d-a8b1-3e37b40ed261}</UniqueIdentifier>
     </Filter>
     <Filter Include="ECS">
       <UniqueIdentifier>{1b04ff59-0acb-416e-b5b2-e0150610010e}</UniqueIdentifier>
@@ -42,6 +26,19 @@
     </Filter>
     <Filter Include="IMGUI\ect">
       <UniqueIdentifier>{a346a4b9-15b3-4efe-b269-252250d0ebf1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Manager">
+      <UniqueIdentifier>{ddf3748e-4d44-4cdb-bf4c-2e0e15dcd440}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Struct">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Memory">
+      <UniqueIdentifier>{4f2ddb51-04d9-44dd-917f-41636356b474}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FileIO">
+      <UniqueIdentifier>{3ef5034e-d8c0-452c-a601-19b3b4633737}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -72,23 +69,8 @@
     <ClCompile Include="Codes\Common\MathHelper.cpp">
       <Filter>Common</Filter>
     </ClCompile>
-    <ClCompile Include="Codes\V1_\V2\ResourceLoader.cpp">
-      <Filter>V1_\V2</Filter>
-    </ClCompile>
-    <ClCompile Include="Codes\V1_\V3\MeshManager.cpp">
-      <Filter>V1_\V3</Filter>
-    </ClCompile>
-    <ClCompile Include="Codes\V1_\V4\MatarialManager.cpp">
-      <Filter>V1_\V4</Filter>
-    </ClCompile>
-    <ClCompile Include="Codes\V1_\V4\DescriptorAllocator.cpp">
-      <Filter>V1_\V4</Filter>
-    </ClCompile>
     <ClCompile Include="Codes\ECS\RenderSystem.cpp">
       <Filter>ECS</Filter>
-    </ClCompile>
-    <ClCompile Include="Codes\IMGUI\ImGuiManager.cpp">
-      <Filter>IMGUI\Custom</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp">
       <Filter>IMGUI\ect</Filter>
@@ -110,6 +92,27 @@
     </ClCompile>
     <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp">
       <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\ImGuiManager.cpp">
+      <Filter>Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\MeshManager.cpp">
+      <Filter>Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\PipelineStateManager.cpp">
+      <Filter>Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\RootSignatureManager.cpp">
+      <Filter>Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\MaterialManager.cpp">
+      <Filter>Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp">
+      <Filter>Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\File_IO\ResourceLoader.cpp">
+      <Filter>FileIO</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -141,25 +144,13 @@
       <Filter>Common</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Structs\constantStruct.h">
-      <Filter>Header Files</Filter>
+      <Filter>Struct</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Structs\modelStruct.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Codes\V1_\V2\ResourceLoader.h">
-      <Filter>V1_\V2</Filter>
-    </ClInclude>
-    <ClInclude Include="Codes\V1_\V3\MeshManager.h">
-      <Filter>V1_\V3</Filter>
+      <Filter>Struct</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Structs\AppStruct.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Codes\V1_\V4\MatarialManager.h">
-      <Filter>V1_\V4</Filter>
-    </ClInclude>
-    <ClInclude Include="Codes\V1_\V4\DescriptorAllocator.h">
-      <Filter>V1_\V4</Filter>
+      <Filter>Struct</Filter>
     </ClInclude>
     <ClInclude Include="Codes\ECS\ComponentStruct.h">
       <Filter>ECS</Filter>
@@ -173,9 +164,6 @@
     <ClInclude Include="Codes\ECS\RenderSystem.h">
       <Filter>ECS</Filter>
     </ClInclude>
-    <ClInclude Include="Codes\IMGUI\ImGuiManager.h">
-      <Filter>IMGUI\Custom</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h">
       <Filter>IMGUI\ect</Filter>
     </ClInclude>
@@ -187,6 +175,27 @@
     </ClInclude>
     <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h">
       <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\ImGuiManager.h">
+      <Filter>Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\MeshManager.h">
+      <Filter>Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\PipelineStateManager.h">
+      <Filter>Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\RootSignatureManager.h">
+      <Filter>Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\MaterialManager.h">
+      <Filter>Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Memory\DescriptorAllocator.h">
+      <Filter>Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\File_IO\ResourceLoader.h">
+      <Filter>FileIO</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
