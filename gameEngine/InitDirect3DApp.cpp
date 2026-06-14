@@ -35,8 +35,8 @@ private:
 	uint32_t mNextObjectCBIndex = 0;
 
 	Entity CreateRenderableEntity(
-		const std::string& meshName,
-		const std::string& materialName,
+		Mesh* mesh,
+		std::shared_ptr<Material> material,
 		XMFLOAT3 position = { 0, 0, 0 });
 
     virtual void OnResize()override;
@@ -155,16 +155,23 @@ bool InitDirect3DApp::Initialize()
 		return false;
 	}
 
-	Entity entity = mRegistry.createEntity();
+	Mesh* bibianMesh = MeshManager::Get().GetMesh("bibian");
+	auto testMat = MaterialManager::Get().GetMaterial("Test");
 
-	mRegistry.addComponent(entity, TransformComponent{ .position = {0, 0, 0} });
-	mRegistry.addComponent(entity, RenderableComponent{
-		.meshName = "bibian",
-		.materialName = "Test",
-		.objectCBIndex = mNextObjectCBIndex++
-		});
-	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, entity, mRegistry);
+	if (bibianMesh && testMat)
+	{
+		Entity entity = mRegistry.createEntity();
+		mRegistry.addComponent(entity, TransformComponent{ .position = {0, 0, 0} });
+		mRegistry.addComponent(entity, RenderableComponent{
+			.mesh = bibianMesh,
+			.material = testMat,
+			.objectCBIndex = mNextObjectCBIndex++
+			});
 
+		mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
+			mGlobalDescriptorAllocator, entity, mRegistry);
+	}
+	
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
@@ -173,26 +180,31 @@ bool InitDirect3DApp::Initialize()
 }
 
 Entity InitDirect3DApp::CreateRenderableEntity(
-	const std::string& meshName,
-	const std::string& materialName,
+	Mesh* mesh,
+	std::shared_ptr<Material> material,
 	XMFLOAT3 position)
 {
+	if (!mesh || !material)
+	{
+		OutputDebugStringA("CreateRenderableEntity failed: mesh or material is null\n");
+		return INVALID_ENTITY;
+	}
+
 	Entity entity = mRegistry.createEntity();
 
 	mRegistry.addComponent(entity, TransformComponent{ .position = position });
 	mRegistry.addComponent(entity, RenderableComponent{
-		.meshName = meshName,
-		.materialName = materialName,
+		.mesh = mesh,           // ← 변경
+		.material = material,   // ← 변경
 		.objectCBIndex = mNextObjectCBIndex++
 		});
 
-	// CBV 생성
 	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
 		mGlobalDescriptorAllocator, entity, mRegistry);
 
-	mEntities.push_back(entity);   // 관리 목록에 추가
+	mEntities.push_back(entity);
 
-	OutputDebugStringA(("Created Entity " + std::to_string(entity) + " with Mesh: " + meshName + ", Material: " + materialName + "\n").c_str());
+	OutputDebugStringA(("Created Entity " + std::to_string(entity) + "\n").c_str());
 	return entity;
 }
 
@@ -347,8 +359,14 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 {
 	switch (wParam)
 	{
-	case VK_UP:          // ↑ 키
-		CreateRenderableEntity("bibian","Test", {(float)mNextObjectCBIndex,0,0});
+	case VK_UP:
+	{
+		Mesh* mesh = MeshManager::Get().GetMesh("bibian");
+		auto mat = MaterialManager::Get().GetMaterial("Test");
+		if (mesh && mat)
+			CreateRenderableEntity(mesh, mat, { (float)mNextObjectCBIndex, 0, 0 });
+		break;
+	}
 		break;
 	case VK_ADD:         // + 키 (숫자패드)
 	case VK_OEM_PLUS:    // + 키
@@ -368,7 +386,13 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 {
 	if (action == ButtonAction::SpawnTestObject)
 	{
-		CreateRenderableEntity("bibian", "Test", { (float)mNextObjectCBIndex,0,0 });
+		if (action == ButtonAction::SpawnTestObject)
+		{
+			Mesh* mesh = MeshManager::Get().GetMesh("bibian");
+			auto mat = MaterialManager::Get().GetMaterial("Test");
+			if (mesh && mat)
+				CreateRenderableEntity(mesh, mat, { (float)mNextObjectCBIndex, 0, 0 });
+		}
 	}
 }
 

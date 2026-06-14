@@ -256,11 +256,9 @@ void RenderSystem::render(Registry& registry,
 {
     auto entities = registry.view<TransformComponent, RenderableComponent>();
 
-    // Descriptor Heap 설정 (한 번만)
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-    // ==================== Last State 캐싱 ====================
     ID3D12RootSignature* lastRS = nullptr;
     ID3D12PipelineState* lastPSO = nullptr;
 
@@ -269,9 +267,9 @@ void RenderSystem::render(Registry& registry,
         auto& tf = registry.getComponent<TransformComponent>(e);
         auto& rend = registry.getComponent<RenderableComponent>(e);
 
-        if (!rend.visible) continue;
+        if (!rend.visible || !rend.mesh) continue;   // mesh가 null이면 스킵
 
-        // 1. 행렬 계산 및 CB 데이터 업데이트
+        // 1. Transform → CB 업데이트
         XMMATRIX world = tf.GetWorldMatrix();
         XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
         XMMATRIX wvp = XMMatrixMultiply(world, viewProj);
@@ -280,21 +278,18 @@ void RenderSystem::render(Registry& registry,
         XMStoreFloat4x4(&objConst.WorldViewProj, XMMatrixTranspose(wvp));
         currentFrameResource->ObjectCB->CopyData(rend.objectCBIndex, objConst);
 
-        // 2. Mesh
-        Mesh* mesh = MeshManager::Get().GetMesh(rend.meshName);
-        if (!mesh || mesh->DrawArgs.empty()) continue;
-
-        auto vbv = mesh->VertexBufferView();
-        auto ibv = mesh->IndexBufferView();
+        // 2. Mesh (string lookup 제거!)
+        auto vbv = rend.mesh->VertexBufferView();
+        auto ibv = rend.mesh->IndexBufferView();
 
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        // ==================== Root Signature & PSO (Last State 캐싱) ====================
+        // RootSignature + PSO (Last State 캐싱)
         ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
 
-        PSOKey key;
+        PSOKey key{};
         key.shaderName = "object";
         key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -302,29 +297,28 @@ void RenderSystem::render(Registry& registry,
 
         ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(key, sceneRS);
 
-        // Root Signature 변경 최소화
         if (sceneRS != lastRS)
         {
             cmdList->SetGraphicsRootSignature(sceneRS);
             lastRS = sceneRS;
         }
-
-        // PSO 변경 최소화
         if (pso != lastPSO)
         {
             cmdList->SetPipelineState(pso);
             lastPSO = pso;
         }
 
-        // =====================================================
-        // 서브메시별 Material 바인딩 + 그리기
-        // =====================================================
-        for (auto& pair : mesh->DrawArgs)
+        // 서브메시 그리기
+        for (auto& pair : rend.mesh->DrawArgs)
         {
             const auto& sub = pair.second;
-            Material* material = sub.material;
 
-            // CBV 바인딩 (Root Parameter 0)
+            // sub.material (raw) 우선, 없으면 rend.material 사용
+            Material* material = sub.material ? sub.material : rend.material.get();
+
+            if (!material) continue;
+
+            // CBV 바인딩
             if (!mEntityCBVHandles.empty() &&
                 e < mEntityCBVHandles.size() &&
                 currentFrameIndex < mEntityCBVHandles[e].size())
@@ -332,10 +326,10 @@ void RenderSystem::render(Registry& registry,
                 cmdList->SetGraphicsRootDescriptorTable(0, mEntityCBVHandles[e][currentFrameIndex].GPU);
             }
 
-            // Texture 바인딩 (Root Parameter 1)
+            // Texture 바인딩
             cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
 
-            // 서브메시 그리기
+            // Draw
             cmdList->DrawIndexedInstanced(
                 sub.IndexCount,
                 1,

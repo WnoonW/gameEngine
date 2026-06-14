@@ -1,6 +1,11 @@
 #pragma once
 #include <DirectXMath.h>
 #include <string>
+#include <memory>
+
+struct Mesh;
+struct Material;
+
 using namespace DirectX;
 
 
@@ -19,9 +24,9 @@ struct TransformComponent {
 
 
 struct RenderableComponent {
-    std::string meshName;   // MeshManager::Get().GetMesh()
-    std::string materialName;     // MatarialManager::Get().GetMatarial()
-    uint32_t    objectCBIndex = 0;         // FrameResource ObjectCB 인덱스
+    Mesh* mesh = nullptr;            // MeshManager에서 받은 포인터
+    std::shared_ptr<Material> material = nullptr;    // MaterialManager에서 받은 포인터
+    uint32_t    objectCBIndex = 0;          // FrameResource ObjectCB 인덱스
     bool        visible = true;
 };
 

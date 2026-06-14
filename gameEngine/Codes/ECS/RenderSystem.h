@@ -23,9 +23,6 @@ struct DrawCall
     // 정렬용 키
     ID3D12RootSignature* rootSignature;
     ID3D12PipelineState* pso;
-
-    // 필요시 추가
-    // UINT materialID;
 };
 
 class RenderSystem {
