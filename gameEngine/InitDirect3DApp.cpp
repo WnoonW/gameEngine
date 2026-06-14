@@ -18,7 +18,7 @@
 
 using namespace DirectX;
 
-class InitDirect3DApp : public D3DApp
+class InitDirect3DApp : public D3DApp, public IFunctionCallback
 {
 public:
 	InitDirect3DApp(HINSTANCE hInstance);
@@ -54,6 +54,7 @@ private:
 
 	virtual void OnKeyDown(WPARAM key)override;
 
+	virtual void buttonClicked(ButtonAction action) override;
 private:
 	float mTheta = 1.5f * XM_PI;
 	float mPhi = XM_PIDIV4;
@@ -106,9 +107,9 @@ bool InitDirect3DApp::Initialize()
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
 	//디스크립터
-	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
+	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192); 
 
-	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator);
+	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
 	ShaderManager::Get().Initialize();
 	RootSignatureManager::Get().Initialize(md3dDevice.Get());
 	PipelineStateManager::Get().Initialize(md3dDevice.Get());
@@ -360,6 +361,14 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 
 	case 'R': 
 		break;
+	}
+}
+
+void InitDirect3DApp::buttonClicked(ButtonAction action)
+{
+	if (action == ButtonAction::SpawnTestObject)
+	{
+		CreateRenderableEntity("bibian", "Test", { (float)mNextObjectCBIndex,0,0 });
 	}
 }
 
