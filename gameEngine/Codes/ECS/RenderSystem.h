@@ -4,10 +4,12 @@
 #include <vector>
 #include <memory>
 
-#include "Registry.h"
+#include "World.h"
 #include "ComponentStruct.h"
 #include "DescriptorAllocator.h"
 #include "AppStruct.h"
+
+using namespace ECS;
 
 struct Mesh;
 struct SubmeshGeometry;
@@ -27,9 +29,14 @@ struct DrawCall
 
 class RenderSystem {
 public:
-    void createCBV(ID3D12Device* device, std::vector<std::unique_ptr<FrameResource>>& frameResources, 
-                                    int gNumFrameResources, DescriptorAllocator& descriptorAllocator, Entity entity, Registry& registry);
-    void render(Registry& registry,
+    void createCBV(ID3D12Device* device,
+        std::vector<std::unique_ptr<FrameResource>>& frameResources,
+        int gNumFrameResources,
+        DescriptorAllocator& descriptorAllocator,
+        Entity entity,
+        ECS::World& world);
+
+    void render(ECS::World& world,
         ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
         DescriptorAllocator* descriptorAllocator,

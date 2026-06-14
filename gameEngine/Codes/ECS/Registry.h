@@ -5,7 +5,7 @@
 #include <typeindex>
 #include <any>
 #include <optional>
-
+using namespace ECS;
 class Registry {
 public:
     Entity createEntity() {

@@ -189,10 +189,14 @@
     <ClInclude Include="Codes\Common\GeometryGenerator.h" />
     <ClInclude Include="Codes\Common\MathHelper.h" />
     <ClInclude Include="Codes\Common\UploadBuffer.h" />
+    <ClInclude Include="Codes\ECS\Archetype.h" />
+    <ClInclude Include="Codes\ECS\ArchetypeManager.h" />
+    <ClInclude Include="Codes\ECS\Component.h" />
     <ClInclude Include="Codes\ECS\ComponentStruct.h" />
     <ClInclude Include="Codes\ECS\Entity.h" />
     <ClInclude Include="Codes\ECS\Registry.h" />
     <ClInclude Include="Codes\ECS\RenderSystem.h" />
+    <ClInclude Include="Codes\ECS\World.h" />
     <ClInclude Include="Codes\File_IO\ResourceLoader.h" />
     <ClInclude Include="Codes\Managers\ImGuiManager.h" />
     <ClInclude Include="Codes\Managers\MaterialManager.h" />

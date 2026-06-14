@@ -7,7 +7,6 @@
 #include "MaterialManager.h"
 #include "RootsignatureManager.h"
 #include "DescriptorAllocator.h"
-#include "Registry.h"
 #include "ComponentStruct.h"
 #include "RenderSystem.h"
 #include "AppStruct.h"
@@ -28,11 +27,11 @@ public:
 private:
 	static DescriptorAllocator mGlobalDescriptorAllocator;
 	ImGuiManager mImGuiManager;
-	Registry mRegistry = {};
 	RenderSystem mRenderSystem = {};
-	Entity mEntity = {};
+	ECS::World mWorld;
 	std::vector<Entity> mEntities;
 	uint32_t mNextObjectCBIndex = 0;
+	int mSpiralIndex = 0;
 
 	Entity CreateRenderableEntity(
 		Mesh* mesh,
@@ -108,8 +107,8 @@ bool InitDirect3DApp::Initialize()
 
 	//디스크립터
 	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192); 
-
 	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
+	
 	ShaderManager::Get().Initialize();
 	RootSignatureManager::Get().Initialize(md3dDevice.Get());
 	PipelineStateManager::Get().Initialize(md3dDevice.Get());
@@ -160,16 +159,16 @@ bool InitDirect3DApp::Initialize()
 
 	if (bibianMesh && testMat)
 	{
-		Entity entity = mRegistry.createEntity();
-		mRegistry.addComponent(entity, TransformComponent{ .position = {0, 0, 0} });
-		mRegistry.addComponent(entity, RenderableComponent{
-			.mesh = bibianMesh,
-			.material = testMat,
+		Entity e = mWorld.CreateEntity();
+		mWorld.AddComponent(e, TransformComponent{ .position = {0,0,0} });
+		mWorld.AddComponent(e, RenderableComponent{
+			.mesh = MeshManager::Get().GetMesh("bibian"),
+			.material = MaterialManager::Get().GetMaterial("Test"),
 			.objectCBIndex = mNextObjectCBIndex++
 			});
 
 		mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
-			mGlobalDescriptorAllocator, entity, mRegistry);
+			mGlobalDescriptorAllocator, e, mWorld);
 	}
 	
 	ThrowIfFailed(mCommandList->Close());
@@ -190,17 +189,17 @@ Entity InitDirect3DApp::CreateRenderableEntity(
 		return INVALID_ENTITY;
 	}
 
-	Entity entity = mRegistry.createEntity();
+	Entity entity = mWorld.CreateEntity();
 
-	mRegistry.addComponent(entity, TransformComponent{ .position = position });
-	mRegistry.addComponent(entity, RenderableComponent{
-		.mesh = mesh,           // ← 변경
-		.material = material,   // ← 변경
+	mWorld.AddComponent(entity, TransformComponent{ .position = position });
+	mWorld.AddComponent(entity, RenderableComponent{
+		.mesh = mesh,           
+		.material = material,   
 		.objectCBIndex = mNextObjectCBIndex++
 		});
 
 	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
-		mGlobalDescriptorAllocator, entity, mRegistry);
+		mGlobalDescriptorAllocator, entity, mWorld);
 
 	mEntities.push_back(entity);
 
@@ -285,7 +284,8 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	// ==========================================
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
-	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
+	mRenderSystem.render(mWorld, mCommandList.Get(), mCurrFrameResource, 
+		&mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
 
 	mImGuiManager.Render(mCommandList.Get());
 }
@@ -351,7 +351,7 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
 {
-	mRadius -= wheelDelta * 0.001f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
+	mRadius -= wheelDelta * 0.005f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
 	mRadius = MathHelper::Clamp(mRadius, 0.1f, 150.0f);
 }
 
@@ -364,7 +364,25 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 		Mesh* mesh = MeshManager::Get().GetMesh("bibian");
 		auto mat = MaterialManager::Get().GetMaterial("Test");
 		if (mesh && mat)
-			CreateRenderableEntity(mesh, mat, { (float)mNextObjectCBIndex, 0, 0 });
+		{
+			float idx = static_cast<float>(mSpiralIndex);
+
+			// === 회오리 파라미터 (여기서 조절하세요) ===
+			float angleStep = 0.1f;     // 라디안 (작을수록 빽빽한 회오리)
+			float radiusStep = 0.1f;     // 클수록 빨리 퍼짐
+
+			float angle = idx * angleStep;
+			float radius = idx * radiusStep;
+
+			XMFLOAT3 pos = {
+				radius * std::cos(angle),
+				0.0f,
+				radius * std::sin(angle)
+			};
+
+			CreateRenderableEntity(mesh, mat, pos);
+			mSpiralIndex++;
+		}
 		break;
 	}
 		break;

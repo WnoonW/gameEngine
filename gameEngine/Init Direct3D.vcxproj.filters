@@ -203,6 +203,18 @@
     <ClInclude Include="Codes\Managers\ShaderManager.h">
       <Filter>Manager</Filter>
     </ClInclude>
+    <ClInclude Include="Codes\ECS\Component.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Archetype.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\ArchetypeManager.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\World.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
