@@ -171,6 +171,7 @@
     <ClCompile Include="Codes\Managers\MeshManager.cpp" />
     <ClCompile Include="Codes\Managers\PipelineStateManager.cpp" />
     <ClCompile Include="Codes\Managers\RootSignatureManager.cpp" />
+    <ClCompile Include="Codes\Managers\ShaderManager.cpp" />
     <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
@@ -188,16 +189,21 @@
     <ClInclude Include="Codes\Common\GeometryGenerator.h" />
     <ClInclude Include="Codes\Common\MathHelper.h" />
     <ClInclude Include="Codes\Common\UploadBuffer.h" />
+    <ClInclude Include="Codes\ECS\Archetype.h" />
+    <ClInclude Include="Codes\ECS\ArchetypeManager.h" />
+    <ClInclude Include="Codes\ECS\Component.h" />
     <ClInclude Include="Codes\ECS\ComponentStruct.h" />
     <ClInclude Include="Codes\ECS\Entity.h" />
     <ClInclude Include="Codes\ECS\Registry.h" />
     <ClInclude Include="Codes\ECS\RenderSystem.h" />
+    <ClInclude Include="Codes\ECS\World.h" />
     <ClInclude Include="Codes\File_IO\ResourceLoader.h" />
     <ClInclude Include="Codes\Managers\ImGuiManager.h" />
     <ClInclude Include="Codes\Managers\MaterialManager.h" />
     <ClInclude Include="Codes\Managers\MeshManager.h" />
     <ClInclude Include="Codes\Managers\PipelineStateManager.h" />
     <ClInclude Include="Codes\Managers\RootSignatureManager.h" />
+    <ClInclude Include="Codes\Managers\ShaderManager.h" />
     <ClInclude Include="Codes\Memory\DescriptorAllocator.h" />
     <ClInclude Include="Codes\Structs\AppStruct.h" />
     <ClInclude Include="Codes\Structs\constantStruct.h" />
@@ -205,6 +211,12 @@
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="Resources\Shaders\instancing.hlsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>

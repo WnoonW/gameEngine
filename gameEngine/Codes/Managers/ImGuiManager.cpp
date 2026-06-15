@@ -6,7 +6,8 @@ bool ImGuiManager::Initialize(
     ID3D12CommandQueue* commandQueue,
     UINT numFramesInFlight,
     DXGI_FORMAT rtvFormat,
-    DescriptorAllocator& globalDescriptorAllocator)
+    DescriptorAllocator& globalDescriptorAllocator,
+    IFunctionCallback* callback)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -14,9 +15,10 @@ bool ImGuiManager::Initialize(
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
-    // === Static 포인터로 allocator 연결 ===
     static DescriptorAllocator* s_DescriptorAllocator = nullptr;
     s_DescriptorAllocator = &globalDescriptorAllocator;
+
+    m_Callback = callback;
 
     ImGui_ImplDX12_InitInfo init_info = {};
     init_info.Device = device;
@@ -53,11 +55,17 @@ bool ImGuiManager::Initialize(
 void ImGuiManager::CustomUI()
 {
     ImGui::Begin("V3.0-UI Debug Window");
-    ImGui::Text("Hello from ImGuiManager!");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
-    if (ImGui::Button("Reset Something")) {
-    }
+    if (ImGui::Button("Reset Scene"))
+        if (m_Callback) m_Callback->buttonClicked(ButtonAction::ResetScene);
+
+    if (ImGui::Button("Spawn Test Object"))
+        if (m_Callback) m_Callback->buttonClicked(ButtonAction::SpawnTestObject);
+
+    if (ImGui::Button("Toggle Wireframe"))
+        if (m_Callback) m_Callback->buttonClicked(ButtonAction::ToggleWireframe);
+
     ImGui::End();
 }
 

@@ -114,6 +114,9 @@
     <ClCompile Include="Codes\File_IO\ResourceLoader.cpp">
       <Filter>FileIO</Filter>
     </ClCompile>
+    <ClCompile Include="Codes\Managers\ShaderManager.cpp">
+      <Filter>Manager</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Codes\Common\Camera.h">
@@ -197,6 +200,21 @@
     <ClInclude Include="Codes\File_IO\ResourceLoader.h">
       <Filter>FileIO</Filter>
     </ClInclude>
+    <ClInclude Include="Codes\Managers\ShaderManager.h">
+      <Filter>Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Component.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\Archetype.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\ArchetypeManager.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\ECS\World.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
@@ -206,6 +224,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Resources\Shaders\object.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Resources\Shaders\instancing.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

@@ -10,6 +10,24 @@
 
 #include "DescriptorAllocator.h"
 
+enum class ButtonAction
+{
+    None,
+    ResetScene,
+    SpawnTestObject,
+    ToggleWireframe,
+    ReloadShaders,
+    PrintECSStats,
+    // ... 필요할 때마다 추가
+};
+
+class IFunctionCallback
+{
+public:
+	virtual void buttonClicked(ButtonAction action) = 0;
+};
+
+
 class ImGuiManager
 {
 public:
@@ -18,7 +36,8 @@ public:
         ID3D12CommandQueue* commandQueue,
         UINT numFramesInFlight,
         DXGI_FORMAT rtvFormat,
-        DescriptorAllocator& globalDescriptorAllocator);
+        DescriptorAllocator& globalDescriptorAllocator,
+        IFunctionCallback* callback = nullptr);
 
     void CustomUI();
 
@@ -33,4 +52,5 @@ public:
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
     ID3D12Device* m_Device = nullptr;
+    IFunctionCallback* m_Callback = nullptr;
 };

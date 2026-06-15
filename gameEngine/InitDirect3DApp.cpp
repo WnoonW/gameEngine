@@ -5,17 +5,19 @@
 #include "d3dApp.h"
 #include "MeshManager.h"
 #include "MaterialManager.h"
+#include "RootsignatureManager.h"
 #include "DescriptorAllocator.h"
-#include "Registry.h"
 #include "ComponentStruct.h"
 #include "RenderSystem.h"
 #include "AppStruct.h"
 #include "ImGuiManager.h"
+#include "PipelineStateManager.h"
+#include "ShaderManager.h"
 
 
 using namespace DirectX;
 
-class InitDirect3DApp : public D3DApp
+class InitDirect3DApp : public D3DApp, public IFunctionCallback
 {
 public:
 	InitDirect3DApp(HINSTANCE hInstance);
@@ -25,15 +27,15 @@ public:
 private:
 	static DescriptorAllocator mGlobalDescriptorAllocator;
 	ImGuiManager mImGuiManager;
-	Registry mRegistry = {};
 	RenderSystem mRenderSystem = {};
-	Entity mEntity = {};
+	ECS::World mWorld;
 	std::vector<Entity> mEntities;
 	uint32_t mNextObjectCBIndex = 0;
+	int mSpiralIndex = 0;
 
 	Entity CreateRenderableEntity(
-		const std::string& meshName,
-		const std::string& materialName,
+		Mesh* mesh,
+		std::shared_ptr<Material> material,
 		XMFLOAT3 position = { 0, 0, 0 });
 
     virtual void OnResize()override;
@@ -51,6 +53,7 @@ private:
 
 	virtual void OnKeyDown(WPARAM key)override;
 
+	virtual void buttonClicked(ButtonAction action) override;
 private:
 	float mTheta = 1.5f * XM_PI;
 	float mPhi = XM_PIDIV4;
@@ -103,9 +106,12 @@ bool InitDirect3DApp::Initialize()
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
 	//디스크립터
-	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
-
-	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator);
+	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192); 
+	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
+	
+	ShaderManager::Get().Initialize();
+	RootSignatureManager::Get().Initialize(md3dDevice.Get());
+	PipelineStateManager::Get().Initialize(md3dDevice.Get());
 
 	//머티리얼
 	MaterialManager::Get().CreateMaterial("Default", L"Resources/Textures/bricks.dds", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
@@ -148,16 +154,23 @@ bool InitDirect3DApp::Initialize()
 		return false;
 	}
 
-	Entity entity = mRegistry.createEntity();
+	Mesh* bibianMesh = MeshManager::Get().GetMesh("bibian");
+	auto testMat = MaterialManager::Get().GetMaterial("Test");
 
-	mRegistry.addComponent(entity, TransformComponent{ .position = {0, 0, 0} });
-	mRegistry.addComponent(entity, RenderableComponent{
-		.meshName = "bibian",
-		.materialName = "Test",
-		.objectCBIndex = mNextObjectCBIndex++
-		});
-	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator, entity, mRegistry);
+	if (bibianMesh && testMat)
+	{
+		Entity e = mWorld.CreateEntity();
+		mWorld.AddComponent(e, TransformComponent{ .position = {0,0,0} });
+		mWorld.AddComponent(e, RenderableComponent{
+			.mesh = MeshManager::Get().GetMesh("bibian"),
+			.material = MaterialManager::Get().GetMaterial("Test"),
+			.objectCBIndex = mNextObjectCBIndex++
+			});
 
+		mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
+			mGlobalDescriptorAllocator, e, mWorld);
+	}
+	
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
@@ -166,26 +179,31 @@ bool InitDirect3DApp::Initialize()
 }
 
 Entity InitDirect3DApp::CreateRenderableEntity(
-	const std::string& meshName,
-	const std::string& materialName,
+	Mesh* mesh,
+	std::shared_ptr<Material> material,
 	XMFLOAT3 position)
 {
-	Entity entity = mRegistry.createEntity();
+	if (!mesh || !material)
+	{
+		OutputDebugStringA("CreateRenderableEntity failed: mesh or material is null\n");
+		return INVALID_ENTITY;
+	}
 
-	mRegistry.addComponent(entity, TransformComponent{ .position = position });
-	mRegistry.addComponent(entity, RenderableComponent{
-		.meshName = meshName,
-		.materialName = materialName,
+	Entity entity = mWorld.CreateEntity();
+
+	mWorld.AddComponent(entity, TransformComponent{ .position = position });
+	mWorld.AddComponent(entity, RenderableComponent{
+		.mesh = mesh,           
+		.material = material,   
 		.objectCBIndex = mNextObjectCBIndex++
 		});
 
-	// CBV 생성
 	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
-		mGlobalDescriptorAllocator, entity, mRegistry);
+		mGlobalDescriptorAllocator, entity, mWorld);
 
-	mEntities.push_back(entity);   // 관리 목록에 추가
+	mEntities.push_back(entity);
 
-	OutputDebugStringA(("Created Entity " + std::to_string(entity) + " with Mesh: " + meshName + ", Material: " + materialName + "\n").c_str());
+	OutputDebugStringA(("Created Entity " + std::to_string(entity) + "\n").c_str());
 	return entity;
 }
 
@@ -266,7 +284,8 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	// ==========================================
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
-	mRenderSystem.render(mRegistry, mCommandList.Get(), mCurrFrameResource, &mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
+	mRenderSystem.render(mWorld, mCommandList.Get(), mCurrFrameResource, 
+		&mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
 
 	mImGuiManager.Render(mCommandList.Get());
 }
@@ -332,7 +351,7 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
 {
-	mRadius -= wheelDelta * 0.001f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
+	mRadius -= wheelDelta * 0.005f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
 	mRadius = MathHelper::Clamp(mRadius, 0.1f, 150.0f);
 }
 
@@ -340,8 +359,32 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 {
 	switch (wParam)
 	{
-	case VK_UP:          // ↑ 키
-		CreateRenderableEntity("bibian","Test", {(float)mNextObjectCBIndex,0,0});
+	case VK_UP:
+	{
+		Mesh* mesh = MeshManager::Get().GetMesh("bibian");
+		auto mat = MaterialManager::Get().GetMaterial("Test");
+		if (mesh && mat)
+		{
+			float idx = static_cast<float>(mSpiralIndex);
+
+			// === 회오리 파라미터 (여기서 조절하세요) ===
+			float angleStep = 0.1f;     // 라디안 (작을수록 빽빽한 회오리)
+			float radiusStep = 0.1f;     // 클수록 빨리 퍼짐
+
+			float angle = idx * angleStep;
+			float radius = idx * radiusStep;
+
+			XMFLOAT3 pos = {
+				radius * std::cos(angle),
+				0.0f,
+				radius * std::sin(angle)
+			};
+
+			CreateRenderableEntity(mesh, mat, pos);
+			mSpiralIndex++;
+		}
+		break;
+	}
 		break;
 	case VK_ADD:         // + 키 (숫자패드)
 	case VK_OEM_PLUS:    // + 키
@@ -354,6 +397,20 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 
 	case 'R': 
 		break;
+	}
+}
+
+void InitDirect3DApp::buttonClicked(ButtonAction action)
+{
+	if (action == ButtonAction::SpawnTestObject)
+	{
+		if (action == ButtonAction::SpawnTestObject)
+		{
+			Mesh* mesh = MeshManager::Get().GetMesh("bibian");
+			auto mat = MaterialManager::Get().GetMaterial("Test");
+			if (mesh && mat)
+				CreateRenderableEntity(mesh, mat, { (float)mNextObjectCBIndex, 0, 0 });
+		}
 	}
 }
 

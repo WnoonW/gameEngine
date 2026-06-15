@@ -25,105 +25,7 @@ bool MaterialManager::CreateMaterial(
     srvDesc.Texture2D.MipLevels = mMaterial.mTexture->GetDesc().MipLevels;
     device->CreateShaderResourceView(mMaterial.mTexture.Get(), &srvDesc, mMaterial.mTextureHandle.CPU);
 
-    // 3. Shader 컴파일
-    mMaterial.mvsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\object.hlsl", nullptr, "VS", "vs_5_0");
-    mMaterial.mpsByteCode = d3dUtil::CompileShader(L"Resources\\Shaders\\object.hlsl", nullptr, "PS", "ps_5_0");
-
-    // 4. Input Layout
-    mMaterial.mInputLayout = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-    };
-
-    // =====================================================
-    // 5. Root Signature 생성 (ObjectCB + Texture SRV)
-    // =====================================================
-
-    // ==================== Root Signature 파라미터 설정 ====================
-
-    D3D12_ROOT_PARAMETER slotRootParameter[2] = {};
-
-    // b0 : Constant Buffer (CBV)
-    D3D12_DESCRIPTOR_RANGE cbvRange = {};
-    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.NumDescriptors = 1;
-    cbvRange.BaseShaderRegister = 0;
-    cbvRange.RegisterSpace = 0;
-    cbvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-    slotRootParameter[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    slotRootParameter[0].DescriptorTable.NumDescriptorRanges = 1;
-    slotRootParameter[0].DescriptorTable.pDescriptorRanges = &cbvRange;
-    slotRootParameter[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // t0 : Texture (SRV)
-    D3D12_DESCRIPTOR_RANGE srvRange = {};
-    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors = 1;
-    srvRange.BaseShaderRegister = 0;
-    srvRange.RegisterSpace = 0;
-    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-    slotRootParameter[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    slotRootParameter[1].DescriptorTable.NumDescriptorRanges = 1;
-    slotRootParameter[1].DescriptorTable.pDescriptorRanges = &srvRange;
-    slotRootParameter[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-
-    CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
-        0,                                      // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        2, slotRootParameter,
-        1, &samplerDesc,
-        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-    ComPtr<ID3DBlob> serializedRootSig = nullptr;
-    ComPtr<ID3DBlob> errorBlob = nullptr;
-
-    HRESULT hr = D3D12SerializeRootSignature(
-        &rootSigDesc,
-        D3D_ROOT_SIGNATURE_VERSION_1,
-        serializedRootSig.GetAddressOf(),
-        errorBlob.GetAddressOf());
-
-    if (errorBlob != nullptr)
-        OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-
-    ThrowIfFailed(hr);
-
-    ThrowIfFailed(device->CreateRootSignature(
-        0,
-        serializedRootSig->GetBufferPointer(),
-        serializedRootSig->GetBufferSize(),
-        IID_PPV_ARGS(&mMaterial.mRootSignature)));
-
-    // =====================================================
-    // 6. PSO 생성
-    // =====================================================
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { mMaterial.mInputLayout.data(), (UINT)mMaterial.mInputLayout.size() };
-    psoDesc.pRootSignature = mMaterial.mRootSignature.Get();
-    psoDesc.VS = { mMaterial.mvsByteCode->GetBufferPointer(), mMaterial.mvsByteCode->GetBufferSize() };
-    psoDesc.PS = { mMaterial.mpsByteCode->GetBufferPointer(), mMaterial.mpsByteCode->GetBufferSize() };
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-	psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;   // 네 스왑체인 포맷에 맞게 수정
-    psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    psoDesc.SampleDesc.Count = 1;
-
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&mMaterial.mPSO)));
-
-    // 7. 저장
+    // 3. 저장
     mMaterials.emplace(name, std::make_shared<Material>(std::move(mMaterial)));
     return true;
 }
@@ -154,11 +56,8 @@ void MaterialManager::Shutdown()
 			auto& mat = pair.second;
 
 			// ComPtr 명시적 해제 (순서 중요)
-			mat->mpsByteCode.Reset();
-			mat->mvsByteCode.Reset();
 			mat->mTextureUploadHeap.Reset();
 			mat->mTexture.Reset();
-			mat->mInputLayout.clear();
 		}
 	}
 

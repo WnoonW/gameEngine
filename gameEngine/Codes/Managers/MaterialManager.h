@@ -18,15 +18,6 @@ struct Material
     ComPtr<ID3D12Resource> mTexture = nullptr;
     ComPtr<ID3D12Resource> mTextureUploadHeap = nullptr;
     DescriptorAllocator::DescriptorHandle mTextureHandle;
-
-    // Shader
-    ComPtr<ID3DBlob> mvsByteCode = nullptr;
-    ComPtr<ID3DBlob> mpsByteCode = nullptr;
-    std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
-
-    //
-    ComPtr<ID3D12RootSignature> mRootSignature;
-    ComPtr<ID3D12PipelineState> mPSO;
 };
 
 class MaterialManager
@@ -38,7 +29,10 @@ class MaterialManager
 		return instance;
 	}
 
-	bool CreateMaterial(const std::string& name, const std::wstring& filePath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* commandQueue, DescriptorAllocator& descriptorAllocator);
+	bool CreateMaterial(const std::string& name, const std::wstring& filePath, 
+                        ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, 
+                        ID3D12CommandQueue* commandQueue, DescriptorAllocator& descriptorAllocator);
+
 	std::shared_ptr<Material> GetMaterial(const std::string& name);
     std::shared_ptr<Material> GetDefaultMaterial();
 	void Shutdown();
