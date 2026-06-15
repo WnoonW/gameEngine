@@ -3,17 +3,9 @@
 #pragma warning(disable: 6387)
 #include <DirectXColors.h>
 #include "d3dApp.h"
-#include "MeshManager.h"
-#include "MaterialManager.h"
-#include "RootsignatureManager.h"
 #include "DescriptorAllocator.h"
-#include "ComponentStruct.h"
-#include "RenderSystem.h"
-#include "AppStruct.h"
 #include "ImGuiManager.h"
-#include "PipelineStateManager.h"
-#include "ShaderManager.h"
-
+#include "Engine.h"
 
 using namespace DirectX;
 
@@ -27,16 +19,8 @@ public:
 private:
 	static DescriptorAllocator mGlobalDescriptorAllocator;
 	ImGuiManager mImGuiManager;
-	RenderSystem mRenderSystem = {};
-	ECS::World mWorld;
-	std::vector<Entity> mEntities;
-	uint32_t mNextObjectCBIndex = 0;
+	Engine mEngine;
 	int mSpiralIndex = 0;
-
-	Entity CreateRenderableEntity(
-		Mesh* mesh,
-		std::shared_ptr<Material> material,
-		XMFLOAT3 position = { 0, 0, 0 });
 
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
@@ -54,6 +38,12 @@ private:
 	virtual void OnKeyDown(WPARAM key)override;
 
 	virtual void buttonClicked(ButtonAction action) override;
+
+private:
+	void InitializeCoreSystems();
+	void LoadAssets();
+	void CreateInitialScene();
+
 private:
 	float mTheta = 1.5f * XM_PI;
 	float mPhi = XM_PIDIV4;
@@ -105,106 +95,16 @@ bool InitDirect3DApp::Initialize()
 
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
-	//디스크립터
-	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192); 
-	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(), gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
-	
-	ShaderManager::Get().Initialize();
-	RootSignatureManager::Get().Initialize(md3dDevice.Get());
-	PipelineStateManager::Get().Initialize(md3dDevice.Get());
+	InitializeCoreSystems();
+	LoadAssets();
+	CreateInitialScene();
 
-	//머티리얼
-	MaterialManager::Get().CreateMaterial("Default", L"Resources/Textures/bricks.dds", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/e.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-
-	MaterialManager::Get().CreateMaterial("颜", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("颜2", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("眉睫", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("目光", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("白目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("口线", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("口舌", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("齿", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("目影", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-
-	MaterialManager::Get().CreateMaterial("体", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("肌", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-
-	MaterialManager::Get().CreateMaterial("体2", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("足", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	MaterialManager::Get().CreateMaterial("髮", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-
-	MaterialManager::Get().CreateMaterial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-
-	//MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/结晶.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	//MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/武器金属.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-	//MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/武器.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
-
-
-	//메시
-	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
-		md3dDevice.Get(), mCommandList.Get());
-	bool meshResult1 = MeshManager::Get().CreateMesh("box", L"Resources/Assets/square.obj",
-		md3dDevice.Get(), mCommandList.Get());
-
-	if (!meshResult || !meshResult1)
-	{
-		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
-		return false;
-	}
-
-	Mesh* bibianMesh = MeshManager::Get().GetMesh("bibian");
-	auto testMat = MaterialManager::Get().GetMaterial("Test");
-
-	if (bibianMesh && testMat)
-	{
-		Entity e = mWorld.CreateEntity();
-		mWorld.AddComponent(e, TransformComponent{ .position = {0,0,0} });
-		mWorld.AddComponent(e, RenderableComponent{
-			.mesh = MeshManager::Get().GetMesh("bibian"),
-			.material = MaterialManager::Get().GetMaterial("Test"),
-			.objectCBIndex = mNextObjectCBIndex++
-			});
-
-		mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
-			mGlobalDescriptorAllocator, e, mWorld);
-	}
-	
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
+
 	return true;
-}
-
-Entity InitDirect3DApp::CreateRenderableEntity(
-	Mesh* mesh,
-	std::shared_ptr<Material> material,
-	XMFLOAT3 position)
-{
-	if (!mesh || !material)
-	{
-		OutputDebugStringA("CreateRenderableEntity failed: mesh or material is null\n");
-		return INVALID_ENTITY;
-	}
-
-	Entity entity = mWorld.CreateEntity();
-
-	mWorld.AddComponent(entity, TransformComponent{ .position = position });
-	mWorld.AddComponent(entity, RenderableComponent{
-		.mesh = mesh,           
-		.material = material,   
-		.objectCBIndex = mNextObjectCBIndex++
-		});
-
-	mRenderSystem.createCBV(md3dDevice.Get(), mFrameResources, gNumFrameResources,
-		mGlobalDescriptorAllocator, entity, mWorld);
-
-	mEntities.push_back(entity);
-
-	OutputDebugStringA(("Created Entity " + std::to_string(entity) + "\n").c_str());
-	return entity;
 }
 
 void InitDirect3DApp::OnResize()
@@ -224,6 +124,8 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
 	mImGuiManager.CustomUI();
+
+	mEngine.Update();
 }
 
 void InitDirect3DApp::BeginFrame()
@@ -265,27 +167,20 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	// ==========================================
-	// 1. 구면 좌표로 View 행렬 계산
-	// ==========================================
+	// View 행렬 계산
 	float x = mRadius * sinf(mPhi) * cosf(mTheta);
 	float z = mRadius * sinf(mPhi) * sinf(mTheta);
-	float y = mRadius * cosf(mPhi) + mTargetY;   // ← 높이 보정
+	float y = mRadius * cosf(mPhi) + mTargetY;
 
 	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR target = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);   // 타겟도 같이 이동
+	XMVECTOR target = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);
 	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
 	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
-	XMStoreFloat4x4(&mView, view);
-
-	// ==========================================
-	// 2. Projection
-	// ==========================================
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
-	mRenderSystem.render(mWorld, mCommandList.Get(), mCurrFrameResource, 
-		&mGlobalDescriptorAllocator, mCurrFrameResourceIndex, view, proj);
+	// === Engine을 통해 렌더링 ===
+	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
 
 	mImGuiManager.Render(mCommandList.Get());
 }
@@ -311,6 +206,75 @@ void InitDirect3DApp::EndFrame()
 	ThrowIfFailed(mCommandQueue->Signal(mFence.Get(), mCurrFrameResource->FenceValue));
 }
 
+// =====================================================
+// 핵심 시스템 초기화
+// =====================================================
+void InitDirect3DApp::InitializeCoreSystems()
+{
+	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
+
+	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(),
+		gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
+
+	// === Engine 초기화 ===
+	mEngine.Initialize(md3dDevice.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator);
+}
+
+// =====================================================
+// 에셋 로딩 (Material + Mesh)
+// =====================================================
+void InitDirect3DApp::LoadAssets()
+{
+	// Material 로딩
+	MaterialManager::Get().CreateMaterial("Default", L"Resources/Textures/bricks.dds",
+		md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("Test", L"Resources/Textures/e.png",
+		md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+	// 추가 Material들 (필요한 것만 남기거나 정리 가능)
+	MaterialManager::Get().CreateMaterial("颜", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("颜2", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("眉睫", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("目光", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("白目", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("口线", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("口舌", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("齿", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("目影", L"Resources/Textures/颜.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+	MaterialManager::Get().CreateMaterial("体", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("肌", L"Resources/Textures/体.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+	MaterialManager::Get().CreateMaterial("体2", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("足", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+	MaterialManager::Get().CreateMaterial("髮", L"Resources/Textures/髮.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+	MaterialManager::Get().CreateMaterial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
+
+
+	// Mesh 로딩
+	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
+		md3dDevice.Get(), mCommandList.Get());
+	bool meshResult1 = MeshManager::Get().CreateMesh("box", L"Resources/Assets/square.obj",
+		md3dDevice.Get(), mCommandList.Get());
+
+	if (!meshResult || !meshResult1)
+	{
+		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
+	}
+}
+
+// =====================================================
+// 초기 씬 구성 (엔티티 생성)
+// =====================================================
+void InitDirect3DApp::CreateInitialScene()
+{
+	mEngine.CreateRenderableEntity("bibian", "Test", { 0.0f, 0.0f, 0.0f });
+}
+
+#pragma region Input Handling
+//입력처리
 void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
 	mLastMousePos.x = x;
@@ -361,31 +325,23 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 	{
 	case VK_UP:
 	{
-		Mesh* mesh = MeshManager::Get().GetMesh("bibian");
-		auto mat = MaterialManager::Get().GetMaterial("Test");
-		if (mesh && mat)
-		{
-			float idx = static_cast<float>(mSpiralIndex);
+		float idx = static_cast<float>(mSpiralIndex);
+		float angleStep = 0.1f;
+		float radiusStep = 0.1f;
 
-			// === 회오리 파라미터 (여기서 조절하세요) ===
-			float angleStep = 0.1f;     // 라디안 (작을수록 빽빽한 회오리)
-			float radiusStep = 0.1f;     // 클수록 빨리 퍼짐
+		float angle = idx * angleStep;
+		float radius = idx * radiusStep;
 
-			float angle = idx * angleStep;
-			float radius = idx * radiusStep;
+		XMFLOAT3 pos = {
+			radius * std::cos(angle),
+			0.0f,
+			radius * std::sin(angle)
+		};
 
-			XMFLOAT3 pos = {
-				radius * std::cos(angle),
-				0.0f,
-				radius * std::sin(angle)
-			};
-
-			CreateRenderableEntity(mesh, mat, pos);
-			mSpiralIndex++;
-		}
+		mEngine.CreateRenderableEntity("bibian", "Test", pos);
+		mSpiralIndex++;
 		break;
 	}
-		break;
 	case VK_ADD:         // + 키 (숫자패드)
 	case VK_OEM_PLUS:    // + 키
 		break;
@@ -404,19 +360,15 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 {
 	if (action == ButtonAction::SpawnTestObject)
 	{
-		if (action == ButtonAction::SpawnTestObject)
-		{
-			Mesh* mesh = MeshManager::Get().GetMesh("bibian");
-			auto mat = MaterialManager::Get().GetMaterial("Test");
-			if (mesh && mat)
-				CreateRenderableEntity(mesh, mat, { (float)mNextObjectCBIndex, 0, 0 });
-		}
+		mEngine.CreateRenderableEntity("bibian", "Test", { 0, 1, 0 });
 	}
 }
+#pragma endregion
 
 void InitDirect3DApp::OnDestroy()
 {
-	// === ImGui 종료 (추가) ===
+	mEngine.Shutdown();
+
 	ImGui_ImplDX12_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
