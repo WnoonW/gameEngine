@@ -3,12 +3,14 @@
 #include <dxgi1_6.h>
 #include <wrl.h>
 #include <Windows.h>
+#include <functional>
 
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_dx12.h>
 
 #include "DescriptorAllocator.h"
+#include "Engine.h"
 
 enum class ButtonAction
 {
@@ -41,6 +43,8 @@ public:
 
     void CustomUI();
 
+    void SetDebugStatsProvider(std::function<EngineDebugStats()> provider);
+
     void Shutdown();
 
     // 매 프레임 호출 (Update 또는 Render 시작 부분에서)
@@ -53,4 +57,5 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
     ID3D12Device* m_Device = nullptr;
     IFunctionCallback* m_Callback = nullptr;
+    std::function<EngineDebugStats()> m_DebugStatsProvider;
 };

@@ -543,7 +543,7 @@ void D3DApp::CreateCommandObjects()
 	mFrameResources.resize(gNumFrameResources);
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
-		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), 1024);
+		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), kMaxRenderableInstances);
 	}
 
 	mCurrFrameResourceIndex = 0;

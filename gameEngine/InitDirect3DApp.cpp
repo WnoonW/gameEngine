@@ -218,6 +218,8 @@ void InitDirect3DApp::InitializeCoreSystems()
 
 	// === Engine 초기화 ===
 	mEngine.Initialize(md3dDevice.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator);
+
+	mImGuiManager.SetDebugStatsProvider([this]() { return mEngine.GetDebugStats(); });
 }
 
 // =====================================================
@@ -360,7 +362,7 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 {
 	if (action == ButtonAction::SpawnTestObject)
 	{
-		mEngine.CreateRenderableEntity("bibian", "Test", { 0, 1, 0 });
+		mEngine.CreateRenderableEntity("box", "Test", { 0, 1, 0 });
 	}
 }
 #pragma endregion

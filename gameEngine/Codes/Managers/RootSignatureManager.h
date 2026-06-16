@@ -8,6 +8,7 @@ using Microsoft::WRL::ComPtr;
 enum class RootSignatureType
 {
     Scene,          // 일반 오브젝트 렌더링
+    Instancing,     // Structured Buffer 인스턴싱
     ImGui,          // ImGui 전용
     Shadow,         // Shadow Map
     // Transparent, PostProcess 등 나중에 추가
@@ -28,6 +29,7 @@ private:
     ~RootSignatureManager() = default;
 
     void CreateSceneRootSignature();
+    void CreateInstancingRootSignature();
     // void CreateImGuiRootSignature();
     // void CreateShadowRootSignature();
 

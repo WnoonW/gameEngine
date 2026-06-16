@@ -13,8 +13,9 @@ struct FrameResource
 
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> CmdListAlloc;
 
-    //std::unique_ptr<UploadBuffer<PassConstants>>   PassCB = nullptr;
+    std::unique_ptr<UploadBuffer<PassConstants>>   PassCB = nullptr;
     std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
+    std::unique_ptr<UploadBuffer<InstanceData>>    InstanceDataBuffer = nullptr;
 
     UINT64 FenceValue = 0;
 };
@@ -26,16 +27,21 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount)
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         IID_PPV_ARGS(CmdListAlloc.GetAddressOf())));
 
-    // 필요에 따라 PassCB도 여기서 생성
-    // PassCB = std::make_unique<UploadBuffer<PassConstants>>(device, 1, true);
-
+    PassCB = std::make_unique<UploadBuffer<PassConstants>>(device, 1, true);
     ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, objectCount, true);
+    InstanceDataBuffer = std::make_unique<UploadBuffer<InstanceData>>(device, objectCount, false);
 }
 
 inline FrameResource::~FrameResource()
 {
     if (ObjectCB)
         ObjectCB.reset();
+
+    if (PassCB)
+        PassCB.reset();
+
+    if (InstanceDataBuffer)
+        InstanceDataBuffer.reset();
 
     if (CmdListAlloc)
         CmdListAlloc.Reset();

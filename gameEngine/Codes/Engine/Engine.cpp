@@ -4,6 +4,8 @@
 #include "RootSignatureManager.h"
 #include "PipelineStateManager.h"
 #include "ShaderManager.h"
+#include "ComponentStruct.h"
+#include <unordered_map>
 
 Engine::Engine()
 {}
@@ -27,6 +29,8 @@ bool Engine::Initialize(ID3D12Device* device,
     ShaderManager::Get().Initialize();
     RootSignatureManager::Get().Initialize(device);
     PipelineStateManager::Get().Initialize(device);
+
+    mRenderSystem.Initialize(device, frameResources, gNumFrameResources, descriptorAllocator);
 
     return true;
 }
@@ -64,12 +68,8 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
     mWorld.AddComponent(entity, TransformComponent{ .position = position });
     mWorld.AddComponent(entity, RenderableComponent{
         .mesh = mesh,
-        .material = material,
-        .objectCBIndex = mNextObjectCBIndex++
+        .material = material
         });
-
-    mRenderSystem.createCBV(mDevice, *mFrameResources, mGNumFrameResources,
-        *mDescriptorAllocator, entity, mWorld);
 
     return entity;
 }
@@ -78,4 +78,33 @@ void Engine::Shutdown()
 {
     mResourceManager->Shutdown();
     // 필요하면 mRenderSystem, mWorld 관련 정리도 여기에 추가
+}
+
+EngineDebugStats Engine::GetDebugStats()
+{
+    EngineDebugStats stats{};
+    stats.renderStats = mRenderSystem.GetLastRenderStats();
+
+    std::unordered_map<std::string, ObjectCountInfo> groupedCounts;
+
+    mWorld.ForEach<TransformComponent, RenderableComponent>(
+        [&](Entity /*entity*/, TransformComponent& /*tf*/, RenderableComponent& rend)
+        {
+            if (!rend.visible || !rend.mesh || !rend.material) return;
+
+            std::string key = rend.mesh->name + "|" + rend.material->name;
+            auto& info = groupedCounts[key];
+            if (info.count == 0)
+            {
+                info.meshName = rend.mesh->name;
+                info.materialName = rend.material->name;
+            }
+            ++info.count;
+        });
+
+    stats.objectCounts.reserve(groupedCounts.size());
+    for (auto& pair : groupedCounts)
+        stats.objectCounts.push_back(pair.second);
+
+    return stats;
 }

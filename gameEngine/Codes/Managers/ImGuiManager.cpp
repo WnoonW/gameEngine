@@ -52,10 +52,60 @@ bool ImGuiManager::Initialize(
     return true;
 }
 
+void ImGuiManager::SetDebugStatsProvider(std::function<EngineDebugStats()> provider)
+{
+    m_DebugStatsProvider = std::move(provider);
+}
+
 void ImGuiManager::CustomUI()
 {
     ImGui::Begin("V3.0-UI Debug Window");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
+    if (m_DebugStatsProvider)
+    {
+        EngineDebugStats stats = m_DebugStatsProvider();
+        const RenderStats& renderStats = stats.renderStats;
+
+        ImGui::Separator();
+        ImGui::Text("Renderable Entities: %d", renderStats.totalRenderableEntities);
+        ImGui::Text("Draw Batches: %d", renderStats.drawBatches);
+        ImGui::Text("Peak Instances / Batch: %d / %d",
+            renderStats.peakInstancesPerBatch,
+            renderStats.instanceBufferCapacity);
+
+        ImGui::Separator();
+        ImGui::Text("Object Counts");
+        if (stats.objectCounts.empty())
+        {
+            ImGui::TextUnformatted("(none)");
+        }
+        else
+        {
+            if (ImGui::BeginTable("ObjectCounts", 3,
+                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            {
+                ImGui::TableSetupColumn("Mesh");
+                ImGui::TableSetupColumn("Material");
+                ImGui::TableSetupColumn("Count", ImGuiTableColumnFlags_WidthFixed, 64.0f);
+                ImGui::TableHeadersRow();
+
+                for (const ObjectCountInfo& info : stats.objectCounts)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(info.meshName.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(info.materialName.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", info.count);
+                }
+
+                ImGui::EndTable();
+            }
+        }
+        ImGui::Separator();
+    }
 
     if (ImGui::Button("Reset Scene"))
         if (m_Callback) m_Callback->buttonClicked(ButtonAction::ResetScene);

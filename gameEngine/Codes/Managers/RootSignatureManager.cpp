@@ -16,6 +16,7 @@ void RootSignatureManager::Initialize(ID3D12Device* device)
     mDevice = device;
 
     CreateSceneRootSignature();
+    CreateInstancingRootSignature();
 }
 
 void RootSignatureManager::Shutdown()
@@ -103,4 +104,80 @@ void RootSignatureManager::CreateSceneRootSignature()
         IID_PPV_ARGS(&rootSig)));
 
     mRootSignatures[RootSignatureType::Scene] = rootSig;
+}
+
+void RootSignatureManager::CreateInstancingRootSignature()
+{
+    D3D12_ROOT_PARAMETER slotRootParameter[3] = {};
+
+    D3D12_DESCRIPTOR_RANGE passCbvRange = {};
+    passCbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    passCbvRange.NumDescriptors = 1;
+    passCbvRange.BaseShaderRegister = 0;
+    passCbvRange.RegisterSpace = 0;
+    passCbvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    slotRootParameter[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    slotRootParameter[0].DescriptorTable.NumDescriptorRanges = 1;
+    slotRootParameter[0].DescriptorTable.pDescriptorRanges = &passCbvRange;
+    slotRootParameter[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
+    D3D12_DESCRIPTOR_RANGE textureSrvRange = {};
+    textureSrvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureSrvRange.NumDescriptors = 1;
+    textureSrvRange.BaseShaderRegister = 0;
+    textureSrvRange.RegisterSpace = 0;
+    textureSrvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    slotRootParameter[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    slotRootParameter[1].DescriptorTable.NumDescriptorRanges = 1;
+    slotRootParameter[1].DescriptorTable.pDescriptorRanges = &textureSrvRange;
+    slotRootParameter[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_DESCRIPTOR_RANGE instanceSrvRange = {};
+    instanceSrvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    instanceSrvRange.NumDescriptors = 1;
+    instanceSrvRange.BaseShaderRegister = 1;
+    instanceSrvRange.RegisterSpace = 0;
+    instanceSrvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    slotRootParameter[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    slotRootParameter[2].DescriptorTable.NumDescriptorRanges = 1;
+    slotRootParameter[2].DescriptorTable.pDescriptorRanges = &instanceSrvRange;
+    slotRootParameter[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
+    CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
+        0,
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
+        3, slotRootParameter,
+        1, &samplerDesc,
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    ComPtr<ID3DBlob> serializedRootSig = nullptr;
+    ComPtr<ID3DBlob> errorBlob = nullptr;
+
+    HRESULT hr = D3D12SerializeRootSignature(
+        &rootSigDesc,
+        D3D_ROOT_SIGNATURE_VERSION_1,
+        serializedRootSig.GetAddressOf(),
+        errorBlob.GetAddressOf());
+
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+
+    ThrowIfFailed(hr);
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    ThrowIfFailed(mDevice->CreateRootSignature(
+        0,
+        serializedRootSig->GetBufferPointer(),
+        serializedRootSig->GetBufferSize(),
+        IID_PPV_ARGS(&rootSig)));
+
+    mRootSignatures[RootSignatureType::Instancing] = rootSig;
 }

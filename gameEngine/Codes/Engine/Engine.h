@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 #include <DirectXMath.h>
 
 #include "World.h"
@@ -9,6 +10,19 @@
 #include "ResourceManager.h"
 
 using namespace DirectX;
+
+struct ObjectCountInfo
+{
+    std::string meshName;
+    std::string materialName;
+    int count = 0;
+};
+
+struct EngineDebugStats
+{
+    std::vector<ObjectCountInfo> objectCounts;
+    RenderStats renderStats{};
+};
 
 class Engine
 {
@@ -38,6 +52,9 @@ public:
         XMFLOAT3 position = { 0.0f, 0.0f, 0.0f });
 
     void Shutdown();
+
+    EngineDebugStats GetDebugStats();
+
 private:
     ECS::World mWorld;
     RenderSystem mRenderSystem;
@@ -47,6 +64,4 @@ private:
     std::vector<std::unique_ptr<FrameResource>>* mFrameResources = nullptr;
     int mGNumFrameResources = 0;
     DescriptorAllocator* mDescriptorAllocator = nullptr;
-
-    uint32_t mNextObjectCBIndex = 0;
 };
