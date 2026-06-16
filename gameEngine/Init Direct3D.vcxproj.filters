@@ -27,9 +27,6 @@
     <Filter Include="IMGUI\ect">
       <UniqueIdentifier>{a346a4b9-15b3-4efe-b269-252250d0ebf1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Manager">
-      <UniqueIdentifier>{ddf3748e-4d44-4cdb-bf4c-2e0e15dcd440}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Struct">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
@@ -39,6 +36,15 @@
     </Filter>
     <Filter Include="FileIO">
       <UniqueIdentifier>{3ef5034e-d8c0-452c-a601-19b3b4633737}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Systems">
+      <UniqueIdentifier>{1e411239-71a6-417d-9be7-bf60523b500e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine">
+      <UniqueIdentifier>{9ddafb42-0046-4550-9d34-d23669746869}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Managers">
+      <UniqueIdentifier>{ddf3748e-4d44-4cdb-bf4c-2e0e15dcd440}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -69,9 +75,6 @@
     <ClCompile Include="Codes\Common\MathHelper.cpp">
       <Filter>Common</Filter>
     </ClCompile>
-    <ClCompile Include="Codes\ECS\RenderSystem.cpp">
-      <Filter>ECS</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp">
       <Filter>IMGUI\ect</Filter>
     </ClCompile>
@@ -94,19 +97,19 @@
       <Filter>IMGUI\ect</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\ImGuiManager.cpp">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\MeshManager.cpp">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\PipelineStateManager.cpp">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\RootSignatureManager.cpp">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\MaterialManager.cpp">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp">
       <Filter>Memory</Filter>
@@ -115,7 +118,16 @@
       <Filter>FileIO</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\ShaderManager.cpp">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Systems\RenderSystem.cpp">
+      <Filter>Systems</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Engine\Engine.cpp">
+      <Filter>Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\ResourceManager.cpp">
+      <Filter>Managers</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -164,9 +176,6 @@
     <ClInclude Include="Codes\ECS\Registry.h">
       <Filter>ECS</Filter>
     </ClInclude>
-    <ClInclude Include="Codes\ECS\RenderSystem.h">
-      <Filter>ECS</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h">
       <Filter>IMGUI\ect</Filter>
     </ClInclude>
@@ -180,19 +189,19 @@
       <Filter>IMGUI\ect</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\ImGuiManager.h">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\MeshManager.h">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\PipelineStateManager.h">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\RootSignatureManager.h">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\MaterialManager.h">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Memory\DescriptorAllocator.h">
       <Filter>Memory</Filter>
@@ -201,7 +210,7 @@
       <Filter>FileIO</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\ShaderManager.h">
-      <Filter>Manager</Filter>
+      <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\ECS\Component.h">
       <Filter>ECS</Filter>
@@ -214,6 +223,15 @@
     </ClInclude>
     <ClInclude Include="Codes\ECS\World.h">
       <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Systems\RenderSystem.h">
+      <Filter>Systems</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Engine\Engine.h">
+      <Filter>Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\ResourceManager.h">
+      <Filter>Managers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
