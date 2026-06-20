@@ -73,5 +73,5 @@ ComPtr<ID3DBlob> ShaderManager::GetComputeShader(
     const std::wstring& filePath,
     const std::string& entryPoint)
 {
-    return GetShader(filePath, entryPoint, "cs_6_0");
+    return GetShader(filePath, entryPoint, "cs_5_1");
 }

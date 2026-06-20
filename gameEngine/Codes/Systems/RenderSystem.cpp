@@ -148,19 +148,24 @@ void RenderSystem::render(World& world,
         }
     };
 
-    // ==================== Phase 2: Compute Shader Dispatch ====================
-    // Compute Shader로 Frustum Culling + Indirect Argument 작성
-    DispatchFrustumCulling(cmdList, currentFrameResource, currentFrameIndex, 8192);
+    // === 1. Compute Shader Dispatch (Phase 2) ===
+    if (currentFrameIndex < mIndirectArgsUAVHandles.size())
+    {
+        DispatchFrustumCulling(cmdList, currentFrameResource, descriptorAllocator, currentFrameIndex, 8192);
 
-    // Compute → Graphics 배리어 (중요!)
-    D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        currentFrameResource->IndirectArgsUAVBuffer.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT
-    );
-    cmdList->ResourceBarrier(1, &barrier);
-    // ========================================================================
+        // Compute → Graphics 배리어
+        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            currentFrameResource->IndirectArgsUAVBuffer.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT
+        );
+        cmdList->ResourceBarrier(1, &barrier);
+    }
 
+    ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
+    cmdList->SetDescriptorHeaps(1, descriptorHeaps);
+
+    // === 3. 기존 Graphics 렌더링 로직 (일단 유지) ===
     XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
 
     std::unordered_map<BatchKey, std::vector<BatchInstance>, BatchKeyHash> batches;
@@ -218,11 +223,6 @@ void RenderSystem::render(World& world,
             drawArg.BaseVertexLocation = submesh->BaseVertexLocation;
             drawArg.StartInstanceLocation = instanceOffset + static_cast<UINT>(chunkStart);
 
-            /*D3D12_DRAW_INDEXED_ARGUMENTS* mappedArgs = nullptr;
-            currentFrameResource->IndirectArgsUAVBuffer->Map(0, nullptr, (void**)&mappedArgs);
-            mappedArgs[argIndex] = drawArg;
-            currentFrameResource->IndirectArgsUAVBuffer->Unmap(0, nullptr);*/
-
             drawCalls.push_back({ key, argIndex });
             argIndex++;
         }
@@ -251,9 +251,6 @@ void RenderSystem::render(World& world,
 
     ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(psoKey, instancingRS);
     cmdList->SetPipelineState(pso);
-
-    ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
-    cmdList->SetDescriptorHeaps(1, descriptorHeaps);
 
     for (auto& drawCall : drawCalls)
     {
@@ -287,10 +284,19 @@ void RenderSystem::render(World& world,
 void RenderSystem::DispatchFrustumCulling(
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
+    DescriptorAllocator* descriptorAllocator,
     int currentFrameIndex,
     UINT maxInstanceCount)
 {
-    // Compute Root Signature 설정
+    if (!descriptorAllocator) return;
+
+    // 안전 체크
+    if (currentFrameIndex >= mIndirectArgsUAVHandles.size())
+    {
+        OutputDebugStringA("[RenderSystem] currentFrameIndex out of range in DispatchFrustumCulling\n");
+        return;
+    }
+
     auto* computeRS = PipelineStateManager::Get().GetComputeRootSignature();
     auto* computePSO = PipelineStateManager::Get().GetOrCreateComputePSO(
         PSOKey{ .shaderName = "FrustumCullingCS", .isComputeShader = true },
@@ -299,16 +305,33 @@ void RenderSystem::DispatchFrustumCulling(
 
     if (!computePSO) return;
 
+    // Descriptor Heap 설정
+    ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
+    cmdList->SetDescriptorHeaps(1, descriptorHeaps);
+
     cmdList->SetComputeRootSignature(computeRS);
     cmdList->SetPipelineState(computePSO);
 
-    // UAV Descriptor 설정 (IndirectArgsUAVBuffer)
+    // UAV 바인딩 (슬롯 0)
     cmdList->SetComputeRootDescriptorTable(0, mIndirectArgsUAVHandles[currentFrameIndex].GPU);
 
-    // 상수 버퍼 설정 (나중에 CullConstants 전달용)
-    // cmdList->SetComputeRootConstantBufferView(1, ...);
+    // === Constant Buffer 바인딩 (슬롯 1) - MaxInstanceCount 전달 ===
+    // 임시로 PassCB를 재활용하거나, 별도 작은 상수 버퍼를 만들어도 됩니다.
+    // 지금은 간단히 테스트용으로 maxInstanceCount를 직접 넘기기 위해 구조체를 만듦
+
+    struct CullConstants
+    {
+        UINT MaxInstanceCount;
+    };
+
+    CullConstants cullData{};
+    cullData.MaxInstanceCount = maxInstanceCount;
+
+    // 임시 상수 버퍼 (테스트용)
+    // 실제로는 FrameResource에 전용 상수 버퍼를 만드는 게 좋습니다.
+    cmdList->SetComputeRoot32BitConstants(1, sizeof(CullConstants) / 4, &cullData, 0);
 
     // Dispatch
-    UINT threadGroupCount = (maxInstanceCount + 63) / 64;   // 64개 스레드 기준
+    UINT threadGroupCount = (maxInstanceCount + 63) / 64;
     cmdList->Dispatch(threadGroupCount, 1, 1);
 }

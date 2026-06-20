@@ -37,6 +37,7 @@ public:
     void DispatchFrustumCulling(
         ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
+        DescriptorAllocator* descriptorAllocator,
         int currentFrameIndex,
         UINT maxInstanceCount);
 

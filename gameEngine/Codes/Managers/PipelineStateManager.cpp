@@ -192,7 +192,7 @@ void PipelineStateManager::InitializeComputePipeline(ID3D12Device* device)
 
         CD3DX12_ROOT_PARAMETER1 rootParams[2];
         rootParams[0].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
-        rootParams[1].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL);
+        rootParams[1].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL);
 
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
         computeRootSignatureDesc.Init_1_1(_countof(rootParams), rootParams, 0, nullptr);
