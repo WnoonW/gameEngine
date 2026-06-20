@@ -47,6 +47,7 @@ private:
     std::vector<DescriptorAllocator::DescriptorHandle> mPassCBVHandles;
     std::vector<DescriptorAllocator::DescriptorHandle> mInstanceSRVHandles;
     std::vector<DescriptorAllocator::DescriptorHandle> mIndirectArgsUAVHandles;
+    std::vector<DescriptorAllocator::DescriptorHandle> mDrawCommandSRVHandles;
     UINT mMaxInstancesPerFrame = 0;
     RenderStats mLastRenderStats{};
 };

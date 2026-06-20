@@ -4,8 +4,6 @@
 #include "../Common/UploadBuffer.h"
 #include <imgui.h>
 
-// FrameResource.h / .cpp
-
 struct FrameResource
 {
     FrameResource(ID3D12Device* device, UINT objectCount, UINT maxIndirectArgs = 16384);   // 생성자 변경
@@ -17,6 +15,7 @@ struct FrameResource
     std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
     std::unique_ptr<UploadBuffer<InstanceData>>    InstanceDataBuffer = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Resource> IndirectArgsUAVBuffer;
+    std::unique_ptr<UploadBuffer<IndirectDrawCommand>> DrawCommandBuffer = nullptr;
     UINT64 FenceValue = 0;
 };
 
@@ -45,14 +44,16 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount, UINT
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS,   // Compute Shader가 쓸 상태
         nullptr,
         IID_PPV_ARGS(&IndirectArgsUAVBuffer)));
+
+    DrawCommandBuffer = std::make_unique<UploadBuffer<IndirectDrawCommand>>(device, 4096, false);
 }
 
 inline FrameResource::~FrameResource()
 {
-    if (IndirectArgsUAVBuffer) IndirectArgsUAVBuffer.Reset();
-
-    if (InstanceDataBuffer) InstanceDataBuffer.reset();
-    if (ObjectCB) ObjectCB.reset();
-    if (PassCB) PassCB.reset();
-    if (CmdListAlloc) CmdListAlloc.Reset();
+    if (DrawCommandBuffer)      DrawCommandBuffer.reset();
+    if (IndirectArgsUAVBuffer)  IndirectArgsUAVBuffer.Reset();
+    if (InstanceDataBuffer)     InstanceDataBuffer.reset();
+    if (ObjectCB)               ObjectCB.reset();
+    if (PassCB)                 PassCB.reset();
+    if (CmdListAlloc)           CmdListAlloc.Reset();
 }

@@ -59,6 +59,7 @@ void RenderSystem::Initialize(ID3D12Device* device,
     mPassCBVHandles.resize(gNumFrameResources);
     mInstanceSRVHandles.resize(gNumFrameResources);
     mIndirectArgsUAVHandles.resize(gNumFrameResources);
+    mDrawCommandSRVHandles.resize(gNumFrameResources);
 
     mMaxInstancesPerFrame = static_cast<UINT>(
         frameResources[0]->InstanceDataBuffer->Resource()->GetDesc().Width / sizeof(InstanceData));
@@ -89,9 +90,8 @@ void RenderSystem::Initialize(ID3D12Device* device,
         instanceSrvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
         device->CreateShaderResourceView(instanceBuffer, &instanceSrvDesc, instanceHandle.CPU);
 
-        // ==================== Phase 2: IndirectArgs UAV Descriptor 추가 ====================
+        // IndirectArgs UAV Descriptor
         auto indirectArgsBuffer = frameResources[frameIndex]->IndirectArgsUAVBuffer.Get();
-
         auto indirectHandle = descriptorAllocator.Allocate();
         mIndirectArgsUAVHandles[frameIndex] = indirectHandle;
 
@@ -99,13 +99,26 @@ void RenderSystem::Initialize(ID3D12Device* device,
         uavDesc.Format = DXGI_FORMAT_UNKNOWN;
         uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
         uavDesc.Buffer.FirstElement = 0;
-        uavDesc.Buffer.NumElements = 8192;                    // maxIndirectArgs와 맞춰주세요
+        uavDesc.Buffer.NumElements = 8192;
         uavDesc.Buffer.StructureByteStride = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
         uavDesc.Buffer.CounterOffsetInBytes = 0;
         uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-
         device->CreateUnorderedAccessView(indirectArgsBuffer, nullptr, &uavDesc, indirectHandle.CPU);
-        // ==================================================================================
+
+        // DrawCommandBuffer SRV
+        auto drawCmdBuffer = frameResources[frameIndex]->DrawCommandBuffer->Resource();
+        auto drawCmdHandle = descriptorAllocator.Allocate();
+        mDrawCommandSRVHandles[frameIndex] = drawCmdHandle;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.FirstElement = 0;
+        srvDesc.Buffer.NumElements = 4096;
+        srvDesc.Buffer.StructureByteStride = sizeof(IndirectDrawCommand);
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        device->CreateShaderResourceView(drawCmdBuffer, &srvDesc, drawCmdHandle.CPU);
     }
 }
 
@@ -148,24 +161,9 @@ void RenderSystem::render(World& world,
         }
     };
 
-    // === 1. Compute Shader Dispatch (Phase 2) ===
-    if (currentFrameIndex < mIndirectArgsUAVHandles.size())
-    {
-        DispatchFrustumCulling(cmdList, currentFrameResource, descriptorAllocator, currentFrameIndex, 8192);
-
-        // Compute → Graphics 배리어
-        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            currentFrameResource->IndirectArgsUAVBuffer.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT
-        );
-        cmdList->ResourceBarrier(1, &barrier);
-    }
-
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(1, descriptorHeaps);
 
-    // === 3. 기존 Graphics 렌더링 로직 (일단 유지) ===
     XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
 
     std::unordered_map<BatchKey, std::vector<BatchInstance>, BatchKeyHash> batches;
@@ -181,9 +179,8 @@ void RenderSystem::render(World& world,
             for (auto& pair : rend.mesh->DrawArgs)
             {
                 const std::string& submeshName = pair.first;
-                const SubmeshGeometry& sub = pair.second;   // ← 이름 변경 추천
+                const SubmeshGeometry& sub = pair.second;
 
-                // === 이전 방식으로 수정 ===
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
 
@@ -216,18 +213,33 @@ void RenderSystem::render(World& world,
             UINT chunkCount = static_cast<UINT>(std::min<size_t>(mMaxInstancesPerFrame, instances.size() - chunkStart));
             const SubmeshGeometry* submesh = instances[0].submesh;
 
-            D3D12_DRAW_INDEXED_ARGUMENTS drawArg = {};
-            drawArg.IndexCountPerInstance = submesh->IndexCount;
-            drawArg.InstanceCount = chunkCount;
-            drawArg.StartIndexLocation = submesh->StartIndexLocation;
-            drawArg.BaseVertexLocation = submesh->BaseVertexLocation;
-            drawArg.StartInstanceLocation = instanceOffset + static_cast<UINT>(chunkStart);
+            IndirectDrawCommand drawCmd{};
+            drawCmd.IndexCountPerInstance = submesh->IndexCount;
+            drawCmd.StartIndexLocation = submesh->StartIndexLocation;
+            drawCmd.BaseVertexLocation = submesh->BaseVertexLocation;
+            drawCmd.InstanceCount = chunkCount;   // ← 여기 추가
+            drawCmd.MaterialIndex = 0;
+
+            currentFrameResource->DrawCommandBuffer->CopyData(argIndex, drawCmd);
 
             drawCalls.push_back({ key, argIndex });
             argIndex++;
         }
 
         instanceOffset += static_cast<UINT>(instances.size());
+    }
+
+    // === Compute Shader Dispatch (배칭 후에 호출) ===
+    if (currentFrameIndex < mIndirectArgsUAVHandles.size() && argIndex > 0)
+    {
+        DispatchFrustumCulling(cmdList, currentFrameResource, descriptorAllocator, currentFrameIndex, argIndex);
+
+        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            currentFrameResource->IndirectArgsUAVBuffer.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT
+        );
+        cmdList->ResourceBarrier(1, &barrier);
     }
 
     mLastRenderStats.totalRenderableEntities = instanceOffset;
@@ -240,7 +252,6 @@ void RenderSystem::render(World& world,
 
     cmdList->SetGraphicsRootSignature(instancingRS);
 
-    // === PSO 생성 (올바른 방식) ===
     PSOKey psoKey;
     psoKey.shaderName = "instancing";
     psoKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -256,8 +267,8 @@ void RenderSystem::render(World& world,
     {
         auto& key = drawCall.key;
 
-        auto vbv = key.mesh->VertexBufferView();   // 멤버 함수 호출
-        auto ibv = key.mesh->IndexBufferView();    // 멤버 함수 호출
+        auto vbv = key.mesh->VertexBufferView();
+        auto ibv = key.mesh->IndexBufferView();
 
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
@@ -273,7 +284,7 @@ void RenderSystem::render(World& world,
         cmdList->ExecuteIndirect(
             cmdSig,
             1,
-            currentFrameResource->IndirectArgsUAVBuffer.Get(),  // ← 변경
+            currentFrameResource->IndirectArgsUAVBuffer.Get(),
             argOffset,
             nullptr,
             0
@@ -286,11 +297,10 @@ void RenderSystem::DispatchFrustumCulling(
     FrameResource* currentFrameResource,
     DescriptorAllocator* descriptorAllocator,
     int currentFrameIndex,
-    UINT maxInstanceCount)
+    UINT drawCommandCount)          // ← maxInstanceCount 대신 drawCommandCount로 변경
 {
     if (!descriptorAllocator) return;
 
-    // 안전 체크
     if (currentFrameIndex >= mIndirectArgsUAVHandles.size())
     {
         OutputDebugStringA("[RenderSystem] currentFrameIndex out of range in DispatchFrustumCulling\n");
@@ -305,33 +315,24 @@ void RenderSystem::DispatchFrustumCulling(
 
     if (!computePSO) return;
 
-    // Descriptor Heap 설정
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(1, descriptorHeaps);
 
     cmdList->SetComputeRootSignature(computeRS);
     cmdList->SetPipelineState(computePSO);
 
-    // UAV 바인딩 (슬롯 0)
-    cmdList->SetComputeRootDescriptorTable(0, mIndirectArgsUAVHandles[currentFrameIndex].GPU);
-
-    // === Constant Buffer 바인딩 (슬롯 1) - MaxInstanceCount 전달 ===
-    // 임시로 PassCB를 재활용하거나, 별도 작은 상수 버퍼를 만들어도 됩니다.
-    // 지금은 간단히 테스트용으로 maxInstanceCount를 직접 넘기기 위해 구조체를 만듦
-
     struct CullConstants
     {
-        UINT MaxInstanceCount;
+        UINT DrawCommandCount;      // ← 이름 변경
     };
 
     CullConstants cullData{};
-    cullData.MaxInstanceCount = maxInstanceCount;
+    cullData.DrawCommandCount = drawCommandCount;
 
-    // 임시 상수 버퍼 (테스트용)
-    // 실제로는 FrameResource에 전용 상수 버퍼를 만드는 게 좋습니다.
+    cmdList->SetComputeRootDescriptorTable(0, mIndirectArgsUAVHandles[currentFrameIndex].GPU);
     cmdList->SetComputeRoot32BitConstants(1, sizeof(CullConstants) / 4, &cullData, 0);
+    cmdList->SetComputeRootDescriptorTable(2, mDrawCommandSRVHandles[currentFrameIndex].GPU);
 
-    // Dispatch
-    UINT threadGroupCount = (maxInstanceCount + 63) / 64;
+    UINT threadGroupCount = (drawCommandCount + 63) / 64;
     cmdList->Dispatch(threadGroupCount, 1, 1);
 }

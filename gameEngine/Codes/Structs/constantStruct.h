@@ -19,3 +19,12 @@ struct InstanceData
 {
 	DirectX::XMFLOAT4X4 WorldViewProj = MathHelper::Identity4x4();
 };
+
+struct IndirectDrawCommand
+{
+    UINT IndexCountPerInstance;
+    UINT StartIndexLocation;
+    UINT BaseVertexLocation;
+    UINT InstanceCount;    
+    UINT MaterialIndex;
+};

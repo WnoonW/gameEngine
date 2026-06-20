@@ -188,11 +188,14 @@ void PipelineStateManager::InitializeComputePipeline(ID3D12Device* device)
     // === Compute Root Signature 생성 (한 번만) ===
     if (!mComputeRootSignature)
     {
-        CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+        CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0
+        CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0
 
-        CD3DX12_ROOT_PARAMETER1 rootParams[2];
-        rootParams[0].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
-        rootParams[1].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL);
+        CD3DX12_ROOT_PARAMETER1 rootParams[3];
+
+        rootParams[0].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL); // u0 - IndirectArgsUAV
+        rootParams[1].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL);             // b0 - MaxInstanceCount
+        rootParams[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_ALL); // t0 - DrawCommand SRV
 
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
         computeRootSignatureDesc.Init_1_1(_countof(rootParams), rootParams, 0, nullptr);
