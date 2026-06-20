@@ -68,3 +68,10 @@ ComPtr<ID3DBlob> ShaderManager::GetPixelShader(const std::wstring& filePath, con
 {
     return GetShader(filePath, entryPoint, "ps_5_0");
 }
+
+ComPtr<ID3DBlob> ShaderManager::GetComputeShader(
+    const std::wstring& filePath,
+    const std::string& entryPoint)
+{
+    return GetShader(filePath, entryPoint, "cs_6_0");
+}

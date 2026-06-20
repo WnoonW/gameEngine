@@ -2,7 +2,7 @@
 #include <DirectXMath.h>
 #include "../Common/MathHelper.h"
 
-inline constexpr UINT kMaxRenderableInstances = 4096;
+inline constexpr UINT kMaxRenderableInstances = 16384;
 
 struct ObjectConstants
 {

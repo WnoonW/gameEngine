@@ -140,9 +140,6 @@
     <ClInclude Include="Codes\Common\d3dUtil.h">
       <Filter>Common</Filter>
     </ClInclude>
-    <ClInclude Include="Codes\Common\d3dx12.h">
-      <Filter>Common</Filter>
-    </ClInclude>
     <ClInclude Include="Codes\Common\DDSTextureLoader.h">
       <Filter>Common</Filter>
     </ClInclude>
@@ -233,6 +230,9 @@
     <ClInclude Include="Codes\Managers\ResourceManager.h">
       <Filter>Managers</Filter>
     </ClInclude>
+    <ClInclude Include="Codes\Common\d3dx12.h">
+      <Filter>Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
@@ -245,6 +245,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Resources\Shaders\instancing.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Resources\Shaders\FrustumCullingCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

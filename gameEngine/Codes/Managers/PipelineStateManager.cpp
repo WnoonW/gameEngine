@@ -34,6 +34,8 @@ PipelineStateManager& PipelineStateManager::Get()
 void PipelineStateManager::Initialize(ID3D12Device* device)
 {
     mDevice = device;
+    InitializeCommandSignatures(device);
+    InitializeComputePipeline(device);
 }
 
 void PipelineStateManager::Shutdown()
@@ -47,9 +49,14 @@ ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
     ID3D12RootSignature* rootSignature,
     ID3D12Device* device)
 {
-    if (device == nullptr)
-        device = mDevice;
+    if (key.isComputeShader)
+    {
+        return GetOrCreateComputePSO(key, rootSignature, device);
+    }
 
+    if (!device) device = mDevice;
+
+    // === Graphics PSO 캐싱 (PSOKey 전체를 키로 사용) ===
     auto it = mPSOCache.find(key);
     if (it != mPSOCache.end())
         return it->second.Get();
@@ -105,4 +112,114 @@ ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
 
     mPSOCache[key] = pso;
     return pso.Get();
+}
+
+ID3D12PipelineState* PipelineStateManager::GetOrCreateComputePSO(
+    const PSOKey& key,
+    ID3D12RootSignature* rootSignature,
+    ID3D12Device* device)
+{
+    if (!device) device = mDevice;
+
+    std::string cacheKey = key.shaderName;
+
+    // 캐시에 이미 있으면 반환
+    auto it = mComputePSOCache.find(cacheKey);
+    if (it != mComputePSOCache.end())
+        return it->second.Get();
+
+    // === 쉐이더 경로 생성 (Resources\Shaders\ 추가) ===
+    std::wstring wShaderName(key.shaderName.begin(), key.shaderName.end());
+    std::wstring shaderPath = L"Resources\\Shaders\\" + wShaderName + L".hlsl";
+
+    // Compute Shader 컴파일
+    auto computeBlob = ShaderManager::Get().GetComputeShader(shaderPath, "main");
+
+    if (!computeBlob)
+    {
+        OutputDebugStringA("[PipelineStateManager] Compute Shader Compile Failed!\n");
+        return nullptr;
+    }
+
+    // Compute PSO 생성
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
+    desc.pRootSignature = rootSignature;
+    desc.CS = {
+        computeBlob->GetBufferPointer(),
+        computeBlob->GetBufferSize()
+    };
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+    HRESULT hr = device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pso));
+
+    if (FAILED(hr))
+    {
+        OutputDebugStringA("[PipelineStateManager] CreateComputePipelineState Failed!\n");
+        return nullptr;
+    }
+
+    mComputePSOCache[cacheKey] = pso;
+    return pso.Get();
+}
+
+void PipelineStateManager::InitializeCommandSignatures(ID3D12Device* device)
+{
+    D3D12_INDIRECT_ARGUMENT_DESC argDesc = {};
+    argDesc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+
+    D3D12_COMMAND_SIGNATURE_DESC sigDesc = {};
+    sigDesc.ByteStride = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
+    sigDesc.NumArgumentDescs = 1;
+    sigDesc.pArgumentDescs = &argDesc;
+
+    ThrowIfFailed(device->CreateCommandSignature(&sigDesc, nullptr,
+        IID_PPV_ARGS(&mDrawIndexedIndirectSignature)));
+}
+
+ID3D12CommandSignature* PipelineStateManager::GetDrawIndexedIndirectSignature() const
+{
+    return mDrawIndexedIndirectSignature.Get();
+}
+
+void PipelineStateManager::InitializeComputePipeline(ID3D12Device* device)
+{
+    if (!device) device = mDevice;
+
+    // === Compute Root Signature 생성 (한 번만) ===
+    if (!mComputeRootSignature)
+    {
+        CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+
+        CD3DX12_ROOT_PARAMETER1 rootParams[2];
+        rootParams[0].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
+        rootParams[1].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL);
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
+        computeRootSignatureDesc.Init_1_1(_countof(rootParams), rootParams, 0, nullptr);
+
+        Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+
+        HRESULT hr = D3DX12SerializeVersionedRootSignature(&computeRootSignatureDesc,
+            D3D_ROOT_SIGNATURE_VERSION_1_1, &signatureBlob, &errorBlob);
+
+        if (FAILED(hr))
+        {
+            if (errorBlob) OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+            assert(false && "Compute Root Signature Serialize Failed");
+        }
+
+        device->CreateRootSignature(0, signatureBlob->GetBufferPointer(),
+            signatureBlob->GetBufferSize(), IID_PPV_ARGS(&mComputeRootSignature));
+    }
+}
+
+ID3D12RootSignature* PipelineStateManager::GetComputeRootSignature() const
+{
+    return mComputeRootSignature.Get();
+}
+
+ID3D12PipelineState* PipelineStateManager::GetFrustumCullingPSO() const
+{
+    return mFrustumCullingPSO.Get();
 }

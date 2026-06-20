@@ -58,6 +58,8 @@ void RenderSystem::Initialize(ID3D12Device* device,
 {
     mPassCBVHandles.resize(gNumFrameResources);
     mInstanceSRVHandles.resize(gNumFrameResources);
+    mIndirectArgsUAVHandles.resize(gNumFrameResources);
+
     mMaxInstancesPerFrame = static_cast<UINT>(
         frameResources[0]->InstanceDataBuffer->Resource()->GetDesc().Width / sizeof(InstanceData));
 
@@ -86,10 +88,28 @@ void RenderSystem::Initialize(ID3D12Device* device,
         instanceSrvDesc.Buffer.StructureByteStride = sizeof(InstanceData);
         instanceSrvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
         device->CreateShaderResourceView(instanceBuffer, &instanceSrvDesc, instanceHandle.CPU);
+
+        // ==================== Phase 2: IndirectArgs UAV Descriptor 추가 ====================
+        auto indirectArgsBuffer = frameResources[frameIndex]->IndirectArgsUAVBuffer.Get();
+
+        auto indirectHandle = descriptorAllocator.Allocate();
+        mIndirectArgsUAVHandles[frameIndex] = indirectHandle;
+
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        uavDesc.Buffer.FirstElement = 0;
+        uavDesc.Buffer.NumElements = 8192;                    // maxIndirectArgs와 맞춰주세요
+        uavDesc.Buffer.StructureByteStride = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
+        uavDesc.Buffer.CounterOffsetInBytes = 0;
+        uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+
+        device->CreateUnorderedAccessView(indirectArgsBuffer, nullptr, &uavDesc, indirectHandle.CPU);
+        // ==================================================================================
     }
 }
 
-void RenderSystem::render(ECS::World& world,
+void RenderSystem::render(World& world,
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
     DescriptorAllocator* descriptorAllocator,
@@ -97,108 +117,198 @@ void RenderSystem::render(ECS::World& world,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
-    ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
-    cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-
     mLastRenderStats = {};
-    mLastRenderStats.instanceBufferCapacity = static_cast<int>(mMaxInstancesPerFrame);
+
+    struct BatchKey {
+        Mesh* mesh;
+        Material* material;
+        std::string submeshName;
+
+        bool operator==(const BatchKey& other) const {
+            return mesh == other.mesh && material == other.material && submeshName == other.submeshName;
+        }
+    };
+
+    struct BatchInstance {
+        XMMATRIX worldViewProj;
+        const SubmeshGeometry* submesh;
+    };
+
+    struct BatchDrawCall {
+        BatchKey key;
+        UINT argIndex;
+    };
+
+    struct BatchKeyHash {
+        size_t operator()(const BatchKey& k) const {
+            size_t h1 = std::hash<Mesh*>()(k.mesh);
+            size_t h2 = std::hash<Material*>()(k.material);
+            size_t h3 = std::hash<std::string>()(k.submeshName);
+            return h1 ^ (h2 << 1) ^ (h3 << 2);
+        }
+    };
+
+    // ==================== Phase 2: Compute Shader Dispatch ====================
+    // Compute Shader로 Frustum Culling + Indirect Argument 작성
+    DispatchFrustumCulling(cmdList, currentFrameResource, currentFrameIndex, 8192);
+
+    // Compute → Graphics 배리어 (중요!)
+    D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        currentFrameResource->IndirectArgsUAVBuffer.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT
+    );
+    cmdList->ResourceBarrier(1, &barrier);
+    // ========================================================================
 
     XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
-    std::unordered_map<BatchKey, std::vector<BatchInstance>> batches;
+
+    std::unordered_map<BatchKey, std::vector<BatchInstance>, BatchKeyHash> batches;
 
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity /*entity*/, TransformComponent& tf, RenderableComponent& rend)
         {
-            if (!rend.visible || !rend.mesh) return;
-
-            ++mLastRenderStats.totalRenderableEntities;
+            if (!rend.visible || !rend.mesh || !rend.material) return;
 
             XMMATRIX worldMat = tf.GetWorldMatrix();
             XMMATRIX wvp = XMMatrixMultiply(worldMat, viewProj);
 
             for (auto& pair : rend.mesh->DrawArgs)
             {
-                const auto& sub = pair.second;
+                const std::string& submeshName = pair.first;
+                const SubmeshGeometry& sub = pair.second;   // ← 이름 변경 추천
+
+                // === 이전 방식으로 수정 ===
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
 
                 BatchKey key{
                     .mesh = rend.mesh,
                     .material = material,
-                    .submeshName = pair.first
+                    .submeshName = submeshName
                 };
-
-                batches[key].push_back(BatchInstance{
-                    .worldViewProj = wvp,
-                    .submesh = &sub
-                    });
+                batches[key].push_back({ wvp, &sub });
             }
         });
 
-    ID3D12RootSignature* instancingRS =
-        RootSignatureManager::Get().GetRootSignature(RootSignatureType::Instancing);
+    std::vector<BatchDrawCall> drawCalls;
+    UINT instanceOffset = 0;
+    UINT argIndex = 0;
 
-    PSOKey psoKey{};
-    psoKey.shaderName = "instancing";
-    psoKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-
-    ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(psoKey, instancingRS);
-    if (!pso) return;
-
-    cmdList->SetGraphicsRootSignature(instancingRS);
-    cmdList->SetPipelineState(pso);
-
-    for (auto& [batchKey, instances] : batches)
+    for (auto& [key, instances] : batches)
     {
         if (instances.empty()) continue;
 
-        const SubmeshGeometry& submesh = *instances[0].submesh;
-        auto vbv = batchKey.mesh->VertexBufferView();
-        auto ibv = batchKey.mesh->IndexBufferView();
+        for (size_t i = 0; i < instances.size(); ++i)
+        {
+            InstanceData data{};
+            XMStoreFloat4x4(&data.WorldViewProj, XMMatrixTranspose(instances[i].worldViewProj));
+            currentFrameResource->InstanceDataBuffer->CopyData(instanceOffset + static_cast<int>(i), data);
+        }
+
+        for (size_t chunkStart = 0; chunkStart < instances.size(); chunkStart += mMaxInstancesPerFrame)
+        {
+            UINT chunkCount = static_cast<UINT>(std::min<size_t>(mMaxInstancesPerFrame, instances.size() - chunkStart));
+            const SubmeshGeometry* submesh = instances[0].submesh;
+
+            D3D12_DRAW_INDEXED_ARGUMENTS drawArg = {};
+            drawArg.IndexCountPerInstance = submesh->IndexCount;
+            drawArg.InstanceCount = chunkCount;
+            drawArg.StartIndexLocation = submesh->StartIndexLocation;
+            drawArg.BaseVertexLocation = submesh->BaseVertexLocation;
+            drawArg.StartInstanceLocation = instanceOffset + static_cast<UINT>(chunkStart);
+
+            /*D3D12_DRAW_INDEXED_ARGUMENTS* mappedArgs = nullptr;
+            currentFrameResource->IndirectArgsUAVBuffer->Map(0, nullptr, (void**)&mappedArgs);
+            mappedArgs[argIndex] = drawArg;
+            currentFrameResource->IndirectArgsUAVBuffer->Unmap(0, nullptr);*/
+
+            drawCalls.push_back({ key, argIndex });
+            argIndex++;
+        }
+
+        instanceOffset += static_cast<UINT>(instances.size());
+    }
+
+    mLastRenderStats.totalRenderableEntities = instanceOffset;
+    mLastRenderStats.drawBatches = static_cast<int>(drawCalls.size());
+
+    if (drawCalls.empty()) return;
+
+    auto* cmdSig = PipelineStateManager::Get().GetDrawIndexedIndirectSignature();
+    ID3D12RootSignature* instancingRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Instancing);
+
+    cmdList->SetGraphicsRootSignature(instancingRS);
+
+    // === PSO 생성 (올바른 방식) ===
+    PSOKey psoKey;
+    psoKey.shaderName = "instancing";
+    psoKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoKey.rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    psoKey.rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;
+
+    ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(psoKey, instancingRS);
+    cmdList->SetPipelineState(pso);
+
+    ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
+    cmdList->SetDescriptorHeaps(1, descriptorHeaps);
+
+    for (auto& drawCall : drawCalls)
+    {
+        auto& key = drawCall.key;
+
+        auto vbv = key.mesh->VertexBufferView();   // 멤버 함수 호출
+        auto ibv = key.mesh->IndexBufferView();    // 멤버 함수 호출
 
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
+
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         cmdList->SetGraphicsRootDescriptorTable(0, mPassCBVHandles[currentFrameIndex].GPU);
-        cmdList->SetGraphicsRootDescriptorTable(1, batchKey.material->mTextureHandle.GPU);
+        cmdList->SetGraphicsRootDescriptorTable(1, key.material->mTextureHandle.GPU);
         cmdList->SetGraphicsRootDescriptorTable(2, mInstanceSRVHandles[currentFrameIndex].GPU);
 
-        UINT batchStart = 0;
-        const UINT totalInstances = static_cast<UINT>(instances.size());
-        if (static_cast<int>(totalInstances) > mLastRenderStats.peakInstancesPerBatch)
-            mLastRenderStats.peakInstancesPerBatch = static_cast<int>(totalInstances);
+        UINT64 argOffset = drawCall.argIndex * sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
 
-        while (batchStart < totalInstances)
-        {
-            UINT chunkCount = totalInstances - batchStart;
-            if (chunkCount > mMaxInstancesPerFrame)
-                chunkCount = mMaxInstancesPerFrame;
-
-            for (UINT i = 0; i < chunkCount; ++i)
-            {
-                InstanceData data{};
-                XMStoreFloat4x4(
-                    &data.WorldViewProj,
-                    XMMatrixTranspose(instances[batchStart + i].worldViewProj));
-                currentFrameResource->InstanceDataBuffer->CopyData(static_cast<int>(i), data);
-            }
-
-            PassConstants passConstants{};
-            passConstants.InstanceOffset = 0;
-            currentFrameResource->PassCB->CopyData(0, passConstants);
-
-            cmdList->DrawIndexedInstanced(
-                submesh.IndexCount,
-                chunkCount,
-                submesh.StartIndexLocation,
-                submesh.BaseVertexLocation,
-                0);
-
-            batchStart += chunkCount;
-            ++mLastRenderStats.drawBatches;
-        }
+        cmdList->ExecuteIndirect(
+            cmdSig,
+            1,
+            currentFrameResource->IndirectArgsUAVBuffer.Get(),  // ← 변경
+            argOffset,
+            nullptr,
+            0
+        );
     }
+}
+
+void RenderSystem::DispatchFrustumCulling(
+    ID3D12GraphicsCommandList* cmdList,
+    FrameResource* currentFrameResource,
+    int currentFrameIndex,
+    UINT maxInstanceCount)
+{
+    // Compute Root Signature 설정
+    auto* computeRS = PipelineStateManager::Get().GetComputeRootSignature();
+    auto* computePSO = PipelineStateManager::Get().GetOrCreateComputePSO(
+        PSOKey{ .shaderName = "FrustumCullingCS", .isComputeShader = true },
+        computeRS
+    );
+
+    if (!computePSO) return;
+
+    cmdList->SetComputeRootSignature(computeRS);
+    cmdList->SetPipelineState(computePSO);
+
+    // UAV Descriptor 설정 (IndirectArgsUAVBuffer)
+    cmdList->SetComputeRootDescriptorTable(0, mIndirectArgsUAVHandles[currentFrameIndex].GPU);
+
+    // 상수 버퍼 설정 (나중에 CullConstants 전달용)
+    // cmdList->SetComputeRootConstantBufferView(1, ...);
+
+    // Dispatch
+    UINT threadGroupCount = (maxInstanceCount + 63) / 64;   // 64개 스레드 기준
+    cmdList->Dispatch(threadGroupCount, 1, 1);
 }

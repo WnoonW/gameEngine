@@ -34,11 +34,18 @@ public:
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);
 
+    void DispatchFrustumCulling(
+        ID3D12GraphicsCommandList* cmdList,
+        FrameResource* currentFrameResource,
+        int currentFrameIndex,
+        UINT maxInstanceCount);
+
     const RenderStats& GetLastRenderStats() const { return mLastRenderStats; }
 
 private:
     std::vector<DescriptorAllocator::DescriptorHandle> mPassCBVHandles;
     std::vector<DescriptorAllocator::DescriptorHandle> mInstanceSRVHandles;
+    std::vector<DescriptorAllocator::DescriptorHandle> mIndirectArgsUAVHandles;
     UINT mMaxInstancesPerFrame = 0;
     RenderStats mLastRenderStats{};
 };
