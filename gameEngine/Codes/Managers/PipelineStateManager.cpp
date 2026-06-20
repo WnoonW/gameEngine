@@ -188,14 +188,19 @@ void PipelineStateManager::InitializeComputePipeline(ID3D12Device* device)
     // === Compute Root Signature 생성 (한 번만) ===
     if (!mComputeRootSignature)
     {
-        CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0
-        CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0
+        CD3DX12_DESCRIPTOR_RANGE1 uavRange1(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0 - IndirectArgs
+        CD3DX12_DESCRIPTOR_RANGE1 uavRange2(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 1); // u1 - CompactedInstance
 
-        CD3DX12_ROOT_PARAMETER1 rootParams[3];
+        CD3DX12_DESCRIPTOR_RANGE1 srvRange1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 - DrawCommands
+        CD3DX12_DESCRIPTOR_RANGE1 srvRange2(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1); // t1 - InstanceData
 
-        rootParams[0].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL); // u0 - IndirectArgsUAV
-        rootParams[1].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL);             // b0 - MaxInstanceCount
-        rootParams[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_ALL); // t0 - DrawCommand SRV
+        CD3DX12_ROOT_PARAMETER1 rootParams[5];
+
+        rootParams[0].InitAsDescriptorTable(1, &uavRange1, D3D12_SHADER_VISIBILITY_ALL); // u0
+        rootParams[1].InitAsDescriptorTable(1, &uavRange2, D3D12_SHADER_VISIBILITY_ALL); // u1 - Compacted
+        rootParams[2].InitAsConstants(17, 0, 0, D3D12_SHADER_VISIBILITY_ALL);             // b0
+        rootParams[3].InitAsDescriptorTable(1, &srvRange1, D3D12_SHADER_VISIBILITY_ALL); // t0
+        rootParams[4].InitAsDescriptorTable(1, &srvRange2, D3D12_SHADER_VISIBILITY_ALL); // t1
 
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
         computeRootSignatureDesc.Init_1_1(_countof(rootParams), rootParams, 0, nullptr);

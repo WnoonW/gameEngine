@@ -60,6 +60,8 @@ void RenderSystem::Initialize(ID3D12Device* device,
     mInstanceSRVHandles.resize(gNumFrameResources);
     mIndirectArgsUAVHandles.resize(gNumFrameResources);
     mDrawCommandSRVHandles.resize(gNumFrameResources);
+    mInstanceDataSRVHandles.resize(gNumFrameResources);
+    mCompactedInstanceUAVHandles.resize(gNumFrameResources);
 
     mMaxInstancesPerFrame = static_cast<UINT>(
         frameResources[0]->InstanceDataBuffer->Resource()->GetDesc().Width / sizeof(InstanceData));
@@ -119,6 +121,39 @@ void RenderSystem::Initialize(ID3D12Device* device,
         srvDesc.Buffer.StructureByteStride = sizeof(IndirectDrawCommand);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
         device->CreateShaderResourceView(drawCmdBuffer, &srvDesc, drawCmdHandle.CPU);
+
+
+        // === InstanceDataBuffer SRV 생성 (Compute Shader용) ===
+        auto instanceDataBuffer = frameResources[frameIndex]->InstanceDataBuffer->Resource();
+        auto instanceDataHandle = descriptorAllocator.Allocate();
+        mInstanceDataSRVHandles[frameIndex] = instanceDataHandle;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC instanceDataSrvDesc{};
+        instanceDataSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        instanceDataSrvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        instanceDataSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        instanceDataSrvDesc.Buffer.FirstElement = 0;
+        instanceDataSrvDesc.Buffer.NumElements = mMaxInstancesPerFrame;
+        instanceDataSrvDesc.Buffer.StructureByteStride = sizeof(InstanceData);
+        instanceDataSrvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        device->CreateShaderResourceView(instanceDataBuffer, &instanceDataSrvDesc, instanceDataHandle.CPU);
+    
+        // === CompactedInstanceBuffer UAV 생성 ===
+        auto compactedBuffer = frameResources[frameIndex]->CompactedInstanceBuffer.Get();
+        auto compactedHandle = descriptorAllocator.Allocate();
+        mCompactedInstanceUAVHandles[frameIndex] = compactedHandle;
+
+        D3D12_UNORDERED_ACCESS_VIEW_DESC compactedUavDesc{};
+        compactedUavDesc.Format = DXGI_FORMAT_UNKNOWN;
+        compactedUavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        compactedUavDesc.Buffer.FirstElement = 0;
+        compactedUavDesc.Buffer.NumElements = mMaxInstancesPerFrame;   // 최대 인스턴스 수
+        compactedUavDesc.Buffer.StructureByteStride = sizeof(InstanceData);
+        compactedUavDesc.Buffer.CounterOffsetInBytes = 0;
+        compactedUavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+
+        device->CreateUnorderedAccessView(compactedBuffer, nullptr, &compactedUavDesc, compactedHandle.CPU);
     }
 }
 
@@ -217,7 +252,8 @@ void RenderSystem::render(World& world,
             drawCmd.IndexCountPerInstance = submesh->IndexCount;
             drawCmd.StartIndexLocation = submesh->StartIndexLocation;
             drawCmd.BaseVertexLocation = submesh->BaseVertexLocation;
-            drawCmd.InstanceCount = chunkCount;   // ← 여기 추가
+            drawCmd.InstanceCount = chunkCount;
+            drawCmd.StartInstanceLocation = instanceOffset + static_cast<UINT>(chunkStart);  // ← 여기 추가
             drawCmd.MaterialIndex = 0;
 
             currentFrameResource->DrawCommandBuffer->CopyData(argIndex, drawCmd);
@@ -232,7 +268,7 @@ void RenderSystem::render(World& world,
     // === Compute Shader Dispatch (배칭 후에 호출) ===
     if (currentFrameIndex < mIndirectArgsUAVHandles.size() && argIndex > 0)
     {
-        DispatchFrustumCulling(cmdList, currentFrameResource, descriptorAllocator, currentFrameIndex, argIndex);
+        DispatchFrustumCulling(cmdList, currentFrameResource, descriptorAllocator, currentFrameIndex, argIndex, viewProj);
 
         D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
             currentFrameResource->IndirectArgsUAVBuffer.Get(),
@@ -297,7 +333,8 @@ void RenderSystem::DispatchFrustumCulling(
     FrameResource* currentFrameResource,
     DescriptorAllocator* descriptorAllocator,
     int currentFrameIndex,
-    UINT drawCommandCount)          // ← maxInstanceCount 대신 drawCommandCount로 변경
+    UINT drawCommandCount,
+    const DirectX::XMMATRIX& viewProj)
 {
     if (!descriptorAllocator) return;
 
@@ -318,20 +355,27 @@ void RenderSystem::DispatchFrustumCulling(
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(1, descriptorHeaps);
 
-    cmdList->SetComputeRootSignature(computeRS);
-    cmdList->SetPipelineState(computePSO);
-
     struct CullConstants
     {
-        UINT DrawCommandCount;      // ← 이름 변경
+        XMMATRIX ViewProj;
+        UINT       DrawCommandCount;
     };
 
     CullConstants cullData{};
+    cullData.ViewProj = viewProj;
     cullData.DrawCommandCount = drawCommandCount;
 
-    cmdList->SetComputeRootDescriptorTable(0, mIndirectArgsUAVHandles[currentFrameIndex].GPU);
-    cmdList->SetComputeRoot32BitConstants(1, sizeof(CullConstants) / 4, &cullData, 0);
-    cmdList->SetComputeRootDescriptorTable(2, mDrawCommandSRVHandles[currentFrameIndex].GPU);
+    cmdList->SetComputeRootSignature(computeRS);
+    cmdList->SetPipelineState(computePSO);
+
+
+    cmdList->SetComputeRootDescriptorTable(0, mIndirectArgsUAVHandles[currentFrameIndex].GPU);      // u0 - IndirectArgs
+    cmdList->SetComputeRootDescriptorTable(1, mCompactedInstanceUAVHandles[currentFrameIndex].GPU); // u1 - CompactedInstance (새로 추가)
+
+    cmdList->SetComputeRoot32BitConstants(2, 17, &cullData, 0);                                      // b0 - ViewProj + Count
+
+    cmdList->SetComputeRootDescriptorTable(3, mDrawCommandSRVHandles[currentFrameIndex].GPU);       // t0 - DrawCommands
+    cmdList->SetComputeRootDescriptorTable(4, mInstanceDataSRVHandles[currentFrameIndex].GPU);      // t1 - InstanceData
 
     UINT threadGroupCount = (drawCommandCount + 63) / 64;
     cmdList->Dispatch(threadGroupCount, 1, 1);

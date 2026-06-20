@@ -16,6 +16,7 @@ struct FrameResource
     std::unique_ptr<UploadBuffer<InstanceData>>    InstanceDataBuffer = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Resource> IndirectArgsUAVBuffer;
     std::unique_ptr<UploadBuffer<IndirectDrawCommand>> DrawCommandBuffer = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Resource> CompactedInstanceBuffer;
     UINT64 FenceValue = 0;
 };
 
@@ -46,6 +47,21 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount, UINT
         IID_PPV_ARGS(&IndirectArgsUAVBuffer)));
 
     DrawCommandBuffer = std::make_unique<UploadBuffer<IndirectDrawCommand>>(device, 4096, false);
+
+    // Compacted Instance Buffer (UAV)
+    D3D12_HEAP_PROPERTIES heapPropComp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    D3D12_RESOURCE_DESC resDescComp = CD3DX12_RESOURCE_DESC::Buffer(
+        sizeof(InstanceData) * objectCount,           // 최대 인스턴스 수만큼
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+    );
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapPropComp,
+        D3D12_HEAP_FLAG_NONE,
+        &resDescComp,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        nullptr,
+        IID_PPV_ARGS(&CompactedInstanceBuffer)));
 }
 
 inline FrameResource::~FrameResource()
@@ -56,4 +72,5 @@ inline FrameResource::~FrameResource()
     if (ObjectCB)               ObjectCB.reset();
     if (PassCB)                 PassCB.reset();
     if (CmdListAlloc)           CmdListAlloc.Reset();
+    if (CompactedInstanceBuffer) CompactedInstanceBuffer.Reset();
 }

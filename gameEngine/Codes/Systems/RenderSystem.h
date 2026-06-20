@@ -39,7 +39,8 @@ public:
         FrameResource* currentFrameResource,
         DescriptorAllocator* descriptorAllocator,
         int currentFrameIndex,
-        UINT maxInstanceCount);
+        UINT maxInstanceCount,
+        const DirectX::XMMATRIX& viewProj);
 
     const RenderStats& GetLastRenderStats() const { return mLastRenderStats; }
 
@@ -48,6 +49,8 @@ private:
     std::vector<DescriptorAllocator::DescriptorHandle> mInstanceSRVHandles;
     std::vector<DescriptorAllocator::DescriptorHandle> mIndirectArgsUAVHandles;
     std::vector<DescriptorAllocator::DescriptorHandle> mDrawCommandSRVHandles;
+    std::vector<DescriptorAllocator::DescriptorHandle> mInstanceDataSRVHandles;
+    std::vector<DescriptorAllocator::DescriptorHandle> mCompactedInstanceUAVHandles;
     UINT mMaxInstancesPerFrame = 0;
     RenderStats mLastRenderStats{};
 };

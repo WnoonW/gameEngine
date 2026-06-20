@@ -25,6 +25,7 @@ struct IndirectDrawCommand
     UINT IndexCountPerInstance;
     UINT StartIndexLocation;
     UINT BaseVertexLocation;
-    UINT InstanceCount;    
+    UINT InstanceCount;
+    UINT StartInstanceLocation;   // ← 추가
     UINT MaterialIndex;
 };
