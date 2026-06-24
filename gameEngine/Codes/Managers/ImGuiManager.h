@@ -9,6 +9,7 @@
 #include <backends/imgui_impl_dx12.h>
 
 #include "DescriptorAllocator.h"
+#include "AppStruct.h"
 
 enum class ButtonAction
 {
@@ -39,7 +40,7 @@ public:
         DescriptorAllocator& globalDescriptorAllocator,
         IFunctionCallback* callback = nullptr);
 
-    void CustomUI();
+    void CustomUI(const MeshInstanceStats& stats);
 
     void Shutdown();
 

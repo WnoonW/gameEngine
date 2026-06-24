@@ -10,6 +10,7 @@ enum class RootSignatureType
     Scene,          // 일반 오브젝트 렌더링
     ImGui,          // ImGui 전용
     Shadow,         // Shadow Map
+	Command,        // ExecuteIndirect용
     // Transparent, PostProcess 등 나중에 추가
 };
 
@@ -22,6 +23,7 @@ public:
     void Shutdown();
 
     ID3D12RootSignature* GetRootSignature(RootSignatureType type);
+    ComPtr<ID3D12CommandSignature> GetOrCreateCommandSignature();
 
 private:
     RootSignatureManager() = default;
@@ -33,4 +35,5 @@ private:
 
     ID3D12Device* mDevice = nullptr;
     std::unordered_map<RootSignatureType, Microsoft::WRL::ComPtr<ID3D12RootSignature>> mRootSignatures;
+    ComPtr<ID3D12CommandSignature> mCommandSignature = nullptr;
 };

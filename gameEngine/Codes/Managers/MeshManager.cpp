@@ -77,7 +77,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		std::wstring msg = L"  [" + std::to_wstring(i) + L"] materialName = [" + wMaterialName + L"]\n";
 		OutputDebugStringW(msg.c_str());
 	}
-	OutputDebugStringW(L"========================================\n\n");
+	OutputDebugStringW(L"\n========================================\n\n");
 #endif
 
 

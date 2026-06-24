@@ -53,6 +53,51 @@ DescriptorAllocator::DescriptorHandle DescriptorAllocator::Allocate()
     return handle;
 }
 
+DescriptorAllocator::DescriptorHandle DescriptorAllocator::Allocate(UINT count)
+{
+    if (count == 0) count = 1;
+    if (mFreeList.size() < count)
+    {
+        throw std::runtime_error("Not enough descriptors in heap for range allocation.");
+    }
+
+    // 연속된 count개의 인덱스를 찾음 (간단한 구현)
+    std::vector<UINT> allocatedIndices;
+    allocatedIndices.reserve(count);
+
+    for (UINT i = 0; i < count; ++i)
+    {
+        if (mFreeList.empty()) break;
+
+        UINT index = mFreeList.front();
+        mFreeList.pop();
+        mIsUsed[index] = true;
+        allocatedIndices.push_back(index);
+    }
+
+    if (allocatedIndices.size() < count)
+    {
+        // 실패 시 롤백 (간단하게 예외 처리)
+        for (auto idx : allocatedIndices)
+        {
+            mIsUsed[idx] = false;
+            mFreeList.push(idx);
+        }
+        throw std::runtime_error("Failed to allocate contiguous descriptor range.");
+    }
+
+    DescriptorHandle handle;
+    handle.Index = allocatedIndices[0];   // 시작 인덱스
+
+    auto cpuStart = mHeap->GetCPUDescriptorHandleForHeapStart();
+    auto gpuStart = mHeap->GetGPUDescriptorHandleForHeapStart();
+
+    handle.CPU.ptr = cpuStart.ptr + (UINT64)allocatedIndices[0] * mDescriptorSize;
+    handle.GPU.ptr = gpuStart.ptr + (UINT64)allocatedIndices[0] * mDescriptorSize;
+
+    return handle;
+}
+
 void DescriptorAllocator::Free(const DescriptorHandle& handle)
 {
     UINT index = handle.Index;

@@ -1,4 +1,6 @@
 #include "ImGuiManager.h"
+#include <algorithm>
+#include <vector>
 
 bool ImGuiManager::Initialize(
     HWND hwnd,
@@ -52,11 +54,44 @@ bool ImGuiManager::Initialize(
     return true;
 }
 
-void ImGuiManager::CustomUI()
+void ImGuiManager::CustomUI(const MeshInstanceStats& stats)
 {
     ImGui::Begin("V3.0-UI Debug Window");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
+    ImGui::Separator();
+    ImGui::Text("Mesh Instances");
+    if (stats.countByMesh.empty())
+    {
+        ImGui::Text("  (none)");
+    }
+    else
+    {
+        std::vector<std::pair<std::string, int>> meshCounts(stats.countByMesh.begin(), stats.countByMesh.end());
+        std::sort(meshCounts.begin(), meshCounts.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        for (const auto& [meshName, count] : meshCounts)
+            ImGui::Text("  %s: %d", meshName.c_str(), count);
+    }
+    ImGui::Text("Total: %d", stats.totalInstances);
+
+    ImGui::Separator();
+    ImGui::Text("Capacity");
+    ImGui::Text("  Object CB: %u / %u", stats.objectCBUsed, stats.objectCBCapacity);
+    ImGui::Text("  Draw cmds: %u / %u", stats.estimatedDrawCommands, stats.drawCommandCapacity);
+    ImGui::Text("  Descriptors: %u / %u", stats.descriptorsUsed, stats.descriptorCapacity);
+
+    const bool nearObjectLimit = stats.objectCBUsed >= stats.objectCBCapacity * 9 / 10;
+    const bool nearDrawLimit = stats.estimatedDrawCommands >= stats.drawCommandCapacity * 9 / 10;
+    const bool nearDescriptorLimit = stats.descriptorsUsed >= stats.descriptorCapacity * 9 / 10;
+    if (nearObjectLimit || nearDrawLimit || nearDescriptorLimit)
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Warning: nearing capacity limit");
+
+    if (!stats.lastCreateError.empty())
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Last spawn error: %s", stats.lastCreateError.c_str());
+
+    ImGui::Separator();
     if (ImGui::Button("Reset Scene"))
         if (m_Callback) m_Callback->buttonClicked(ButtonAction::ResetScene);
 

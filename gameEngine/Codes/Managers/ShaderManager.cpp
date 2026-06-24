@@ -9,7 +9,9 @@ ShaderManager& ShaderManager::Get()
 }
 
 void ShaderManager::Initialize()
-{}
+{
+    mShaderCache.clear();
+}
 
 void ShaderManager::Shutdown()
 {
@@ -61,10 +63,10 @@ ComPtr<ID3DBlob> ShaderManager::GetShader(
 
 ComPtr<ID3DBlob> ShaderManager::GetVertexShader(const std::wstring& filePath, const std::string& entryPoint)
 {
-    return GetShader(filePath, entryPoint, "vs_5_0");
+    return GetShader(filePath, entryPoint, "vs_5_1");
 }
 
 ComPtr<ID3DBlob> ShaderManager::GetPixelShader(const std::wstring& filePath, const std::string& entryPoint)
 {
-    return GetShader(filePath, entryPoint, "ps_5_0");
+    return GetShader(filePath, entryPoint, "ps_5_1");
 }

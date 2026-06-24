@@ -35,6 +35,7 @@ public:
 
     void Initialize(ID3D12Device* device);
     void Shutdown();
+    void InvalidateCache();
 
     // PSO를 가져오거나 없으면 생성
     ID3D12PipelineState* GetOrCreatePSO(

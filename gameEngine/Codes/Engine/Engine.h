@@ -37,6 +37,8 @@ public:
         const std::string& materialName,
         XMFLOAT3 position = { 0.0f, 0.0f, 0.0f });
 
+    MeshInstanceStats CollectMeshInstanceStats();
+
     void Shutdown();
 private:
     ECS::World mWorld;
@@ -49,4 +51,5 @@ private:
     DescriptorAllocator* mDescriptorAllocator = nullptr;
 
     uint32_t mNextObjectCBIndex = 0;
+    std::string mLastCreateError;
 };

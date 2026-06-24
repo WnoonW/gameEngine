@@ -23,12 +23,13 @@ public:
 
     // descriptor 할당
     DescriptorHandle Allocate();
+    DescriptorHandle Allocate(UINT count);
 
     // descriptor 반환 (오브젝트 삭제 시 호출)
     void Free(const DescriptorHandle& handle);
 
-    // 현재 사용 중인 descriptor 개수
     UINT GetUsedCount() const;
+    UINT GetCapacity() const { return mNumDescriptors; }
 
     ID3D12DescriptorHeap* GetHeap() const { return mHeap.Get(); }
     UINT GetDescriptorSize() const { return mDescriptorSize; }

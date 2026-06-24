@@ -42,6 +42,11 @@ void PipelineStateManager::Shutdown()
     mDevice = nullptr;
 }
 
+void PipelineStateManager::InvalidateCache()
+{
+    mPSOCache.clear();
+}
+
 ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
     const PSOKey& key,
     ID3D12RootSignature* rootSignature,

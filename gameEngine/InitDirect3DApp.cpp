@@ -123,7 +123,7 @@ void InitDirect3DApp::OnResize()
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
-	mImGuiManager.CustomUI();
+	mImGuiManager.CustomUI(mEngine.CollectMeshInstanceStats());
 
 	mEngine.Update();
 }
@@ -179,6 +179,9 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
+	// CommandList Reset 후 topology는 undefined → ExecuteIndirect 전에 반드시 설정
+	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
 	// === Engine을 통해 렌더링 ===
 	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
 
@@ -211,7 +214,7 @@ void InitDirect3DApp::EndFrame()
 // =====================================================
 void InitDirect3DApp::InitializeCoreSystems()
 {
-	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
+	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), RenderLimits::DescriptorHeapCapacity);
 
 	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(),
 		gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
@@ -369,9 +372,7 @@ void InitDirect3DApp::OnDestroy()
 {
 	mEngine.Shutdown();
 
-	ImGui_ImplDX12_Shutdown();
-	ImGui_ImplWin32_Shutdown();
-	ImGui::DestroyContext();
+	mImGuiManager.Shutdown();
 
 	MeshManager::Get().Shutdown();
 	MaterialManager::Get().Shutdown();

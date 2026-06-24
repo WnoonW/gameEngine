@@ -11,7 +11,7 @@
 
 #include "d3dUtil.h"
 #include "GameTimer.h"
-#include "../Structs/AppStruct.h"
+#include "AppStruct.h"
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
@@ -104,10 +104,12 @@ protected:
     Microsoft::WRL::ComPtr<ID3D12Fence> mFence;
     UINT64 mCurrentFence = 0;
 
-	static const int gNumFrameResources = 3;           // 2 또는 3 추천
+	static const int gNumFrameResources = 3;           
 	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
 	int mCurrFrameResourceIndex = 0;
 	FrameResource* mCurrFrameResource = nullptr;
+	const UINT MaxDrawCommandCount = RenderLimits::MaxDrawCommandCount;
+	const UINT ArgumentBufferSize = MaxDrawCommandCount * sizeof(IndirectDrawCommand);
 
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;

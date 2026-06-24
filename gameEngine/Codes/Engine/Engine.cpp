@@ -24,6 +24,7 @@ bool Engine::Initialize(ID3D12Device* device,
     mResourceManager = &ResourceManager::Get();
     mResourceManager->Initialize(); 
 
+	MaterialManager::Get().InitializeTextureTable(descriptorAllocator, 1024); 
     ShaderManager::Get().Initialize();
     RootSignatureManager::Get().Initialize(device);
     PipelineStateManager::Get().Initialize(device);
@@ -33,7 +34,6 @@ bool Engine::Initialize(ID3D12Device* device,
 
 void Engine::Update()
 {
-    // 나중에 TransformSystem, AnimationSystem 등 추가 예정
 }
 
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
@@ -42,21 +42,90 @@ void Engine::Render(ID3D12GraphicsCommandList* cmdList,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
-    mRenderSystem.render(mWorld, cmdList, currentFrameResource,
+    mRenderSystem.renderExecuteIndirect(mWorld, cmdList, currentFrameResource,
         mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix);
+}
+
+static uint32_t CountEstimatedDrawCommands(ECS::World& world)
+{
+    uint32_t drawCommands = 0;
+    world.ForEach<RenderableComponent>(
+        [&](Entity, RenderableComponent& rend)
+        {
+            if (!rend.visible || !rend.mesh) return;
+            drawCommands += static_cast<uint32_t>(rend.mesh->DrawArgs.size());
+        });
+    return drawCommands;
+}
+
+MeshInstanceStats Engine::CollectMeshInstanceStats()
+{
+    MeshInstanceStats stats;
+    stats.objectCBUsed = mNextObjectCBIndex;
+    stats.lastCreateError = mLastCreateError;
+
+    if (mDescriptorAllocator)
+    {
+        stats.descriptorsUsed = mDescriptorAllocator->GetUsedCount();
+        stats.descriptorCapacity = mDescriptorAllocator->GetCapacity();
+    }
+
+    mWorld.ForEach<TransformComponent, RenderableComponent>(
+        [&](Entity, TransformComponent&, RenderableComponent& rend)
+        {
+            if (!rend.visible || !rend.mesh) return;
+
+            const std::string meshName = rend.mesh->name.empty() ? "(unnamed)" : rend.mesh->name;
+            stats.countByMesh[meshName]++;
+            stats.totalInstances++;
+            stats.estimatedDrawCommands += static_cast<uint32_t>(rend.mesh->DrawArgs.size());
+        });
+
+    return stats;
 }
 
 Entity Engine::CreateRenderableEntity(const std::string& meshName,
     const std::string& materialName,
     XMFLOAT3 position)
 {
+    mLastCreateError.clear();
+
     Mesh* mesh = mResourceManager->GetMesh(meshName);
     auto material = mResourceManager->GetMaterial(materialName);
 
     if (!mesh || !material)
     {
+        mLastCreateError = "Mesh or material not found.";
         OutputDebugStringA("[Engine] CreateRenderableEntity failed: mesh or material not found\n");
         return INVALID_ENTITY;
+    }
+
+    if (mNextObjectCBIndex >= RenderLimits::MaxObjectCount)
+    {
+        mLastCreateError = "Object constant buffer capacity reached.";
+        OutputDebugStringA("[Engine] CreateRenderableEntity failed: object CB full\n");
+        return INVALID_ENTITY;
+    }
+
+    const uint32_t newDrawCommands = static_cast<uint32_t>(mesh->DrawArgs.size());
+    const uint32_t currentDrawCommands = CountEstimatedDrawCommands(mWorld);
+    if (currentDrawCommands + newDrawCommands > RenderLimits::MaxDrawCommandCount)
+    {
+        mLastCreateError = "Draw command buffer capacity would be exceeded.";
+        OutputDebugStringA("[Engine] CreateRenderableEntity failed: draw command buffer full\n");
+        return INVALID_ENTITY;
+    }
+
+    if (mDescriptorAllocator)
+    {
+        const UINT descriptorsNeeded = static_cast<UINT>(mGNumFrameResources);
+        const UINT descriptorsFree = mDescriptorAllocator->GetCapacity() - mDescriptorAllocator->GetUsedCount();
+        if (descriptorsFree < descriptorsNeeded)
+        {
+            mLastCreateError = "Descriptor heap is full.";
+            OutputDebugStringA("[Engine] CreateRenderableEntity failed: descriptor heap full\n");
+            return INVALID_ENTITY;
+        }
     }
 
     Entity entity = mWorld.CreateEntity();
@@ -77,5 +146,8 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
 void Engine::Shutdown()
 {
     mResourceManager->Shutdown();
-    // 필요하면 mRenderSystem, mWorld 관련 정리도 여기에 추가
+
+    PipelineStateManager::Get().Shutdown();
+    RootSignatureManager::Get().Shutdown();
+    ShaderManager::Get().Shutdown();
 }
