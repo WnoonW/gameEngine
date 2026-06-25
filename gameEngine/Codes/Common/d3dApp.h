@@ -127,6 +127,10 @@ protected:
     Microsoft::WRL::ComPtr<ID3D12Resource> mSwapChainBuffer[SwapChainBufferCount];
     Microsoft::WRL::ComPtr<ID3D12Resource> mDepthStencilBuffer;
 
+    // SRV for the depth buffer, used for occlusion culling in compute shader
+    D3D12_CPU_DESCRIPTOR_HANDLE mDepthSrvCpuHandle{};
+    D3D12_GPU_DESCRIPTOR_HANDLE mDepthSrvGpuHandle{};
+
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mRtvHeap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mDsvHeap;
 

@@ -149,7 +149,7 @@ ComPtr<ID3D12CommandSignature> RootSignatureManager::GetOrCreateCommandSignature
 // ============================================================
 void RootSignatureManager::CreateBuildIndirectRootSignature()
 {
-    CD3DX12_ROOT_PARAMETER rootParams[3] = {};
+    CD3DX12_ROOT_PARAMETER rootParams[4] = {};
 
     // t0 : input GroupDrawData (root SRV - 간단 바인딩)
     rootParams[0].InitAsShaderResourceView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
@@ -160,8 +160,12 @@ void RootSignatureManager::CreateBuildIndirectRootSignature()
     // b0 : 상수 (numGroups) - 32bit root constant으로 사용
     rootParams[2].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL); // 1 DWORD @ b0
 
+    // t1 : depth SRV for occlusion culling (Hi-Z or depth) - use descriptor table
+    CD3DX12_DESCRIPTOR_RANGE depthSrvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
+    rootParams[3].InitAsDescriptorTable(1, &depthSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        3, rootParams,
+        4, rootParams,
         0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
@@ -187,4 +191,4 @@ void RootSignatureManager::CreateBuildIndirectRootSignature()
         IID_PPV_ARGS(&rootSig)));
 
     mRootSignatures[RootSignatureType::BuildIndirect] = rootSig;
-}
+ }

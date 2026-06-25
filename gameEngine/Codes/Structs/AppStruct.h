@@ -54,6 +54,7 @@ struct FrameResource
     // GPU Compute Shader가 IndirectDrawCommand를 기록할 버퍼 (UAV)
     Microsoft::WRL::ComPtr<ID3D12Resource> GPUArgumentBuffer;
     UINT GPUArgumentBufferSize = 0;
+    D3D12_RESOURCE_STATES mGPUArgCurrentState = D3D12_RESOURCE_STATE_COMMON;
 
     // Compute Shader 입력용 GroupDrawData 업로드 버퍼 (재사용)
     Microsoft::WRL::ComPtr<ID3D12Resource> GroupDataUploadBuffer;
@@ -164,9 +165,11 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount, UINT
             &heapProps,
             D3D12_HEAP_FLAG_NONE,
             &bufferDesc,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,  // Compute가 바로 쓰기 좋게
+            D3D12_RESOURCE_STATE_COMMON,  // Buffers start in COMMON; transition later
             nullptr,
             IID_PPV_ARGS(&GPUArgumentBuffer)));
+
+        mGPUArgCurrentState = D3D12_RESOURCE_STATE_COMMON;
     }
 
     // GroupDrawData 업로드 버퍼 (Compute 입력, 최대 4096 groups 여유)

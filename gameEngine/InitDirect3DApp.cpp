@@ -22,6 +22,8 @@ private:
 	Engine mEngine;
 	int mSpiralIndex = 0;
 
+    DescriptorAllocator::DescriptorHandle mDepthSrvHandle{};
+
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
@@ -94,6 +96,21 @@ bool InitDirect3DApp::Initialize()
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
 	InitializeCoreSystems();
+
+	// Create depth SRV now that allocator is initialized (first OnResize happened before)
+	if (mDepthSrvHandle.CPU.ptr == 0 && mDepthStencilBuffer)
+	{
+		mDepthSrvHandle = mGlobalDescriptorAllocator.Allocate();
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Texture2D.MipLevels = 1;
+
+		md3dDevice->CreateShaderResourceView(mDepthStencilBuffer.Get(), &srvDesc, mDepthSrvHandle.CPU);
+	}
+
 	LoadAssets();
 	CreateInitialScene();
 
@@ -110,6 +127,26 @@ void InitDirect3DApp::OnResize()
 	D3DApp::OnResize();
 
 	mEngine.GetCamera().SetLens(XM_PIDIV4, AspectRatio(), 0.1f, 1000.0f);
+
+	// Recreate SRV for new depth buffer on resize
+	if (mDepthSrvHandle.CPU.ptr != 0)
+	{
+		mGlobalDescriptorAllocator.Free(mDepthSrvHandle);
+		mDepthSrvHandle = {};
+	}
+
+	if (mDepthStencilBuffer && mGlobalDescriptorAllocator.GetCapacity() > 0)
+	{
+		mDepthSrvHandle = mGlobalDescriptorAllocator.Allocate();
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Texture2D.MipLevels = 1;
+
+		md3dDevice->CreateShaderResourceView(mDepthStencilBuffer.Get(), &srvDesc, mDepthSrvHandle.CPU);
+	}
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
@@ -148,6 +185,10 @@ void InitDirect3DApp::BeginFrame()
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
 		CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
+	// Transition depth back to write for this frame
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(),
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+
 	mCommandList->RSSetViewports(1, &mScreenViewport);
 	mCommandList->RSSetScissorRects(1, &mScissorRect);
 
@@ -174,6 +215,9 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	// CommandList Reset 후 topology는 undefined → ExecuteIndirect 전에 반드시 설정
 	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+	// Pass depth SRV for occlusion culling (previous frame's depth)
+	mEngine.SetDepthSrvGpu(mDepthSrvHandle.GPU);
+
 	// === Engine을 통해 렌더링 ===
 	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex);
 
@@ -185,6 +229,10 @@ void InitDirect3DApp::EndFrame()
 	// Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	// Transition depth to SRV for next frame's occlusion culling (after draws are done)
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(),
+		D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 
 	// Done recording commands.
 	ThrowIfFailed(mCommandList->Close());

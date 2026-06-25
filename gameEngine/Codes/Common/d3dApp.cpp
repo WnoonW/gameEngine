@@ -509,6 +509,18 @@ void D3DApp::OnResize()
 	dsvDesc.Texture2D.MipSlice = 0;
 	md3dDevice->CreateDepthStencilView(mDepthStencilBuffer.Get(), &dsvDesc, DepthStencilView());
 
+	// Create SRV for depth (for occlusion culling / Hi-Z etc.)
+	// Use typeless resource, SRV format R24_UNORM_X8_TYPELESS
+	D3D12_SHADER_RESOURCE_VIEW_DESC depthSrvDesc = {};
+	depthSrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+	depthSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	depthSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	depthSrvDesc.Texture2D.MipLevels = 1;
+
+	// Allocate from global? For simplicity, we'll manage descriptor later in RenderSystem.
+	// For now, we create the view when needed, or add a persistent one.
+	// We'll add code in Engine/RenderSystem to create/bind SRV dynamically if needed.
+
 	// Transition the resource from its initial state to be used as a depth buffer.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(),
 		D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE));

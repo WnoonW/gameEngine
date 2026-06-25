@@ -46,7 +46,8 @@ void Engine::Render(ID3D12GraphicsCommandList* cmdList,
     const XMMATRIX projMatrix = mCamera.GetProj();
 
     mRenderSystem.renderExecuteIndirect(mWorld, cmdList, currentFrameResource,
-        mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix);
+        mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix,
+        mDepthSrvGpu);  // pass for occlusion culling
 }
 
 static uint32_t CountEstimatedDrawCommands(ECS::World& world)

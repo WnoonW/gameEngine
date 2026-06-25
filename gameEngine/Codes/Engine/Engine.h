@@ -55,4 +55,9 @@ private:
     uint32_t mNextObjectCBIndex = 0;
     std::string mLastCreateError;
     Camera mCamera;
+
+    D3D12_GPU_DESCRIPTOR_HANDLE mDepthSrvGpu{};  // set from app for occlusion
+
+public:
+    void SetDepthSrvGpu(D3D12_GPU_DESCRIPTOR_HANDLE srv) { mDepthSrvGpu = srv; }
 };
