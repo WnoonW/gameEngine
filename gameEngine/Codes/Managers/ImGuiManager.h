@@ -31,6 +31,7 @@ class IFunctionCallback
 {
 public:
 	virtual void buttonClicked(ButtonAction action) = 0;
+	virtual void RequestObjectSpawn(const std::string& meshName, const std::string& materialName) = 0;
 };
 
 
@@ -55,8 +56,15 @@ public:
     // ImGui 창을 다 그린 후에 호출 (CommandList에 실제 그리기)
     void Render(ID3D12GraphicsCommandList* cmdList);
 
+    // 오브젝트(메시) 선택 및 생성용 별도 창
+    void DrawObjectSelector();
+
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
     ID3D12Device* m_Device = nullptr;
     IFunctionCallback* m_Callback = nullptr;
+
+    // Object selector state
+    std::string m_SelectedMesh;
+    std::string m_SelectedMaterial;
 };

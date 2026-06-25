@@ -133,6 +133,17 @@ Mesh* MeshManager::GetMesh(const std::string& name) const
 	return nullptr;
 }
 
+std::vector<std::string> MeshManager::GetAllMeshNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(mMeshes.size());
+    for (const auto& pair : mMeshes)
+    {
+        names.push_back(pair.first);
+    }
+    return names;
+}
+
 void MeshManager::Shutdown()
 {
 	mMeshes.clear();

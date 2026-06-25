@@ -2,11 +2,13 @@
 #pragma warning(disable: 28251)
 #pragma warning(disable: 6387)
 #include <DirectXColors.h>
+#include <string>
 #include "d3dApp.h"
 #include "DescriptorAllocator.h"
 #include "ImGuiManager.h"
 #include "Engine.h"
 #include "constantStruct.h"
+#include "ECS/Entity.h"
 
 using namespace DirectX;
 
@@ -41,6 +43,7 @@ private:
 	virtual void OnKeyDown(WPARAM key)override;
 
 	virtual void buttonClicked(ButtonAction action) override;
+	virtual void RequestObjectSpawn(const std::string& meshName, const std::string& materialName) override;
 
 private:
 	void InitializeCoreSystems();
@@ -156,6 +159,7 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	auto meshStats = mEngine.CollectMeshInstanceStats();
 	auto cullStats = mEngine.GetLastCullingStats();
 	mImGuiManager.CustomUI(meshStats, cullStats);
+	mImGuiManager.DrawObjectSelector();
 
 	mEngine.Update();
 }
@@ -428,6 +432,19 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 	else if (action == ButtonAction::ToggleWireframe)
 	{
 		// TODO: 구현 (Engine이나 렌더에 wireframe 플래그 추가 필요)
+	}
+}
+
+void InitDirect3DApp::RequestObjectSpawn(const std::string& meshName, const std::string& materialName)
+{
+	// 선택한 오브젝트 생성. 연속 생성 시 겹치지 않게 x 오프셋
+	static int selectorSpawnCount = 0;
+	XMFLOAT3 spawnPos = { selectorSpawnCount * 2.0f, 0.0f, 0.0f };
+	++selectorSpawnCount;
+	Entity e = mEngine.CreateRenderableEntity(meshName, materialName, spawnPos);
+	if (e == INVALID_ENTITY)
+	{
+		// 실패 시 에러는 Engine의 lastCreateError에 기록됨 (UI stats로 표시)
 	}
 }
 #pragma endregion

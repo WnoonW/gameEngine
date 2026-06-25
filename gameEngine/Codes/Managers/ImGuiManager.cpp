@@ -1,6 +1,9 @@
 #include "ImGuiManager.h"
+#include "MeshManager.h"
+#include "MaterialManager.h"
 #include <algorithm>
 #include <vector>
+#include <string>
 
 bool ImGuiManager::Initialize(
     HWND hwnd,
@@ -125,6 +128,106 @@ void ImGuiManager::CustomUI(const MeshInstanceStats& meshStats, const CullingSta
     if (ImGui::Button("1200 x 800"))  if (m_Callback) m_Callback->buttonClicked(ButtonAction::SetRes_1200x800);
 
     ImGui::TextDisabled("(Resizes the window)");
+
+    ImGui::End();
+}
+
+void ImGuiManager::DrawObjectSelector()
+{
+    auto meshNames = MeshManager::Get().GetAllMeshNames();
+    auto matNames = MaterialManager::Get().GetAllMaterialNames();
+
+    // 초기 선택 설정 (첫 호출 시)
+    if (m_SelectedMesh.empty() && !meshNames.empty())
+    {
+        m_SelectedMesh = meshNames[0];
+    }
+    if (m_SelectedMaterial.empty() && !matNames.empty())
+    {
+        // "Test" 우선, 없으면 첫번째
+        auto it = std::find(matNames.begin(), matNames.end(), "Test");
+        m_SelectedMaterial = (it != matNames.end()) ? "Test" : matNames[0];
+    }
+
+    ImGui::Begin("Object Selector");
+
+    ImGui::Text("Loaded Meshes");
+    if (meshNames.empty())
+    {
+        ImGui::TextDisabled("(no meshes loaded)");
+    }
+    else
+    {
+        if (ImGui::BeginListBox("##MeshList", ImVec2(-FLT_MIN, 5 * ImGui::GetTextLineHeightWithSpacing())))
+        {
+            for (const auto& name : meshNames)
+            {
+                bool isSelected = (name == m_SelectedMesh);
+                if (ImGui::Selectable(name.c_str(), isSelected))
+                {
+                    m_SelectedMesh = name;
+                }
+                if (isSelected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndListBox();
+        }
+    }
+
+    ImGui::Separator();
+
+    ImGui::Text("Material");
+    if (matNames.empty())
+    {
+        ImGui::TextDisabled("(no materials)");
+    }
+    else
+    {
+        // Combo for material
+        int currentMatIdx = 0;
+        for (size_t i = 0; i < matNames.size(); ++i)
+        {
+            if (matNames[i] == m_SelectedMaterial)
+            {
+                currentMatIdx = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (ImGui::BeginCombo("##MatCombo", m_SelectedMaterial.c_str()))
+        {
+            for (int i = 0; i < static_cast<int>(matNames.size()); ++i)
+            {
+                bool isSel = (i == currentMatIdx);
+                if (ImGui::Selectable(matNames[i].c_str(), isSel))
+                {
+                    m_SelectedMaterial = matNames[i];
+                }
+                if (isSel)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+    }
+
+    ImGui::Separator();
+
+    bool canSpawn = !m_SelectedMesh.empty() && !m_SelectedMaterial.empty();
+    if (!canSpawn)
+        ImGui::BeginDisabled();
+
+    if (ImGui::Button("Spawn Selected", ImVec2(-FLT_MIN, 0)))
+    {
+        if (m_Callback)
+        {
+            m_Callback->RequestObjectSpawn(m_SelectedMesh, m_SelectedMaterial);
+        }
+    }
+
+    if (!canSpawn)
+        ImGui::EndDisabled();
+
+    ImGui::TextDisabled("Spawns at origin (0,0,0). Use + key for spiral spawn.");
 
     ImGui::End();
 }

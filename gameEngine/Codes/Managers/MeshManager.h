@@ -68,6 +68,8 @@ public:
 
     Mesh* GetMesh(const std::string& name) const;
 
+    std::vector<std::string> GetAllMeshNames() const;
+
     void Shutdown();
 
     // 모든 메시의 지오메트리를 하나의 큰 VB/IB로 병합 (GPU-Driven + ExecuteIndirect용)

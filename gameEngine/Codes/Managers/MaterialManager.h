@@ -35,6 +35,8 @@ public:
     std::shared_ptr<Material> GetMaterial(const std::string& name);
     std::shared_ptr<Material> GetDefaultMaterial();
 
+    std::vector<std::string> GetAllMaterialNames() const;
+
     // === ExecuteIndirect용 함수 ===
     void InitializeTextureTable(DescriptorAllocator& descriptorAllocator, UINT maxCount = 1024);
     void BindAllTextures(ID3D12GraphicsCommandList* cmdList, UINT rootParameterIndex);
