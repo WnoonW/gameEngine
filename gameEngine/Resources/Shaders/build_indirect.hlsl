@@ -42,12 +42,12 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     GroupDrawData data = gGroupData[i];
 
     IndirectDrawCommand cmd;
-    cmd.baseInstance = data.baseInstance;
+    cmd.baseInstance = data.baseInstance;  // 이 값이 CommandSignature에 의해 root constant(b13)로 전달됨
     cmd.IndexCountPerInstance = data.indexCountPerInstance;
     cmd.InstanceCount = data.instanceCount;
     cmd.StartIndexLocation = data.startIndexLocation;
     cmd.BaseVertexLocation = data.baseVertexLocation;
-    cmd.StartInstanceLocation = data.baseInstance;   // consistent with previous implementation
+    cmd.StartInstanceLocation = 0;  // CONSTANT의 baseInstance를 사용하므로 0
 
     gOutCommands[i] = cmd;
 

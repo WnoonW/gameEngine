@@ -70,6 +70,21 @@ public:
 
     void Shutdown();
 
+    // 모든 메시의 지오메트리를 하나의 큰 VB/IB로 병합 (GPU-Driven + ExecuteIndirect용)
+    bool BuildGlobalBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
+
+    static ComPtr<ID3D12Resource> sGlobalVertexBuffer;
+    static ComPtr<ID3D12Resource> sGlobalIndexBuffer;
+    static UINT sGlobalVertexCount;
+    static UINT sGlobalIndexCount;
+
+    static ComPtr<ID3D12Resource> sGlobalVertexUploadHeap;
+    static ComPtr<ID3D12Resource> sGlobalIndexUploadHeap;
+
 private:
     std::unordered_map<std::string, std::shared_ptr<Mesh>> mMeshes;
+
+    // 전역 지오메트리 축적용 (CreateMesh 단계에서 쌓음)
+    static std::vector<Vertex> sAllVertices;
+    static std::vector<uint32_t> sAllIndices;
 };

@@ -10,16 +10,11 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 	mMesh.name = name;
 	//============================================================================
 
-
 	//모델 로드
 	MeshLoad(std::filesystem::path(filepath), mMesh.cpuModel);
 	//============================================================================
 
-
-	//서브메시 합체
-	std::vector<Vertex> allVertices;
-	std::vector<uint32_t> allIndices;
-
+	// 서브메시를 전역 버퍼에 누적 (하나의 큰 VB/IB로 합침)
 	struct SubmeshOffset
 	{
 		UINT indexCount;
@@ -30,34 +25,26 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 
 	for (const auto& sub : mMesh.cpuModel.submeshes)
 	{
-		UINT baseVertex = (UINT)allVertices.size();
-		UINT startIndex = (UINT)allIndices.size();
+		UINT baseVertex = (UINT)sAllVertices.size();
+		UINT startIndex = (UINT)sAllIndices.size();
 
-		// 정점 추가
-		allVertices.insert(allVertices.end(), sub.vertices.begin(), sub.vertices.end());
+		// 정점 추가 (전역)
+		sAllVertices.insert(sAllVertices.end(), sub.vertices.begin(), sub.vertices.end());
 
-		// 인덱스 추가 (baseVertex를 더해줘야 함)
+		// 인덱스 추가 (baseVertex를 더해 pre-adjust)
 		for (auto index : sub.indices)
 		{
-			allIndices.push_back(index + baseVertex);
+			sAllIndices.push_back(index + baseVertex);
 		}
 
-		// 오프셋 기록
+		// 오프셋 기록 (이제 global 기준)
 		offsets.push_back({ (UINT)sub.indices.size(), startIndex, baseVertex });
 	}
 	//============================================================================
 
-
-	mMesh.vertexCount = (UINT)allVertices.size();
-	mMesh.indexCount = (UINT)allIndices.size();
-
-
-	//버퍼 생성
-	const UINT vbByteSize = mMesh.vertexCount * sizeof(Vertex);
-	const UINT ibByteSize = mMesh.indexCount * sizeof(uint32_t);
-
-	mMesh.vertexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, allVertices.data(), vbByteSize, mMesh.vertexUploadHeap);
-	mMesh.indexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, allIndices.data(), ibByteSize, mMesh.indexUploadHeap);
+	mMesh.vertexCount = (UINT)sAllVertices.size();  // 임시, global build 후 갱신
+	mMesh.indexCount = (UINT)sAllIndices.size();
+	// per-mesh buffer는 생성하지 않음 (global 사용)
 	//============================================================================
 
 
@@ -82,6 +69,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 
 
 	//각 서브메시 등록 (submesh_0, submesh_1 ...)
+	// offsets의 start/base 는 이미 global 기준임
 	for (size_t i = 0; i < offsets.size(); ++i)
 	{
 		if (offsets[i].indexCount == 0) continue;
@@ -89,7 +77,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		SubmeshGeometry submesh;
 		submesh.IndexCount = offsets[i].indexCount;
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
-		submesh.BaseVertexLocation = 0;                    // ← 여기 중요! 0으로 고정
+		submesh.BaseVertexLocation = 0;                    // pre-adjust 했으므로 0
 		submesh.materialName = mMesh.cpuModel.submeshes[i].materialName;
 		std::string key = "submesh_" + std::to_string(i);
 		mMesh.DrawArgs[key] = submesh;
@@ -147,4 +135,56 @@ Mesh* MeshManager::GetMesh(const std::string& name) const
 void MeshManager::Shutdown()
 {
 	mMeshes.clear();
+	sAllVertices.clear();
+	sAllIndices.clear();
+	sGlobalVertexBuffer.Reset();
+	sGlobalIndexBuffer.Reset();
+	sGlobalVertexUploadHeap.Reset();
+	sGlobalIndexUploadHeap.Reset();
+	sGlobalVertexCount = 0;
+	sGlobalIndexCount = 0;
+}
+
+// static 멤버 정의
+std::vector<Vertex> MeshManager::sAllVertices;
+std::vector<uint32_t> MeshManager::sAllIndices;
+ComPtr<ID3D12Resource> MeshManager::sGlobalVertexBuffer;
+ComPtr<ID3D12Resource> MeshManager::sGlobalIndexBuffer;
+ComPtr<ID3D12Resource> MeshManager::sGlobalVertexUploadHeap;
+ComPtr<ID3D12Resource> MeshManager::sGlobalIndexUploadHeap;
+UINT MeshManager::sGlobalVertexCount = 0;
+UINT MeshManager::sGlobalIndexCount = 0;
+
+bool MeshManager::BuildGlobalBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
+{
+	if (sAllVertices.empty() || sAllIndices.empty())
+	{
+		OutputDebugStringW(L"[MeshManager] No geometry to build global buffers.\n");
+		return false;
+	}
+
+	const UINT vbByteSize = (UINT)sAllVertices.size() * sizeof(Vertex);
+	const UINT ibByteSize = (UINT)sAllIndices.size() * sizeof(uint32_t);
+
+	sGlobalVertexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, sAllVertices.data(), vbByteSize, sGlobalVertexUploadHeap);
+	sGlobalIndexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, sAllIndices.data(), ibByteSize, sGlobalIndexUploadHeap);
+
+	sGlobalVertexCount = (UINT)sAllVertices.size();
+	sGlobalIndexCount = (UINT)sAllIndices.size();
+
+	// 모든 로드된 메시에 global buffer 할당 (같은 VB/IB 공유)
+	for (auto& pair : mMeshes)
+	{
+		Mesh* m = pair.second.get();
+		if (m)
+		{
+			m->vertexBuffer = sGlobalVertexBuffer;
+			m->indexBuffer = sGlobalIndexBuffer;
+			m->vertexCount = sGlobalVertexCount;
+			m->indexCount = sGlobalIndexCount;
+		}
+	}
+
+	OutputDebugStringW(L"[MeshManager] Global geometry buffers created successfully.\n");
+	return true;
 }

@@ -258,6 +258,9 @@ void InitDirect3DApp::LoadAssets()
 	{
 		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
 	}
+
+	// 모든 지오메트리를 하나의 큰 VB/IB로 병합 (ExecuteIndirect + GPU-driven 용)
+	MeshManager::Get().BuildGlobalBuffers(md3dDevice.Get(), mCommandList.Get());
 }
 
 // =====================================================

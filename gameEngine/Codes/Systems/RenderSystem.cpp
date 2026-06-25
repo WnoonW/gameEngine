@@ -56,15 +56,10 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     const XMMATRIX& projMatrix)
 {
     // ============================================================
-    // renderExecuteIndirect - ExecuteIndirect + Instancing 최적화 버전
-    // ------------------------------------------------------------
-    // 목적:
-    //   - 같은 Mesh + 같은 Material 을 사용하는 여러 엔티티를 하나의 Indirect 명령으로 묶음
-    //   - drawArgs.InstanceCount 를 실제 인스턴스 개수로 설정
-    // 핵심 (2번 + 3번 솔루션 적용):
-    //   - InstanceBuffer를 MaxInstanceCount(65536)로 독립 확대 (솔루션 2)
-    //   - 대형 그룹은 chunk 단위로 여러 Indirect 명령 분할 (솔루션 3)
-    //   - (mesh + material + draw args) 단위 그룹핑 + InstanceBuffer + SV_InstanceID
+    // renderExecuteIndirect - GPU-Driven + Merged Geometry (단일 큰 VB/IB)
+    // 모든 지오메트리를 하나의 Vertex/Index Buffer에 넣고 BaseVertex/StartIndex로 구분
+    // IA 바인딩은 한 번, texture 변경 시에만 추가 바인딩 + ExecuteIndirect
+    // CommandSignature CONSTANT로 per-draw baseInstance 전달
     // ============================================================
 
     // 1. Descriptor Heap 설정 (Texture SRV 바인딩을 위해 필요)
@@ -97,6 +92,27 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     cmdList->SetPipelineState(pso);
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+    // ============================================================
+    // 모든 지오메트리를 하나의 큰 Vertex/Index Buffer에 병합 (가장 일반적인 GPU-Driven 방식)
+    // Submesh별 BaseVertexLocation / StartIndexLocation 으로 구분
+    // 이제 IA 바인딩은 한 번만 하면 됨 (texture 변경 시에만 추가 바인딩)
+    // ============================================================
+    if (MeshManager::sGlobalVertexBuffer && MeshManager::sGlobalIndexBuffer)
+    {
+        D3D12_VERTEX_BUFFER_VIEW vbv{};
+        vbv.BufferLocation = MeshManager::sGlobalVertexBuffer->GetGPUVirtualAddress();
+        vbv.StrideInBytes = sizeof(Vertex);
+        vbv.SizeInBytes = MeshManager::sGlobalVertexCount * sizeof(Vertex);
+
+        D3D12_INDEX_BUFFER_VIEW ibv{};
+        ibv.BufferLocation = MeshManager::sGlobalIndexBuffer->GetGPUVirtualAddress();
+        ibv.Format = DXGI_FORMAT_R32_UINT;
+        ibv.SizeInBytes = MeshManager::sGlobalIndexCount * sizeof(uint32_t);
+
+        cmdList->IASetVertexBuffers(0, 1, &vbv);
+        cmdList->IASetIndexBuffer(&ibv);
+    }
+
     // 4. PassConstants 업데이트 및 바인딩 (ViewProj)
     UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
 
@@ -128,11 +144,10 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     // 솔루션 2 적용: maxInstanceCount이 이제 65536 (독립적 큰 버퍼)
 
     // ============================================================
-    // 상태 추적 (mesh + texture 만)
+    // 상태 추적 (texture만 - IA는 글로벌 VB/IB 공유, Base/StartIndex로 구분)
     // ============================================================
     struct DrawBindState
     {
-        Mesh* mesh = nullptr;
         D3D12_GPU_DESCRIPTOR_HANDLE texture{};
     };
 
@@ -159,19 +174,9 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
         batchCount = 0;
     };
 
-    // applyBindState: mesh 또는 texture가 바뀔 때만 바인딩 (상태 변경 최소화)
-    // mesh + texture 만 바인딩
-    auto applyBindState = [&](Mesh* mesh, D3D12_GPU_DESCRIPTOR_HANDLE texture)
+    // applyBindState: texture만 (IA는 글로벌 버퍼 공유, Base/StartIndex로 메시 구분)
+    auto applyBindState = [&](D3D12_GPU_DESCRIPTOR_HANDLE texture)
     {
-        if (mesh != activeState.mesh)
-        {
-            auto vbv = mesh->VertexBufferView();
-            auto ibv = mesh->IndexBufferView();
-            cmdList->IASetVertexBuffers(0, 1, &vbv);
-            cmdList->IASetIndexBuffer(&ibv);
-            activeState.mesh = mesh;
-        }
-
         if (texture.ptr != activeState.texture.ptr)
         {
             cmdList->SetGraphicsRootDescriptorTable(2, texture);
@@ -342,8 +347,8 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     }
 
     // ============================================================
-    // Execute with correct per-mesh / per-texture binding
-    // (필수: vertex/index buffer와 texture를 바인딩해야 오브젝트가 보임)
+    // ExecuteIndirect with texture batching only
+    // (IA는 글로벌로 한 번 바인딩, BaseVertex/StartIndex로 메시 구분)
     // ============================================================
     // Reuse variables declared earlier in the function
     activeState = DrawBindState{};
@@ -354,7 +359,6 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     for (const auto& br : bindingRanges)
     {
         bool stateChanged =
-            (br.mesh != activeState.mesh) ||
             (br.texture.ptr != activeState.texture.ptr);
 
         if (stateChanged)
@@ -371,22 +375,12 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
                 batchCount = 0;
             }
 
-            // Bind IA (vertex / index buffer)
-            if (br.mesh)
-            {
-                auto vbv = br.mesh->VertexBufferView();
-                auto ibv = br.mesh->IndexBufferView();
-                cmdList->IASetVertexBuffers(0, 1, &vbv);
-                cmdList->IASetIndexBuffer(&ibv);
-            }
-
-            // Bind texture
+            // Bind texture only (IA is global)
             if (br.texture.ptr != 0)
             {
                 cmdList->SetGraphicsRootDescriptorTable(2, br.texture);
             }
 
-            activeState.mesh = br.mesh;
             activeState.texture = br.texture;
             batchStart = cmdCursor;
         }

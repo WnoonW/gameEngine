@@ -3,6 +3,7 @@
 // [1] CBV b1 (PassConstants)
 // [2] SRV table t0 (texture)
 // [3] Root Constants b13 (baseInstance - indirect)
+// CommandSignature의 CONSTANT로 per-draw 전달 (여러 메시 그룹 처리에 유용)
 // [4] SRV t1 (Instance StructuredBuffer)
 
 struct ObjectConstants
@@ -25,6 +26,9 @@ StructuredBuffer<ObjectConstants> gInstanceData : register(t1);   // instancing�
 Texture2D gTexture : register(t0);
 SamplerState gSampler : register(s0);
 
+// Per-draw root constant from CommandSignature (CONSTANT argument)
+uint gBaseInstance : register(b13);
+
 struct VertexIn
 {
     float3 PosL : POSITION;
@@ -43,9 +47,10 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
 
-    // ExecuteIndirect + StartInstanceLocation + InstanceCount 사용 시
-    // instanceID 는 StartInstanceLocation 부터 시작함
-    float4x4 world = gInstanceData[instanceID].World;
+    // gBaseInstance는 CommandSignature가 per-command으로 설정해줌
+    // StartInstanceLocation은 0으로 설정하는 것을 권장
+    uint idx = gBaseInstance + instanceID;
+    float4x4 world = gInstanceData[idx].World;
 
     vout.PosH = mul(mul(float4(vin.PosL, 1.0f), world), gViewProj);
     vout.Normal = vin.Normal;
