@@ -89,6 +89,11 @@ MeshInstanceStats Engine::CollectMeshInstanceStats()
     return stats;
 }
 
+CullingStats Engine::GetLastCullingStats() const
+{
+    return mRenderSystem.GetLastCullingStats();
+}
+
 Entity Engine::CreateRenderableEntity(const std::string& meshName,
     const std::string& materialName,
     XMFLOAT3 position)

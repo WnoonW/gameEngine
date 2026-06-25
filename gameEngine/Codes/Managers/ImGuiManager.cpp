@@ -54,42 +54,57 @@ bool ImGuiManager::Initialize(
     return true;
 }
 
-void ImGuiManager::CustomUI(const MeshInstanceStats& stats)
+void ImGuiManager::CustomUI(const MeshInstanceStats& meshStats, const CullingStats& cullStats)
 {
     ImGui::Begin("V3.0-UI Debug Window");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
     ImGui::Separator();
     ImGui::Text("Mesh Instances");
-    if (stats.countByMesh.empty())
+    if (meshStats.countByMesh.empty())
     {
         ImGui::Text("  (none)");
     }
     else
     {
-        std::vector<std::pair<std::string, int>> meshCounts(stats.countByMesh.begin(), stats.countByMesh.end());
+        std::vector<std::pair<std::string, int>> meshCounts(meshStats.countByMesh.begin(), meshStats.countByMesh.end());
         std::sort(meshCounts.begin(), meshCounts.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
 
         for (const auto& [meshName, count] : meshCounts)
             ImGui::Text("  %s: %d", meshName.c_str(), count);
     }
-    ImGui::Text("Total: %d", stats.totalInstances);
+    ImGui::Text("Total: %d", meshStats.totalInstances);
 
     ImGui::Separator();
     ImGui::Text("Capacity");
-    ImGui::Text("  Object CB: %u / %u", stats.objectCBUsed, stats.objectCBCapacity);
-    ImGui::Text("  Draw cmds: %u / %u", stats.estimatedDrawCommands, stats.drawCommandCapacity);
-    ImGui::Text("  Descriptors: %u / %u", stats.descriptorsUsed, stats.descriptorCapacity);
+    ImGui::Text("  Object CB: %u / %u", meshStats.objectCBUsed, meshStats.objectCBCapacity);
+    ImGui::Text("  Draw cmds: %u / %u", meshStats.estimatedDrawCommands, meshStats.drawCommandCapacity);
+    ImGui::Text("  Descriptors: %u / %u", meshStats.descriptorsUsed, meshStats.descriptorCapacity);
 
-    const bool nearObjectLimit = stats.objectCBUsed >= stats.objectCBCapacity * 9 / 10;
-    const bool nearDrawLimit = stats.estimatedDrawCommands >= stats.drawCommandCapacity * 9 / 10;
-    const bool nearDescriptorLimit = stats.descriptorsUsed >= stats.descriptorCapacity * 9 / 10;
+    const bool nearObjectLimit = meshStats.objectCBUsed >= meshStats.objectCBCapacity * 9 / 10;
+    const bool nearDrawLimit = meshStats.estimatedDrawCommands >= meshStats.drawCommandCapacity * 9 / 10;
+    const bool nearDescriptorLimit = meshStats.descriptorsUsed >= meshStats.descriptorCapacity * 9 / 10;
     if (nearObjectLimit || nearDrawLimit || nearDescriptorLimit)
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Warning: nearing capacity limit");
 
-    if (!stats.lastCreateError.empty())
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Last spawn error: %s", stats.lastCreateError.c_str());
+    if (!meshStats.lastCreateError.empty())
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Last spawn error: %s", meshStats.lastCreateError.c_str());
+
+    ImGui::Separator();
+    ImGui::Text("Culling");
+    ImGui::Text("  Candidates (pre-cull): %u", cullStats.totalCandidates);
+    ImGui::Text("  Frustum culled: %u", cullStats.frustumCulled);
+    ImGui::Text("  After frustum: %u", cullStats.passedFrustum);
+    ImGui::Text("  Sent to occlusion compute: %u", cullStats.occlusionTested);
+    ImGui::Text("  Occlusion culled: %u  (shader stub)", cullStats.occlusionCulled);
+    ImGui::Text("  Final indirect commands: %u", cullStats.finalDrawCommands);
+
+    if (cullStats.totalCandidates > 0)
+    {
+        float frustumRate = (cullStats.frustumCulled * 100.0f) / cullStats.totalCandidates;
+        ImGui::Text("  Frustum cull %%: %.1f", frustumRate);
+    }
 
     ImGui::Separator();
     if (ImGui::Button("Reset Scene"))

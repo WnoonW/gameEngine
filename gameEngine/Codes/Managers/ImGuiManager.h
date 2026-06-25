@@ -45,7 +45,7 @@ public:
         DescriptorAllocator& globalDescriptorAllocator,
         IFunctionCallback* callback = nullptr);
 
-    void CustomUI(const MeshInstanceStats& stats);
+    void CustomUI(const MeshInstanceStats& meshStats, const CullingStats& cullStats);
 
     void Shutdown();
 

@@ -8,6 +8,7 @@
 #include "RootSignatureManager.h"
 #include "PipelineStateManager.h"
 #include "constantStruct.h"
+#include "AppStruct.h"
 
 using namespace DirectX;
 
@@ -163,6 +164,9 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     mGroupDrawList.clear();
     mBindingRanges.clear();
 
+    uint32_t totalCandidates = 0;
+    uint32_t frustumCulled = 0;
+
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity, TransformComponent& tf, RenderableComponent& rend)
         {
@@ -178,12 +182,17 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
 
+                totalCandidates++;
+
                 if (HasValidBounds(sub.Bounds))
                 {
                     DirectX::BoundingBox worldBox;
                     sub.Bounds.Transform(worldBox, worldMat);
                     if (!frustum.Intersects(worldBox))
+                    {
+                        frustumCulled++;
                         continue;
+                    }
                 }
 
                 const DrawGroupKey groupKey{
@@ -264,6 +273,15 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     }
 
     const UINT numCommands = static_cast<UINT>(mGroupDrawList.size());
+
+    // Record culling stats (frustum done on CPU, occlusion happens in compute)
+    mLastCullingStats.totalCandidates = totalCandidates;
+    mLastCullingStats.frustumCulled = frustumCulled;
+    mLastCullingStats.passedFrustum = numCommands;
+    mLastCullingStats.occlusionTested = numCommands;
+    mLastCullingStats.occlusionCulled = 0;           // TODO: populate from GPU when real occlusion culling is implemented
+    mLastCullingStats.finalDrawCommands = numCommands;
+
     bool ranBuildIndirect = false;
 
     if (numCommands > 0

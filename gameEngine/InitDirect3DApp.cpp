@@ -153,7 +153,9 @@ void InitDirect3DApp::OnResize()
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
-	mImGuiManager.CustomUI(mEngine.CollectMeshInstanceStats());
+	auto meshStats = mEngine.CollectMeshInstanceStats();
+	auto cullStats = mEngine.GetLastCullingStats();
+	mImGuiManager.CustomUI(meshStats, cullStats);
 
 	mEngine.Update();
 }

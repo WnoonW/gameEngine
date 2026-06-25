@@ -28,6 +28,16 @@ struct MeshInstanceStats
     std::string lastCreateError;
 };
 
+struct CullingStats
+{
+    uint32_t totalCandidates = 0;      // submeshes considered before any culling
+    uint32_t frustumCulled = 0;        // culled by frustum test (CPU)
+    uint32_t passedFrustum = 0;        // after frustum culling (sent to GPU compute)
+    uint32_t occlusionTested = 0;      // commands sent to occlusion compute shader
+    uint32_t occlusionCulled = 0;      // culled by occlusion (GPU) - 0 while stub
+    uint32_t finalDrawCommands = 0;    // actual ExecuteIndirect command count used
+};
+
 // FrameResource.h / .cpp
 
 struct FrameResource

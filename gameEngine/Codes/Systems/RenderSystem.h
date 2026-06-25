@@ -25,6 +25,8 @@ public:
         D3D12_GPU_DESCRIPTOR_HANDLE depthSrvGpu = {},
         const DepthStencilContext* depthCtx = nullptr);
 
+    CullingStats GetLastCullingStats() const { return mLastCullingStats; }
+
 private:
     struct DrawGroupKey
     {
@@ -79,4 +81,6 @@ private:
     std::vector<DrawGroup> mDrawGroups;
     std::vector<GroupDrawData> mGroupDrawList;
     std::vector<BindingRange> mBindingRanges;
+
+    CullingStats mLastCullingStats;
 };

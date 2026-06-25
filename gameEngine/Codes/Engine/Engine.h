@@ -41,6 +41,7 @@ public:
         XMFLOAT3 position = { 0.0f, 0.0f, 0.0f });
 
     MeshInstanceStats CollectMeshInstanceStats();
+    CullingStats GetLastCullingStats() const;
 
     void Shutdown();
 private:
