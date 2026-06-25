@@ -23,7 +23,7 @@ public:
     void Shutdown();
 
     ID3D12RootSignature* GetRootSignature(RootSignatureType type);
-    ComPtr<ID3D12CommandSignature> GetOrCreateCommandSignature();
+    ComPtr<ID3D12CommandSignature> GetOrCreateCommandSignature(ID3D12RootSignature* rootSignature);
 
 private:
     RootSignatureManager() = default;

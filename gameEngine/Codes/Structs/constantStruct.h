@@ -2,9 +2,18 @@
 #include <DirectXMath.h>
 #include "../Common/MathHelper.h"
 
-struct ObjectConstants
+struct PassConstants
 {
-	DirectX::XMFLOAT4X4 WorldViewProj = MathHelper::Identity4x4();
+	DirectX::XMFLOAT4X4 ViewProj = MathHelper::Identity4x4();
 };
 
-using IndirectDrawCommand = D3D12_DRAW_INDEXED_ARGUMENTS;
+struct ObjectConstants
+{
+	DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
+};
+
+struct IndirectDrawCommand
+{
+	uint32_t objectCBIndex = 0;
+	D3D12_DRAW_INDEXED_ARGUMENTS drawArgs{};
+};

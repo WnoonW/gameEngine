@@ -36,6 +36,7 @@ struct FrameResource
 
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> CmdListAlloc;
 
+    std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
     std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
 
     // ArgumentBuffer (ExecuteIndirect용)
@@ -57,6 +58,7 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount, UINT
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         IID_PPV_ARGS(CmdListAlloc.GetAddressOf())));
 
+    PassCB = std::make_unique<UploadBuffer<PassConstants>>(device, 1, true);
     ObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, objectCount, true);
 
     // ==================== ArgumentBuffer 생성 ====================
@@ -101,6 +103,7 @@ inline FrameResource::~FrameResource()
     }
 
     ArgumentBuffer.Reset();
+    PassCB.reset();
     ObjectCB.reset();
     CmdListAlloc.Reset();
 }

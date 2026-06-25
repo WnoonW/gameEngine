@@ -7,6 +7,7 @@
 #include "DescriptorAllocator.h"
 #include "AppStruct.h"
 #include "ResourceManager.h"
+#include "Camera.h"
 
 using namespace DirectX;
 
@@ -25,12 +26,13 @@ public:
     // 매 프레임 업데이트 (나중에 시스템들 추가 예정)
     void Update();
 
+    Camera& GetCamera() { return mCamera; }
+    const Camera& GetCamera() const { return mCamera; }
+
     // 렌더링
     void Render(ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
-        int currentFrameIndex,
-        const XMMATRIX& viewMatrix,
-        const XMMATRIX& projMatrix);
+        int currentFrameIndex);
 
     // 엔티티 생성 (이름 기반)
     Entity CreateRenderableEntity(const std::string& meshName,
@@ -52,4 +54,5 @@ private:
 
     uint32_t mNextObjectCBIndex = 0;
     std::string mLastCreateError;
+    Camera mCamera;
 };

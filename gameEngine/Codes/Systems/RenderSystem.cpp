@@ -8,34 +8,38 @@
 
 using namespace DirectX;
 
-void RenderSystem::createCBV(ID3D12Device* device,
-    std::vector<std::unique_ptr<FrameResource>>& frameResources,
-    int gNumFrameResources,
-    DescriptorAllocator& descriptorAllocator,
-    Entity entity,                    
-    ECS::World& world)                
+namespace
 {
-    RenderableComponent* rend = world.GetComponent<RenderableComponent>(entity);
-    if (!rend) return;
-
-    if (mEntityCBVHandles.size() <= entity)
-        mEntityCBVHandles.resize(entity + 1);
-
-    mEntityCBVHandles[entity].resize(gNumFrameResources);
-
-    for (int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
+    D3D12_GPU_VIRTUAL_ADDRESS GetObjectCBGpuAddress(FrameResource* currentFrameResource, uint32_t objectCBIndex)
     {
-        auto objectCB = frameResources[frameIndex]->ObjectCB->Resource();
+        const UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+        return currentFrameResource->ObjectCB->Resource()->GetGPUVirtualAddress()
+            + static_cast<UINT64>(objectCBIndex) * objCBByteSize;
+    }
 
-        auto handle = descriptorAllocator.Allocate();
-        mEntityCBVHandles[entity][frameIndex] = handle;
+    void UpdatePassCB(FrameResource* currentFrameResource,
+        ID3D12GraphicsCommandList* cmdList,
+        const XMMATRIX& viewMatrix,
+        const XMMATRIX& projMatrix)
+    {
+        XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
 
-        UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc{};
-        cbvDesc.BufferLocation = objectCB->GetGPUVirtualAddress() + (UINT64)rend->objectCBIndex * objCBByteSize;
-        cbvDesc.SizeInBytes = objCBByteSize;
+        PassConstants passConst{};
+        XMStoreFloat4x4(&passConst.ViewProj, XMMatrixTranspose(viewProj));
+        currentFrameResource->PassCB->CopyData(0, passConst);
 
-        device->CreateConstantBufferView(&cbvDesc, handle.CPU);
+        cmdList->SetGraphicsRootConstantBufferView(
+            1,
+            currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
+    }
+
+    void BindObjectCB(FrameResource* currentFrameResource,
+        ID3D12GraphicsCommandList* cmdList,
+        uint32_t objectCBIndex)
+    {
+        cmdList->SetGraphicsRootConstantBufferView(
+            0,
+            GetObjectCBGpuAddress(currentFrameResource, objectCBIndex));
     }
 }
 
@@ -50,8 +54,11 @@ void RenderSystem::renderIndexedInstanced(ECS::World& world,
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
+    UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
+
     ID3D12RootSignature* lastRS = nullptr;
     ID3D12PipelineState* lastPSO = nullptr;
+    D3D12_GPU_VIRTUAL_ADDRESS lastObjectCBAddress = 0;
 
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
@@ -59,15 +66,16 @@ void RenderSystem::renderIndexedInstanced(ECS::World& world,
             if (!rend.visible || !rend.mesh) return;
 
             XMMATRIX worldMat = tf.GetWorldMatrix();
-            XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
-            XMMATRIX wvp = XMMatrixMultiply(worldMat, viewProj);
 
             if (rend.objectCBIndex >= RenderLimits::MaxObjectCount)
                 return;
 
             ObjectConstants objConst{};
-            XMStoreFloat4x4(&objConst.WorldViewProj, XMMatrixTranspose(wvp));
+            XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(worldMat));
             currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
+
+            const D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
+                GetObjectCBGpuAddress(currentFrameResource, rend.objectCBIndex);
 
             auto vbv = rend.mesh->VertexBufferView();
             auto ibv = rend.mesh->IndexBufferView();
@@ -89,19 +97,19 @@ void RenderSystem::renderIndexedInstanced(ECS::World& world,
             if (sceneRS != lastRS) { cmdList->SetGraphicsRootSignature(sceneRS); lastRS = sceneRS; }
             if (pso != lastPSO) { cmdList->SetPipelineState(pso); lastPSO = pso; }
 
+            if (objectCBAddress != lastObjectCBAddress)
+            {
+                cmdList->SetGraphicsRootConstantBufferView(0, objectCBAddress);
+                lastObjectCBAddress = objectCBAddress;
+            }
+
             for (auto& pair : rend.mesh->DrawArgs)
             {
                 const auto& sub = pair.second;
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
 
-                if (e < mEntityCBVHandles.size() &&
-                    currentFrameIndex < static_cast<int>(mEntityCBVHandles[e].size()))
-                {
-                    cmdList->SetGraphicsRootDescriptorTable(0, mEntityCBVHandles[e][currentFrameIndex].GPU);
-                }
-
-                cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
+                cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
 
                 cmdList->DrawIndexedInstanced(
                     sub.IndexCount, 1,
@@ -125,6 +133,8 @@ void RenderSystem::renderExecuteIndirect1(ECS::World& world,
     ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
     cmdList->SetGraphicsRootSignature(sceneRS);
 
+    UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
+
     PSOKey key{};
     key.shaderName = "object";
     key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -136,7 +146,7 @@ void RenderSystem::renderExecuteIndirect1(ECS::World& world,
         return;
 
     ComPtr<ID3D12CommandSignature> cmdSig =
-        RootSignatureManager::Get().GetOrCreateCommandSignature();
+        RootSignatureManager::Get().GetOrCreateCommandSignature(sceneRS);
     if (!cmdSig)
         return;
 
@@ -153,14 +163,12 @@ void RenderSystem::renderExecuteIndirect1(ECS::World& world,
             if (!rend.mesh->vertexBuffer || !rend.mesh->indexBuffer) return;
 
             XMMATRIX worldMat = tf.GetWorldMatrix();
-            XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
-            XMMATRIX wvp = XMMatrixMultiply(worldMat, viewProj);
 
             if (rend.objectCBIndex >= RenderLimits::MaxObjectCount)
                 return;
 
             ObjectConstants objConst{};
-            XMStoreFloat4x4(&objConst.WorldViewProj, XMMatrixTranspose(wvp));
+            XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(worldMat));
             currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
 
             auto vbv = rend.mesh->VertexBufferView();
@@ -170,11 +178,7 @@ void RenderSystem::renderExecuteIndirect1(ECS::World& world,
             cmdList->IASetIndexBuffer(&ibv);
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            if (e < mEntityCBVHandles.size() &&
-                currentFrameIndex < static_cast<int>(mEntityCBVHandles[e].size()))
-            {
-                cmdList->SetGraphicsRootDescriptorTable(0, mEntityCBVHandles[e][currentFrameIndex].GPU);
-            }
+            BindObjectCB(currentFrameResource, cmdList, rend.objectCBIndex);
 
             for (auto& pair : rend.mesh->DrawArgs)
             {
@@ -184,13 +188,14 @@ void RenderSystem::renderExecuteIndirect1(ECS::World& world,
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
 
-                cmdBuffer[writeIndex].IndexCountPerInstance = sub.IndexCount;
-                cmdBuffer[writeIndex].InstanceCount = 1;
-                cmdBuffer[writeIndex].StartIndexLocation = sub.StartIndexLocation;
-                cmdBuffer[writeIndex].BaseVertexLocation = sub.BaseVertexLocation;
-                cmdBuffer[writeIndex].StartInstanceLocation = 0;
+                cmdBuffer[writeIndex].objectCBIndex = rend.objectCBIndex;
+                cmdBuffer[writeIndex].drawArgs.IndexCountPerInstance = sub.IndexCount;
+                cmdBuffer[writeIndex].drawArgs.InstanceCount = 1;
+                cmdBuffer[writeIndex].drawArgs.StartIndexLocation = sub.StartIndexLocation;
+                cmdBuffer[writeIndex].drawArgs.BaseVertexLocation = sub.BaseVertexLocation;
+                cmdBuffer[writeIndex].drawArgs.StartInstanceLocation = 0;
 
-                cmdList->SetGraphicsRootDescriptorTable(1, material->mTextureHandle.GPU);
+                cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
 
                 cmdList->ExecuteIndirect(
                     cmdSig.Get(),
@@ -231,13 +236,15 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
         return;
 
     ComPtr<ID3D12CommandSignature> cmdSig =
-        RootSignatureManager::Get().GetOrCreateCommandSignature();
+        RootSignatureManager::Get().GetOrCreateCommandSignature(sceneRS);
     if (!cmdSig)
         return;
 
     cmdList->SetGraphicsRootSignature(sceneRS);
     cmdList->SetPipelineState(pso);
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
 
     IndirectDrawCommand* cmdBuffer =
         reinterpret_cast<IndirectDrawCommand*>(currentFrameResource->MappedArgumentBuffer);
@@ -248,7 +255,7 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     struct DrawBindState
     {
         Mesh* mesh = nullptr;
-        D3D12_GPU_DESCRIPTOR_HANDLE cbv{};
+        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress = 0;
         D3D12_GPU_DESCRIPTOR_HANDLE texture{};
     };
 
@@ -274,7 +281,7 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     };
 
     auto applyBindState = [&](Mesh* mesh,
-        D3D12_GPU_DESCRIPTOR_HANDLE cbv,
+        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
         D3D12_GPU_DESCRIPTOR_HANDLE texture)
     {
         if (mesh != activeState.mesh)
@@ -286,15 +293,15 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
             activeState.mesh = mesh;
         }
 
-        if (cbv.ptr != activeState.cbv.ptr)
+        if (objectCBAddress != activeState.objectCBAddress)
         {
-            cmdList->SetGraphicsRootDescriptorTable(0, cbv);
-            activeState.cbv = cbv;
+            cmdList->SetGraphicsRootConstantBufferView(0, objectCBAddress);
+            activeState.objectCBAddress = objectCBAddress;
         }
 
         if (texture.ptr != activeState.texture.ptr)
         {
-            cmdList->SetGraphicsRootDescriptorTable(1, texture);
+            cmdList->SetGraphicsRootDescriptorTable(2, texture);
             activeState.texture = texture;
         }
     };
@@ -307,19 +314,13 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
             if (rend.objectCBIndex >= RenderLimits::MaxObjectCount) return;
 
             XMMATRIX worldMat = tf.GetWorldMatrix();
-            XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
-            XMMATRIX wvp = XMMatrixMultiply(worldMat, viewProj);
 
             ObjectConstants objConst{};
-            XMStoreFloat4x4(&objConst.WorldViewProj, XMMatrixTranspose(wvp));
+            XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(worldMat));
             currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
 
-            D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle{};
-            if (e < mEntityCBVHandles.size() &&
-                currentFrameIndex < static_cast<int>(mEntityCBVHandles[e].size()))
-            {
-                cbvHandle = mEntityCBVHandles[e][currentFrameIndex].GPU;
-            }
+            const D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
+                GetObjectCBGpuAddress(currentFrameResource, rend.objectCBIndex);
 
             for (auto& pair : rend.mesh->DrawArgs)
             {
@@ -337,21 +338,22 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
 
                 const bool stateChanged =
                     rend.mesh != activeState.mesh ||
-                    cbvHandle.ptr != activeState.cbv.ptr ||
+                    objectCBAddress != activeState.objectCBAddress ||
                     textureHandle.ptr != activeState.texture.ptr;
 
                 if (stateChanged)
                 {
                     flushBatch();
-                    applyBindState(rend.mesh, cbvHandle, textureHandle);
+                    applyBindState(rend.mesh, objectCBAddress, textureHandle);
                     batchStart = writeIndex;
                 }
 
-                cmdBuffer[writeIndex].IndexCountPerInstance = sub.IndexCount;
-                cmdBuffer[writeIndex].InstanceCount = 1;
-                cmdBuffer[writeIndex].StartIndexLocation = sub.StartIndexLocation;
-                cmdBuffer[writeIndex].BaseVertexLocation = sub.BaseVertexLocation;
-                cmdBuffer[writeIndex].StartInstanceLocation = 0;
+                cmdBuffer[writeIndex].objectCBIndex = rend.objectCBIndex;
+                cmdBuffer[writeIndex].drawArgs.IndexCountPerInstance = sub.IndexCount;
+                cmdBuffer[writeIndex].drawArgs.InstanceCount = 1;
+                cmdBuffer[writeIndex].drawArgs.StartIndexLocation = sub.StartIndexLocation;
+                cmdBuffer[writeIndex].drawArgs.BaseVertexLocation = sub.BaseVertexLocation;
+                cmdBuffer[writeIndex].drawArgs.StartInstanceLocation = 0;
 
                 ++writeIndex;
                 ++batchCount;

@@ -29,6 +29,8 @@ bool Engine::Initialize(ID3D12Device* device,
     RootSignatureManager::Get().Initialize(device);
     PipelineStateManager::Get().Initialize(device);
 
+    mCamera.SetLens(XM_PIDIV4, 16.0f / 9.0f, 0.1f, 1000.0f);
+
     return true;
 }
 
@@ -38,10 +40,11 @@ void Engine::Update()
 
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
-    int currentFrameIndex,
-    const XMMATRIX& viewMatrix,
-    const XMMATRIX& projMatrix)
+    int currentFrameIndex)
 {
+    const XMMATRIX viewMatrix = mCamera.GetView();
+    const XMMATRIX projMatrix = mCamera.GetProj();
+
     mRenderSystem.renderExecuteIndirect(mWorld, cmdList, currentFrameResource,
         mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix);
 }
@@ -116,18 +119,6 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         return INVALID_ENTITY;
     }
 
-    if (mDescriptorAllocator)
-    {
-        const UINT descriptorsNeeded = static_cast<UINT>(mGNumFrameResources);
-        const UINT descriptorsFree = mDescriptorAllocator->GetCapacity() - mDescriptorAllocator->GetUsedCount();
-        if (descriptorsFree < descriptorsNeeded)
-        {
-            mLastCreateError = "Descriptor heap is full.";
-            OutputDebugStringA("[Engine] CreateRenderableEntity failed: descriptor heap full\n");
-            return INVALID_ENTITY;
-        }
-    }
-
     Entity entity = mWorld.CreateEntity();
 
     mWorld.AddComponent(entity, TransformComponent{ .position = position });
@@ -136,9 +127,6 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         .material = material,
         .objectCBIndex = mNextObjectCBIndex++
         });
-
-    mRenderSystem.createCBV(mDevice, *mFrameResources, mGNumFrameResources,
-        *mDescriptorAllocator, entity, mWorld);
 
     return entity;
 }

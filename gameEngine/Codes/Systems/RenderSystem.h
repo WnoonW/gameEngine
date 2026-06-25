@@ -1,7 +1,6 @@
 #pragma once
 #include <d3d12.h>
 #include <DirectXMath.h>
-#include <vector>
 
 #include "World.h"
 #include "ComponentStruct.h"
@@ -13,13 +12,6 @@ using namespace ECS;
 class RenderSystem
 {
 public:
-    void createCBV(ID3D12Device* device,
-        std::vector<std::unique_ptr<FrameResource>>& frameResources,
-        int gNumFrameResources,
-        DescriptorAllocator& descriptorAllocator,
-        Entity entity,
-        World& world);
-
     void renderIndexedInstanced(World& world,
         ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
@@ -44,7 +36,4 @@ public:
         int currentFrameIndex,
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);
-
-private:
-    std::vector<std::vector<DescriptorAllocator::DescriptorHandle>> mEntityCBVHandles;
 };

@@ -49,8 +49,6 @@ private:
 	float mPhi = XM_PIDIV4;
 	float mRadius = 5.0f;
 	float mTargetY = 0.0f;
-	XMFLOAT4X4 mView = {};
-	XMFLOAT4X4 mProj = {};
 	POINT mLastMousePos = {0, 0};
 };
 
@@ -111,13 +109,7 @@ void InitDirect3DApp::OnResize()
 {
 	D3DApp::OnResize();
 
-	XMMATRIX proj = XMMatrixPerspectiveFovLH(
-		XM_PIDIV4,
-		AspectRatio(),           // ← 중요
-		0.1f,
-		1000.0f
-	);
-	XMStoreFloat4x4(&mProj, proj);
+	mEngine.GetCamera().SetLens(XM_PIDIV4, AspectRatio(), 0.1f, 1000.0f);
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
@@ -176,14 +168,14 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	XMVECTOR target = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);
 	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
-	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
-	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+	mEngine.GetCamera().LookAt(pos, target, up);
+	mEngine.GetCamera().UpdateViewMatrix();
 
 	// CommandList Reset 후 topology는 undefined → ExecuteIndirect 전에 반드시 설정
 	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	// === Engine을 통해 렌더링 ===
-	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
+	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex);
 
 	mImGuiManager.Render(mCommandList.Get());
 }
