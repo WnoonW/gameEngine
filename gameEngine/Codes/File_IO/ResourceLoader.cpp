@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include "ResourceLoader.h"
 #include <algorithm>
 #include "Common/DDSTextureLoader.h"
@@ -285,13 +286,13 @@ bool MeshLoad(const std::filesystem::path& filepath, Model& outModel)
 
         for (const auto& v : sub.vertices)
         {
-            vmin.x = std::min(vmin.x, v.position.x);
-            vmin.y = std::min(vmin.y, v.position.y);
-            vmin.z = std::min(vmin.z, v.position.z);
+            vmin.x = (std::min)(vmin.x, v.position.x);
+            vmin.y = (std::min)(vmin.y, v.position.y);
+            vmin.z = (std::min)(vmin.z, v.position.z);
 
-            vmax.x = std::max(vmax.x, v.position.x);
-            vmax.y = std::max(vmax.y, v.position.y);
-            vmax.z = std::max(vmax.z, v.position.z);
+            vmax.x = (std::max)(vmax.x, v.position.x);
+            vmax.y = (std::max)(vmax.y, v.position.y);
+            vmax.z = (std::max)(vmax.z, v.position.z);
         }
 
         sub.bounds.Center = {

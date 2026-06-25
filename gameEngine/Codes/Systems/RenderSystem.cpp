@@ -1,4 +1,5 @@
 #include <DirectXMath.h>
+#include <DirectXCollision.h>
 #include <map>
 #include <tuple>
 #include <vector>
@@ -116,6 +117,12 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     // 4. PassConstants 업데이트 및 바인딩 (ViewProj)
     UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
 
+    // Frustum culling 준비 (카메라 view/proj로부터)
+    DirectX::BoundingFrustum frustum;
+    DirectX::BoundingFrustum::CreateFromMatrix(frustum, projMatrix);
+    XMMATRIX invView = XMMatrixInverse(nullptr, viewMatrix);
+    frustum.Transform(frustum, invView);
+
     // ============================================================
     // InstanceBuffer SRV 바인딩 (root parameter 4 = t1)
     // ============================================================
@@ -166,7 +173,7 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
         cmdList->ExecuteIndirect(
             cmdSig.Get(),
             batchCount,
-            currentFrameResource->ArgumentBuffer.Get(),
+            currentFrameResource->GPUArgumentBuffer.Get(),
             batchStart * sizeof(IndirectDrawCommand),
             nullptr,   // count buffer 없음 (고정 개수)
             0);
@@ -210,6 +217,15 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
                 const auto& sub = pair.second;
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
+
+                // Frustum culling per submesh / per object
+                if (sub.Bounds.Extents.x > 0.0f || sub.Bounds.Extents.y > 0.0f || sub.Bounds.Extents.z > 0.0f)
+                {
+                    DirectX::BoundingBox worldBox;
+                    sub.Bounds.Transform(worldBox, worldMat);
+                    if (!frustum.Intersects(worldBox))
+                        continue;
+                }
 
                 DrawKey key = std::make_tuple(
                     rend.mesh, material,
