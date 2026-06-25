@@ -246,6 +246,20 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
 
         D3D12_GPU_DESCRIPTOR_HANDLE texHandle = matPtr ? matPtr->mTextureHandle.GPU : D3D12_GPU_DESCRIPTOR_HANDLE{};
 
+        // per-submesh local AABB lookup
+        DirectX::XMFLOAT3 localCenter{ 0,0,0 };
+        DirectX::XMFLOAT3 localExtents{ 0,0,0 };
+        for (const auto& daPair : meshPtr->DrawArgs) {
+            const auto& s = daPair.second;
+            if (s.IndexCount == idxCount &&
+                s.StartIndexLocation == startIdx &&
+                s.BaseVertexLocation == baseVert) {
+                localCenter = s.Bounds.Center;
+                localExtents = s.Bounds.Extents;
+                break;
+            }
+        }
+
         UINT cmdsThisRange = 0;
 
         // InstanceBuffer + GroupDrawData 수집 (CS가 IndirectDrawCommand 기록)
@@ -273,6 +287,8 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
             gdata.indexCountPerInstance = idxCount;
             gdata.startIndexLocation = startIdx;
             gdata.baseVertexLocation = baseVert;
+            gdata.localCenter = localCenter;
+            gdata.localExtents = localExtents;
             groupDrawList.push_back(gdata);
 
             cmdsThisRange += 1;

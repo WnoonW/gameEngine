@@ -18,6 +18,9 @@ struct GroupDrawData
     uint indexCountPerInstance;
     uint startIndexLocation;
     int  baseVertexLocation;
+
+    float3 localCenter;
+    float3 localExtents;
 };
 
 // Input: list of group data prepared on CPU

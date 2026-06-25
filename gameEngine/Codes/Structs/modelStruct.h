@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <DirectXMath.h>
+#include <DirectXCollision.h>
 
 struct Vertex {
     DirectX::XMFLOAT3 position;
@@ -13,6 +14,7 @@ struct SubMesh
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
     std::string materialName;           // usemtl 이름 저장
+    DirectX::BoundingBox bounds;        // local AABB for this submesh
 };
 
 struct Model {

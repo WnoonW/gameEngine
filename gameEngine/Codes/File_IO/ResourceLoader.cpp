@@ -10,6 +10,7 @@
 #include <string>
 #include <stdexcept>
 #include <map>
+#include <DirectXCollision.h>
 
 bool ResourceLoad(const std::wstring& filepath)
 {
@@ -269,5 +270,41 @@ bool MeshLoad(const std::filesystem::path& filepath, Model& outModel)
     }
 
     file.close();
+
+    // === 오브젝트별 (서브메시별) AABB 계산 ===
+    for (auto& sub : outModel.submeshes)
+    {
+        if (sub.vertices.empty())
+        {
+            sub.bounds = DirectX::BoundingBox{};
+            continue;
+        }
+
+        DirectX::XMFLOAT3 vmin = sub.vertices[0].position;
+        DirectX::XMFLOAT3 vmax = vmin;
+
+        for (const auto& v : sub.vertices)
+        {
+            vmin.x = std::min(vmin.x, v.position.x);
+            vmin.y = std::min(vmin.y, v.position.y);
+            vmin.z = std::min(vmin.z, v.position.z);
+
+            vmax.x = std::max(vmax.x, v.position.x);
+            vmax.y = std::max(vmax.y, v.position.y);
+            vmax.z = std::max(vmax.z, v.position.z);
+        }
+
+        sub.bounds.Center = {
+            (vmin.x + vmax.x) * 0.5f,
+            (vmin.y + vmax.y) * 0.5f,
+            (vmin.z + vmax.z) * 0.5f
+        };
+        sub.bounds.Extents = {
+            (vmax.x - vmin.x) * 0.5f,
+            (vmax.y - vmin.y) * 0.5f,
+            (vmax.z - vmin.z) * 0.5f
+        };
+    }
+
     return true;
 }

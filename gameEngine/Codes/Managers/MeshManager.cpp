@@ -79,6 +79,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
 		submesh.BaseVertexLocation = 0;                    // pre-adjust 했으므로 0
 		submesh.materialName = mMesh.cpuModel.submeshes[i].materialName;
+		submesh.Bounds = mMesh.cpuModel.submeshes[i].bounds;  // per-submesh AABB 복사
 		std::string key = "submesh_" + std::to_string(i);
 		mMesh.DrawArgs[key] = submesh;
 	}
@@ -184,6 +185,9 @@ bool MeshManager::BuildGlobalBuffers(ID3D12Device* device, ID3D12GraphicsCommand
 			m->indexCount = sGlobalIndexCount;
 		}
 	}
+
+	// AABB는 SubMesh/SubmeshGeometry에 이미 계산되어 있음 (ResourceLoader + MeshManager에서)
+	// per-object world AABB는 transform * local bounds 로 필요시 계산 (BoundingBox.Transform)
 
 	OutputDebugStringW(L"[MeshManager] Global geometry buffers created successfully.\n");
 	return true;

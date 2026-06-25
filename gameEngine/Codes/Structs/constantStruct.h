@@ -1,5 +1,6 @@
 #pragma once
 #include <DirectXMath.h>
+#include <DirectXCollision.h>
 #include "../Common/MathHelper.h"
 
 struct PassConstants
@@ -29,4 +30,8 @@ struct GroupDrawData
     uint32_t indexCountPerInstance;
     uint32_t startIndexLocation;
     int32_t  baseVertexLocation;
+
+    // per-submesh local AABB (for frustum culling in compute etc.)
+    DirectX::XMFLOAT3 localCenter;
+    DirectX::XMFLOAT3 localExtents;
 };
