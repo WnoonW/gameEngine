@@ -18,6 +18,7 @@ void RootSignatureManager::Initialize(ID3D12Device* device)
     mDevice = device;
 
     CreateSceneRootSignature();
+    CreateBuildIndirectRootSignature();
 }
 
 void RootSignatureManager::Shutdown()
@@ -138,4 +139,52 @@ ComPtr<ID3D12CommandSignature> RootSignatureManager::GetOrCreateCommandSignature
         IID_PPV_ARGS(&mCommandSignature)));
 
     return mCommandSignature;
+}
+
+// =====================================================
+// Compute Shader로 IndirectDrawCommand를 기록하기 위한 Root Signature
+// t0 : GroupDrawData (StructuredBuffer input)
+// u0 : IndirectDrawCommand (RWStructuredBuffer output)
+// b0 : 상수 (num groups)
+// ============================================================
+void RootSignatureManager::CreateBuildIndirectRootSignature()
+{
+    CD3DX12_ROOT_PARAMETER rootParams[3] = {};
+
+    // t0 : input GroupDrawData (root SRV - 간단 바인딩)
+    rootParams[0].InitAsShaderResourceView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
+
+    // u0 : output IndirectDrawCommand (root UAV)
+    rootParams[1].InitAsUnorderedAccessView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
+
+    // b0 : 상수 (numGroups) - 32bit root constant으로 사용
+    rootParams[2].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL); // 1 DWORD @ b0
+
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
+        3, rootParams,
+        0, nullptr,
+        D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+    ComPtr<ID3DBlob> serializedRootSig = nullptr;
+    ComPtr<ID3DBlob> errorBlob = nullptr;
+
+    HRESULT hr = D3D12SerializeRootSignature(
+        &rootSigDesc,
+        D3D_ROOT_SIGNATURE_VERSION_1,
+        serializedRootSig.GetAddressOf(),
+        errorBlob.GetAddressOf());
+
+    if (errorBlob != nullptr)
+        OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+
+    ThrowIfFailed(hr);
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    ThrowIfFailed(mDevice->CreateRootSignature(
+        0,
+        serializedRootSig->GetBufferPointer(),
+        serializedRootSig->GetBufferSize(),
+        IID_PPV_ARGS(&rootSig)));
+
+    mRootSignatures[RootSignatureType::BuildIndirect] = rootSig;
 }

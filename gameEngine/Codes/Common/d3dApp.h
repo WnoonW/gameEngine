@@ -46,6 +46,10 @@ public:
 protected:
     virtual void CreateRtvAndDsvDescriptorHeaps();
 	virtual void OnResize(); 
+
+    // 해상도 변경 (IMGUI에서 호출)
+    void ChangeResolution(int width, int height);
+
 	virtual void Update(const GameTimer& gt)=0;
     virtual void Draw(const GameTimer& gt)=0;
 	virtual void BeginFrame() = 0;
@@ -140,6 +144,11 @@ protected:
     DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	int mClientWidth = 800;
 	int mClientHeight = 600;
+
+    // For safe resolution change from inside frame (e.g. ImGui)
+    bool mResizePending = false;
+    int mPendingWidth = 0;
+    int mPendingHeight = 0;
 
 
 };

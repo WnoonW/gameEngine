@@ -122,6 +122,25 @@ int D3DApp::Run()
 				Update(mTimer);	
                 Draw(mTimer);
 				EndFrame();
+
+                // Apply any deferred resolution change (safe here: command list is closed)
+                if (mResizePending)
+                {
+                    mClientWidth = mPendingWidth;
+                    mClientHeight = mPendingHeight;
+                    mResizePending = false;
+
+                    RECT R = { 0, 0, mClientWidth, mClientHeight };
+                    AdjustWindowRect(&R, WS_OVERLAPPEDWINDOW, false);
+
+                    int winWidth  = R.right - R.left;
+                    int winHeight = R.bottom - R.top;
+
+                    SetWindowPos(mhMainWnd, nullptr, 0, 0, winWidth, winHeight,
+                                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+                    OnResize();
+                }
 			}
 			else
 			{
@@ -511,6 +530,18 @@ void D3DApp::OnResize()
 	mScreenViewport.MaxDepth = 1.0f;
 
 	mScissorRect = { 0, 0, mClientWidth, mClientHeight };
+}
+
+void D3DApp::ChangeResolution(int width, int height)
+{
+    if (mClientWidth == width && mClientHeight == height)
+        return;
+
+    // Defer the actual resize to after the current frame is submitted.
+    // This prevents COMMAND_LIST_OPEN error when called from inside Draw() (ImGui callback).
+    mPendingWidth = width;
+    mPendingHeight = height;
+    mResizePending = true;
 }
 
 void D3DApp::CreateRtvAndDsvDescriptorHeaps()

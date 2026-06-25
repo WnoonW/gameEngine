@@ -101,6 +101,16 @@ void ImGuiManager::CustomUI(const MeshInstanceStats& stats)
     if (ImGui::Button("Toggle Wireframe"))
         if (m_Callback) m_Callback->buttonClicked(ButtonAction::ToggleWireframe);
 
+    ImGui::Separator();
+    ImGui::Text("Resolution Presets");
+    if (ImGui::Button("600 x 800"))   if (m_Callback) m_Callback->buttonClicked(ButtonAction::SetRes_600x800);
+    ImGui::SameLine();
+    if (ImGui::Button("1920 x 1080")) if (m_Callback) m_Callback->buttonClicked(ButtonAction::SetRes_1920x1080);
+    ImGui::SameLine();
+    if (ImGui::Button("1200 x 800"))  if (m_Callback) m_Callback->buttonClicked(ButtonAction::SetRes_1200x800);
+
+    ImGui::TextDisabled("(Resizes the window)");
+
     ImGui::End();
 }
 

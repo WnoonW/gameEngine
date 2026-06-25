@@ -357,6 +357,26 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 	{
 		mEngine.CreateRenderableEntity("bibian", "Test", { 0, 1, 0 });
 	}
+	else if (action == ButtonAction::SetRes_600x800)
+	{
+		ChangeResolution(600, 800);
+	}
+	else if (action == ButtonAction::SetRes_1920x1080)
+	{
+		ChangeResolution(1920, 1080);
+	}
+	else if (action == ButtonAction::SetRes_1200x800)
+	{
+		ChangeResolution(1200, 800);
+	}
+	else if (action == ButtonAction::ResetScene)
+	{
+		// TODO: 구현
+	}
+	else if (action == ButtonAction::ToggleWireframe)
+	{
+		// TODO: 구현 (Engine이나 렌더에 wireframe 플래그 추가 필요)
+	}
 }
 #pragma endregion
 

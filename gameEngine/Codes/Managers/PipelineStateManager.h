@@ -37,11 +37,17 @@ public:
     void Shutdown();
     void InvalidateCache();
 
-    // PSO를 가져오거나 없으면 생성
+    // PSO를 가져오거나 없으면 생성 (그래픽스)
     ID3D12PipelineState* GetOrCreatePSO(
         const PSOKey& key,
         ID3D12RootSignature* rootSignature,
         ID3D12Device* device = nullptr);   // device가 nullptr이면 내부 mDevice 사용
+
+    // Compute Shader용 PSO
+    ID3D12PipelineState* GetOrCreateComputePSO(
+        const std::string& shaderName,
+        ID3D12RootSignature* rootSignature,
+        ID3D12Device* device = nullptr);
 
 private:
     PipelineStateManager() = default;

@@ -51,6 +51,15 @@ struct FrameResource
     UINT8* MappedInstanceBuffer = nullptr;
     UINT InstanceBufferSize = 0;
 
+    // GPU Compute Shader가 IndirectDrawCommand를 기록할 버퍼 (UAV)
+    Microsoft::WRL::ComPtr<ID3D12Resource> GPUArgumentBuffer;
+    UINT GPUArgumentBufferSize = 0;
+
+    // Compute Shader 입력용 GroupDrawData 업로드 버퍼 (재사용)
+    Microsoft::WRL::ComPtr<ID3D12Resource> GroupDataUploadBuffer;
+    UINT8* MappedGroupData = nullptr;
+    UINT GroupDataBufferSize = 0;
+
     UINT64 FenceValue = 0;
 };
 
@@ -131,6 +140,63 @@ inline FrameResource::FrameResource(ID3D12Device* device, UINT objectCount, UINT
         ThrowIfFailed(InstanceBuffer->Map(0, &readRange,
             reinterpret_cast<void**>(&MappedInstanceBuffer)));
     }
+
+    // ==================== GPUArgumentBuffer 생성 (Compute Shader 기록용) ====================
+    // DEFAULT heap + UAV. Compute Shader가 IndirectDrawCommand를 씀
+    {
+        GPUArgumentBufferSize = 65536 * sizeof(IndirectDrawCommand);  // MaxDrawCommandCount 기준 여유
+
+        D3D12_HEAP_PROPERTIES heapProps = {};
+        heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        D3D12_RESOURCE_DESC bufferDesc = {};
+        bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bufferDesc.Width = GPUArgumentBufferSize;
+        bufferDesc.Height = 1;
+        bufferDesc.DepthOrArraySize = 1;
+        bufferDesc.MipLevels = 1;
+        bufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+        bufferDesc.SampleDesc.Count = 1;
+        bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        bufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,  // Compute가 바로 쓰기 좋게
+            nullptr,
+            IID_PPV_ARGS(&GPUArgumentBuffer)));
+    }
+
+    // GroupDrawData 업로드 버퍼 (Compute 입력, 최대 4096 groups 여유)
+    {
+        GroupDataBufferSize = 4096 * sizeof(GroupDrawData);
+        D3D12_HEAP_PROPERTIES heapProps = {};
+        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC bufferDesc = {};
+        bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bufferDesc.Width = GroupDataBufferSize;
+        bufferDesc.Height = 1;
+        bufferDesc.DepthOrArraySize = 1;
+        bufferDesc.MipLevels = 1;
+        bufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+        bufferDesc.SampleDesc.Count = 1;
+        bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&GroupDataUploadBuffer)));
+
+        CD3DX12_RANGE readRange(0, 0);
+        ThrowIfFailed(GroupDataUploadBuffer->Map(0, &readRange,
+            reinterpret_cast<void**>(&MappedGroupData)));
+    }
 }
 
 inline FrameResource::~FrameResource()
@@ -148,6 +214,13 @@ inline FrameResource::~FrameResource()
 
     ArgumentBuffer.Reset();
     InstanceBuffer.Reset();
+    GPUArgumentBuffer.Reset();
+    if (MappedGroupData)
+    {
+        GroupDataUploadBuffer->Unmap(0, nullptr);
+        MappedGroupData = nullptr;
+    }
+    GroupDataUploadBuffer.Reset();
     PassCB.reset();
     ObjectCB.reset();
     CmdListAlloc.Reset();

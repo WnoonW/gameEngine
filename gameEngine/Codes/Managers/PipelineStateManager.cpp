@@ -111,3 +111,46 @@ ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
     mPSOCache[key] = pso;
     return pso.Get();
 }
+
+ID3D12PipelineState* PipelineStateManager::GetOrCreateComputePSO(
+    const std::string& shaderName,
+    ID3D12RootSignature* rootSignature,
+    ID3D12Device* device)
+{
+    if (device == nullptr)
+        device = mDevice;
+
+    // Compute PSO는 간단한 키로 관리 (shaderName만 사용)
+    PSOKey key{};
+    key.shaderName = shaderName;
+
+    auto it = mPSOCache.find(key);
+    if (it != mPSOCache.end())
+        return it->second.Get();
+
+    std::wstring wShaderName(shaderName.begin(), shaderName.end());
+    std::wstring shaderPath = L"Resources\\Shaders\\" + wShaderName + L".hlsl";
+
+    auto csBlob = ShaderManager::Get().GetComputeShader(shaderPath);
+    if (!csBlob)
+    {
+        OutputDebugStringA(("Compute Shader Compile Failed: " + shaderName + "\n").c_str());
+        return nullptr;
+    }
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC computeDesc = {};
+    computeDesc.pRootSignature = rootSignature;
+    computeDesc.CS = { csBlob->GetBufferPointer(), csBlob->GetBufferSize() };
+
+    ComPtr<ID3D12PipelineState> pso;
+    HRESULT hr = device->CreateComputePipelineState(&computeDesc, IID_PPV_ARGS(&pso));
+
+    if (FAILED(hr))
+    {
+        OutputDebugStringA(("CreateComputePipelineState Failed: " + shaderName + "\n").c_str());
+        return nullptr;
+    }
+
+    mPSOCache[key] = pso;
+    return pso.Get();
+}

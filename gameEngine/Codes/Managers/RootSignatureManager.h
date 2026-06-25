@@ -10,8 +10,8 @@ enum class RootSignatureType
     Scene,          // 일반 오브젝트 렌더링
     ImGui,          // ImGui 전용
     Shadow,         // Shadow Map
-	Command,        // ExecuteIndirect용
-    // Transparent, PostProcess 등 나중에 추가
+    Command,        // ExecuteIndirect용
+    BuildIndirect,  // Compute Shader로 IndirectDrawCommand 기록용
 };
 
 class RootSignatureManager
@@ -24,6 +24,9 @@ public:
 
     ID3D12RootSignature* GetRootSignature(RootSignatureType type);
     ComPtr<ID3D12CommandSignature> GetOrCreateCommandSignature(ID3D12RootSignature* rootSignature);
+
+    // Compute용 BuildIndirect root signature
+    void CreateBuildIndirectRootSignature();
 
 private:
     RootSignatureManager() = default;

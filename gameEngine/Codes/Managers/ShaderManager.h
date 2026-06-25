@@ -22,6 +22,7 @@ public:
     // 편의 함수
     Microsoft::WRL::ComPtr<ID3DBlob> GetVertexShader(const std::wstring& filePath, const std::string& entryPoint = "VS");
     Microsoft::WRL::ComPtr<ID3DBlob> GetPixelShader(const std::wstring& filePath, const std::string& entryPoint = "PS");
+    Microsoft::WRL::ComPtr<ID3DBlob> GetComputeShader(const std::wstring& filePath, const std::string& entryPoint = "CSMain");
 
 private:
     ShaderManager() = default;

@@ -19,6 +19,11 @@ enum class ButtonAction
     ToggleWireframe,
     ReloadShaders,
     PrintECSStats,
+
+    // Resolution presets
+    SetRes_600x800,
+    SetRes_1920x1080,
+    SetRes_1200x800,
     // ... 필요할 때마다 추가
 };
 

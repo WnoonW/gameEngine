@@ -214,13 +214,20 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
             }
         });
 
+    std::vector<GroupDrawData> groupDrawList;
+
+    // For correct binding: record mesh+texture + how many commands per binding group
+    struct BindingRange {
+        Mesh* mesh = nullptr;
+        D3D12_GPU_DESCRIPTOR_HANDLE texture{};
+        UINT numCommands = 0;
+    };
+    std::vector<BindingRange> bindingRanges;
+
     UINT instanceWritePos = 0;
-    bool emissionLimitReached = false;
 
     for (const auto& kv : groups)
     {
-        if (emissionLimitReached) break;
-
         const auto& key = kv.first;
         const auto& worldList = kv.second;
 
@@ -230,75 +237,172 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
         Material* matPtr = std::get<1>(key);
         UINT idxCount = std::get<2>(key);
         UINT startIdx = std::get<3>(key);
-        INT baseVert = std::get<4>(key);
+        INT  baseVert = std::get<4>(key);
 
         D3D12_GPU_DESCRIPTOR_HANDLE texHandle = matPtr ? matPtr->mTextureHandle.GPU : D3D12_GPU_DESCRIPTOR_HANDLE{};
 
-        const bool stateChanged =
-            (meshPtr != activeState.mesh) || (texHandle.ptr != activeState.texture.ptr);
+        UINT cmdsThisRange = 0;
 
-        if (stateChanged)
-        {
-            flushBatch();
-            applyBindState(meshPtr, texHandle);
-            batchStart = writeIndex;
-        }
-
-        // ============================================================
-        // 솔루션 3: 대형 그룹 Chunking 적용
-        // - 한 그룹(worldList)이 남은 슬롯보다 크면 여러 Indirect 명령으로 분할
-        // - 같은 (mesh + material + draw range) 이므로 IA/Texture 재바인딩 없이
-        //   동일 배치(ExecuteIndirect) 안에 여러 chunk 명령 포함 가능
-        // ============================================================
+        // InstanceBuffer + GroupDrawData 수집 (CS가 IndirectDrawCommand 기록)
         size_t groupPos = 0;
         while (groupPos < worldList.size())
         {
-            if (writeIndex >= maxCommandCount)
-            {
-                flushBatch();
-                emissionLimitReached = true;
-                break;
-            }
+            if (instanceWritePos >= maxInstanceCount) break;
 
-            UINT remaining = (instanceWritePos < maxInstanceCount)
-                ? (maxInstanceCount - instanceWritePos)
-                : 0;
-
-            if (remaining == 0)
-            {
-                flushBatch();
-                emissionLimitReached = true;
-                break;
-            }
-
+            UINT remaining = maxInstanceCount - instanceWritePos;
             UINT chunkSize = min((UINT)(worldList.size() - groupPos), remaining);
             if (chunkSize == 0) break;
 
             const UINT baseInstance = instanceWritePos;
 
-            // chunk 단위로 InstanceBuffer 기록
             for (size_t i = 0; i < chunkSize; ++i)
             {
                 ObjectConstants oc{};
                 XMStoreFloat4x4(&oc.World, XMMatrixTranspose(worldList[groupPos + i]));
                 instanceData[baseInstance + i] = oc;
             }
+
+            GroupDrawData gdata{};
+            gdata.baseInstance = baseInstance;
+            gdata.instanceCount = chunkSize;
+            gdata.indexCountPerInstance = idxCount;
+            gdata.startIndexLocation = startIdx;
+            gdata.baseVertexLocation = baseVert;
+            groupDrawList.push_back(gdata);
+
+            cmdsThisRange += 1;
             instanceWritePos += chunkSize;
-
-            // 한 덩어리(chunk)에 대한 IndirectDrawCommand 기록
-            cmdBuffer[writeIndex].baseInstance = baseInstance;
-            cmdBuffer[writeIndex].drawArgs.IndexCountPerInstance = idxCount;
-            cmdBuffer[writeIndex].drawArgs.InstanceCount = chunkSize;
-            cmdBuffer[writeIndex].drawArgs.StartIndexLocation = startIdx;
-            cmdBuffer[writeIndex].drawArgs.BaseVertexLocation = baseVert;
-            cmdBuffer[writeIndex].drawArgs.StartInstanceLocation = baseInstance;
-
-            ++writeIndex;
-            ++batchCount;
-
             groupPos += chunkSize;
+        }
+
+        if (cmdsThisRange > 0) {
+            bindingRanges.push_back({meshPtr, texHandle, cmdsThisRange});
         }
     }
 
-    flushBatch();
+    UINT numCommands = (UINT)groupDrawList.size();
+
+    // ============================================================
+    // Compute Shader로 IndirectDrawCommand 기록
+    // ============================================================
+    if (numCommands > 0 && currentFrameResource->MappedGroupData && currentFrameResource->GPUArgumentBuffer)
+    {
+        size_t bytes = numCommands * sizeof(GroupDrawData);
+        if (bytes <= currentFrameResource->GroupDataBufferSize)
+            memcpy(currentFrameResource->MappedGroupData, groupDrawList.data(), bytes);
+
+        ID3D12RootSignature* buildRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::BuildIndirect);
+        ID3D12PipelineState* buildPSO = PipelineStateManager::Get().GetOrCreateComputePSO("build_indirect", buildRS);
+
+        if (buildRS && buildPSO)
+        {
+            cmdList->SetComputeRootSignature(buildRS);
+            cmdList->SetPipelineState(buildPSO);
+
+            cmdList->SetComputeRootShaderResourceView(0, currentFrameResource->GroupDataUploadBuffer->GetGPUVirtualAddress());
+            cmdList->SetComputeRootUnorderedAccessView(1, currentFrameResource->GPUArgumentBuffer->GetGPUVirtualAddress());
+            cmdList->SetComputeRoot32BitConstant(2, numCommands, 0);
+
+            UINT tg = (numCommands + 63) / 64;
+            cmdList->Dispatch(tg, 1, 1);
+
+            // UAV writes visible
+            D3D12_RESOURCE_BARRIER uavVisible = {};
+            uavVisible.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+            uavVisible.UAV.pResource = currentFrameResource->GPUArgumentBuffer.Get();
+            cmdList->ResourceBarrier(1, &uavVisible);
+
+            // Transition for ExecuteIndirect
+            D3D12_RESOURCE_BARRIER toIndirect = {};
+            toIndirect.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            toIndirect.Transition.pResource = currentFrameResource->GPUArgumentBuffer.Get();
+            toIndirect.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            toIndirect.Transition.StateAfter  = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            toIndirect.Transition.Subresource = 0;
+            cmdList->ResourceBarrier(1, &toIndirect);
+        }
+    }
+
+    // ============================================================
+    // 중요: Compute PSO에서 Graphics로 복원 (오류 수정)
+    // ============================================================
+    cmdList->SetGraphicsRootSignature(sceneRS);
+    cmdList->SetPipelineState(pso);
+    cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    // Descriptor Heap은 처음에 이미 설정했지만, 안전하게 다시 설정
+    cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+    // PassCB와 InstanceBuffer SRV 다시 바인딩
+    UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
+    if (currentFrameResource->InstanceBuffer)
+    {
+        cmdList->SetGraphicsRootShaderResourceView(
+            4, currentFrameResource->InstanceBuffer->GetGPUVirtualAddress());
+    }
+
+    // ============================================================
+    // Execute with correct per-mesh / per-texture binding
+    // (필수: vertex/index buffer와 texture를 바인딩해야 오브젝트가 보임)
+    // ============================================================
+    // Reuse variables declared earlier in the function
+    activeState = DrawBindState{};
+    UINT cmdCursor = 0;
+    batchStart = 0;
+    batchCount = 0;
+
+    for (const auto& br : bindingRanges)
+    {
+        bool stateChanged =
+            (br.mesh != activeState.mesh) ||
+            (br.texture.ptr != activeState.texture.ptr);
+
+        if (stateChanged)
+        {
+            if (batchCount > 0)
+            {
+                cmdList->ExecuteIndirect(
+                    cmdSig.Get(),
+                    batchCount,
+                    currentFrameResource->GPUArgumentBuffer.Get(),
+                    batchStart * sizeof(IndirectDrawCommand),
+                    nullptr,
+                    0);
+                batchCount = 0;
+            }
+
+            // Bind IA (vertex / index buffer)
+            if (br.mesh)
+            {
+                auto vbv = br.mesh->VertexBufferView();
+                auto ibv = br.mesh->IndexBufferView();
+                cmdList->IASetVertexBuffers(0, 1, &vbv);
+                cmdList->IASetIndexBuffer(&ibv);
+            }
+
+            // Bind texture
+            if (br.texture.ptr != 0)
+            {
+                cmdList->SetGraphicsRootDescriptorTable(2, br.texture);
+            }
+
+            activeState.mesh = br.mesh;
+            activeState.texture = br.texture;
+            batchStart = cmdCursor;
+        }
+
+        batchCount += br.numCommands;
+        cmdCursor += br.numCommands;
+    }
+
+    if (batchCount > 0)
+    {
+        cmdList->ExecuteIndirect(
+            cmdSig.Get(),
+            batchCount,
+            currentFrameResource->GPUArgumentBuffer.Get(),
+            batchStart * sizeof(IndirectDrawCommand),
+            nullptr,
+            0);
+    }
 }
