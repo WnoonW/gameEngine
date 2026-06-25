@@ -6,6 +6,7 @@
 #include "DescriptorAllocator.h"
 #include "ImGuiManager.h"
 #include "Engine.h"
+#include "constantStruct.h"
 
 using namespace DirectX;
 
@@ -181,21 +182,15 @@ void InitDirect3DApp::BeginFrame()
 	ThrowIfFailed(mCurrFrameResource->CmdListAlloc->Reset());
 	ThrowIfFailed(mCommandList->Reset(mCurrFrameResource->CmdListAlloc.Get(), nullptr));
 
-	// 4. 렌더 타겟 준비 (BeginFrame에 두는 건 임시, 나중에 Draw로 옮겨도 됨)
+	// 4. 렌더 타겟 준비
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
 		CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
-	// Transition depth back to write for this frame
-	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(),
-		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
-
+	// Depth는 EndFrame에서 SRV로 전환된 상태를 유지 (occlusion compute가 이전 프레임 depth를 읽음)
 	mCommandList->RSSetViewports(1, &mScreenViewport);
 	mCommandList->RSSetScissorRects(1, &mScissorRect);
 
 	mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
-	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
 }
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
@@ -215,11 +210,16 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	// CommandList Reset 후 topology는 undefined → ExecuteIndirect 전에 반드시 설정
 	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// Pass depth SRV for occlusion culling (previous frame's depth)
 	mEngine.SetDepthSrvGpu(mDepthSrvHandle.GPU);
 
-	// === Engine을 통해 렌더링 ===
-	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex);
+	DepthStencilContext depthCtx{
+		DepthStencilResource(),
+		DepthStencilView(),
+		CurrentBackBufferView(),
+		&mDepthStencilState
+	};
+
+	mEngine.RenderScene(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, &depthCtx);
 
 	mImGuiManager.Render(mCommandList.Get());
 }
@@ -231,8 +231,7 @@ void InitDirect3DApp::EndFrame()
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
 	// Transition depth to SRV for next frame's occlusion culling (after draws are done)
-	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(),
-		D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+	TransitionDepthStencil(mCommandList.Get(), DepthReadState);
 
 	// Done recording commands.
 	ThrowIfFailed(mCommandList->Close());

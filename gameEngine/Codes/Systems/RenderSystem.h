@@ -22,7 +22,8 @@ public:
         int currentFrameIndex,
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix,
-        D3D12_GPU_DESCRIPTOR_HANDLE depthSrvGpu = {});
+        D3D12_GPU_DESCRIPTOR_HANDLE depthSrvGpu = {},
+        const DepthStencilContext* depthCtx = nullptr);
 
 private:
     struct DrawGroupKey

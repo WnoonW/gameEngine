@@ -1,7 +1,20 @@
 #pragma once
+#include <d3d12.h>
 #include <DirectXMath.h>
 #include <DirectXCollision.h>
 #include "../Common/MathHelper.h"
+
+static constexpr D3D12_RESOURCE_STATES DepthReadState =
+    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+    | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+struct DepthStencilContext
+{
+    ID3D12Resource* resource = nullptr;
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv{};
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv{};
+    D3D12_RESOURCE_STATES* currentState = nullptr;
+};
 
 struct PassConstants
 {

@@ -38,16 +38,17 @@ void Engine::Update()
 {
 }
 
-void Engine::Render(ID3D12GraphicsCommandList* cmdList,
+void Engine::RenderScene(ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
-    int currentFrameIndex)
+    int currentFrameIndex,
+    const DepthStencilContext* depthCtx)
 {
     const XMMATRIX viewMatrix = mCamera.GetView();
     const XMMATRIX projMatrix = mCamera.GetProj();
 
     mRenderSystem.renderExecuteIndirect(mWorld, cmdList, currentFrameResource,
         mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix,
-        mDepthSrvGpu);  // pass for occlusion culling
+        mDepthSrvGpu, depthCtx);
 }
 
 static uint32_t CountEstimatedDrawCommands(ECS::World& world)

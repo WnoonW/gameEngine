@@ -90,6 +90,24 @@ D3D12_CPU_DESCRIPTOR_HANDLE D3DApp::DepthStencilView()const
 {
 	return mDsvHeap->GetCPUDescriptorHandleForHeapStart();
 }
+
+ID3D12Resource* D3DApp::DepthStencilResource() const
+{
+	return mDepthStencilBuffer.Get();
+}
+
+void D3DApp::TransitionDepthStencil(ID3D12GraphicsCommandList* cmdList, D3D12_RESOURCE_STATES newState)
+{
+	if (!mDepthStencilBuffer || mDepthStencilState == newState)
+		return;
+
+	const D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		mDepthStencilBuffer.Get(),
+		mDepthStencilState,
+		newState);
+	cmdList->ResourceBarrier(1, &barrier);
+	mDepthStencilState = newState;
+}
 #pragma endregion
 //=============================================================================================================================================GetAndSet
 
@@ -524,6 +542,7 @@ void D3DApp::OnResize()
 	// Transition the resource from its initial state to be used as a depth buffer.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(),
 		D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+	mDepthStencilState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 
 	// Execute the resize commands.
 	ThrowIfFailed(mCommandList->Close());

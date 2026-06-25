@@ -6,6 +6,7 @@
 #include "RenderSystem.h"
 #include "DescriptorAllocator.h"
 #include "AppStruct.h"
+#include "constantStruct.h"
 #include "ResourceManager.h"
 #include "Camera.h"
 
@@ -29,10 +30,10 @@ public:
     Camera& GetCamera() { return mCamera; }
     const Camera& GetCamera() const { return mCamera; }
 
-    // 렌더링
-    void Render(ID3D12GraphicsCommandList* cmdList,
+    void RenderScene(ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
-        int currentFrameIndex);
+        int currentFrameIndex,
+        const DepthStencilContext* depthCtx);
 
     // 엔티티 생성 (이름 기반)
     Entity CreateRenderableEntity(const std::string& meshName,

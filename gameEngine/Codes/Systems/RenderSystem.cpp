@@ -57,6 +57,39 @@ namespace
             || bounds.Extents.y > 0.0f
             || bounds.Extents.z > 0.0f;
     }
+
+    void TransitionDepthStencil(const DepthStencilContext* depthCtx,
+        ID3D12GraphicsCommandList* cmdList,
+        D3D12_RESOURCE_STATES newState)
+    {
+        if (!depthCtx || !depthCtx->resource || !depthCtx->currentState)
+            return;
+        if (*depthCtx->currentState == newState)
+            return;
+
+        const D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            depthCtx->resource,
+            *depthCtx->currentState,
+            newState);
+        cmdList->ResourceBarrier(1, &barrier);
+        *depthCtx->currentState = newState;
+    }
+
+    void PrepareDepthForSceneDraw(const DepthStencilContext* depthCtx, ID3D12GraphicsCommandList* cmdList)
+    {
+        if (!depthCtx || !depthCtx->resource || depthCtx->dsv.ptr == 0 || depthCtx->rtv.ptr == 0)
+            return;
+
+        TransitionDepthStencil(depthCtx, cmdList, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        cmdList->ClearDepthStencilView(
+            depthCtx->dsv,
+            D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+            1.0f,
+            0,
+            0,
+            nullptr);
+        cmdList->OMSetRenderTargets(1, &depthCtx->rtv, true, &depthCtx->dsv);
+    }
 }
 
 void RenderSystem::renderExecuteIndirect(ECS::World& world,
@@ -66,7 +99,8 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     int /*currentFrameIndex*/,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix,
-    D3D12_GPU_DESCRIPTOR_HANDLE depthSrvGpu)
+    D3D12_GPU_DESCRIPTOR_HANDLE depthSrvGpu,
+    const DepthStencilContext* depthCtx)
 {
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
@@ -248,6 +282,11 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
 
             if (buildRS && buildPSO)
             {
+                if (depthSrvGpu.ptr != 0)
+                {
+                    TransitionDepthStencil(depthCtx, cmdList, DepthReadState);
+                }
+
                 D3D12_RESOURCE_BARRIER toUAV = {};
                 toUAV.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
                 toUAV.Transition.pResource = currentFrameResource->GPUArgumentBuffer.Get();
@@ -302,6 +341,8 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
 
     if (numCommands == 0)
         return;
+
+    PrepareDepthForSceneDraw(depthCtx, cmdList);
 
     D3D12_GPU_DESCRIPTOR_HANDLE activeTexture{};
     UINT cmdCursor = 0;

@@ -71,8 +71,11 @@ protected:
     void CreateSwapChain();
 
 	void FlushCommandQueue();
+	void TransitionDepthStencil(ID3D12GraphicsCommandList* cmdList, D3D12_RESOURCE_STATES newState);
 
 	ID3D12Resource* CurrentBackBuffer()const;
+	ID3D12Resource* DepthStencilResource()const;
+	D3D12_RESOURCE_STATES GetDepthStencilState() const { return mDepthStencilState; }
 	D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView()const;
 	D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView()const;
 
@@ -126,6 +129,7 @@ protected:
 	int mCurrBackBuffer = 0;
     Microsoft::WRL::ComPtr<ID3D12Resource> mSwapChainBuffer[SwapChainBufferCount];
     Microsoft::WRL::ComPtr<ID3D12Resource> mDepthStencilBuffer;
+    D3D12_RESOURCE_STATES mDepthStencilState = D3D12_RESOURCE_STATE_COMMON;
 
     // SRV for the depth buffer, used for occlusion culling in compute shader
     D3D12_CPU_DESCRIPTOR_HANDLE mDepthSrvCpuHandle{};
