@@ -1,6 +1,14 @@
 // Root signature는 C++ (RootSignatureManager)에서만 정의.
-// slot 0: Object CBV (b0), slot 1: Pass CBV (b1), slot 2: Texture SRV (t0)
-// slot 3: root constants (indirect 전용) - 셰이더에서 참조하지 않음
+// [0] CBV b0 (ObjectConstants) - 하위 호환
+// [1] CBV b1 (PassConstants)
+// [2] SRV table t0 (texture)
+// [3] Root Constants b13 (baseInstance - indirect)
+// [4] SRV t1 (Instance StructuredBuffer)
+
+struct ObjectConstants
+{
+    float4x4 World;
+};
 
 cbuffer cbPerObject : register(b0)
 {
@@ -11,6 +19,8 @@ cbuffer cbPerPass : register(b1)
 {
     float4x4 gViewProj;
 };
+
+StructuredBuffer<ObjectConstants> gInstanceData : register(t1);   // instancing용
 
 Texture2D gTexture : register(t0);
 SamplerState gSampler : register(s0);
@@ -29,11 +39,15 @@ struct VertexOut
     float2 TexC : TEXCOORD;
 };
 
-VertexOut VS(VertexIn vin)
+VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
 
-    vout.PosH = mul(mul(float4(vin.PosL, 1.0f), gWorld), gViewProj);
+    // ExecuteIndirect + StartInstanceLocation + InstanceCount 사용 시
+    // instanceID 는 StartInstanceLocation 부터 시작함
+    float4x4 world = gInstanceData[instanceID].World;
+
+    vout.PosH = mul(mul(float4(vin.PosL, 1.0f), world), gViewProj);
     vout.Normal = vin.Normal;
     vout.TexC = vin.TexC;
 

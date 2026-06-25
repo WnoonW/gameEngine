@@ -111,6 +111,10 @@ protected:
 	const UINT MaxDrawCommandCount = RenderLimits::MaxDrawCommandCount;
 	const UINT ArgumentBufferSize = MaxDrawCommandCount * sizeof(IndirectDrawCommand);
 
+	// Instancing용 InstanceBuffer (솔루션 2: 독립적이고 더 큰 크기)
+	const UINT MaxInstanceCount = RenderLimits::MaxInstanceCount;
+	const UINT InstanceBufferSize = MaxInstanceCount * sizeof(ObjectConstants);
+
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;
 

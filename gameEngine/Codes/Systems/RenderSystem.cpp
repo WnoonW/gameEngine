@@ -1,4 +1,8 @@
 #include <DirectXMath.h>
+#include <map>
+#include <tuple>
+#include <vector>
+
 #include "RenderSystem.h"
 #include "MaterialManager.h"
 #include "MeshManager.h"
@@ -52,16 +56,15 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     const XMMATRIX& projMatrix)
 {
     // ============================================================
-    // renderExecuteIndirect - ExecuteIndirect + State Batching 기반 렌더링
+    // renderExecuteIndirect - ExecuteIndirect + Instancing 최적화 버전
     // ------------------------------------------------------------
     // 목적:
-    //   - DrawCall을 간접 명령(IndirectDrawCommand)으로 미리 기록
-    //   - 같은 Mesh / ObjectCB / Texture를 사용하는 연속 Draw를 "배치(Batch)"로 묶어
-    //     ExecuteIndirect 호출 횟수와 상태 변경 횟수를 최소화
-    // 주요 최적화 포인트:
-    //   1. Mesh / CBV / Texture 상태가 바뀔 때만 IA, RootCBV, DescriptorTable 바인딩
-    //   2. 상태가 동일한 DrawCommand들을 하나의 ExecuteIndirect로 묶어서 실행
-    //   3. CommandSignature를 통해 DrawIndexed + 소량 Root Constant(objectCBIndex)를 동시에 제어
+    //   - 같은 Mesh + 같은 Material 을 사용하는 여러 엔티티를 하나의 Indirect 명령으로 묶음
+    //   - drawArgs.InstanceCount 를 실제 인스턴스 개수로 설정
+    // 핵심 (2번 + 3번 솔루션 적용):
+    //   - InstanceBuffer를 MaxInstanceCount(65536)로 독립 확대 (솔루션 2)
+    //   - 대형 그룹은 chunk 단위로 여러 Indirect 명령 분할 (솔루션 3)
+    //   - (mesh + material + draw args) 단위 그룹핑 + InstanceBuffer + SV_InstanceID
     // ============================================================
 
     // 1. Descriptor Heap 설정 (Texture SRV 바인딩을 위해 필요)
@@ -83,9 +86,7 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     if (!pso)
         return;
 
-    // CommandSignature 가져오기 (IndirectDrawCommand 해석 규칙 정의)
-    //   - [0] Root Constants (1 DWORD) → Root Parameter 3 (objectCBIndex, 셰이더에서는 현재 미사용)
-    //   - [1] DrawIndexedArguments
+    // CommandSignature (첫 uint32 = baseInstance 를 root constant로 전달)
     ComPtr<ID3D12CommandSignature> cmdSig =
         RootSignatureManager::Get().GetOrCreateCommandSignature(sceneRS);
     if (!cmdSig)
@@ -100,34 +101,38 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     UpdatePassCB(currentFrameResource, cmdList, viewMatrix, projMatrix);
 
     // ============================================================
-    // 5. Indirect Argument Buffer 준비
-    // ------------------------------------------------------------
-    // FrameResource에 미리 생성된 Upload 버퍼를 CPU에서 직접 기록
-    // 각 IndirectDrawCommand는 CommandSignature와 1:1 대응
+    // InstanceBuffer SRV 바인딩 (root parameter 4 = t1)
+    // ============================================================
+    if (currentFrameResource->InstanceBuffer)
+    {
+        cmdList->SetGraphicsRootShaderResourceView(
+            4,
+            currentFrameResource->InstanceBuffer->GetGPUVirtualAddress());
+    }
+
+    // ============================================================
+    // Indirect Argument Buffer + Instance Data Buffer 준비
+    // InstanceBuffer는 StructuredBuffer로 바인딩되어 SV_InstanceID 인덱싱에 사용됨
     // ============================================================
     IndirectDrawCommand* cmdBuffer =
         reinterpret_cast<IndirectDrawCommand*>(currentFrameResource->MappedArgumentBuffer);
 
+    ObjectConstants* instanceData =
+        reinterpret_cast<ObjectConstants*>(currentFrameResource->MappedInstanceBuffer);
+
     const UINT maxCommandCount =
         currentFrameResource->ArgumentBufferSize / sizeof(IndirectDrawCommand);
 
+    const UINT maxInstanceCount =
+        currentFrameResource->InstanceBufferSize / sizeof(ObjectConstants);
+    // 솔루션 2 적용: maxInstanceCount이 이제 65536 (독립적 큰 버퍼)
+
     // ============================================================
-    // 6. 상태 추적 및 배치(Batching) 변수
-    // ------------------------------------------------------------
-    // DrawBindState: 현재 GPU에 바인딩된 상태를 기억하여 중복 바인딩 방지
-    //   - mesh           : Vertex/Index Buffer
-    //   - objectCBAddress: ObjectConstants CBV (Root Parameter 0)
-    //   - texture        : Material Texture SRV (Root Parameter 2)
-    //
-    // 배치 변수:
-    //   - writeIndex  : ArgumentBuffer에 명령을 기록할 다음 위치
-    //   - batchStart  : 현재 배치가 시작된 writeIndex
-    //   - batchCount  : 현재 배치에 포함된 연속 DrawCommand 개수
+    // 상태 추적 (mesh + texture 만)
     // ============================================================
     struct DrawBindState
     {
         Mesh* mesh = nullptr;
-        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress = 0;
         D3D12_GPU_DESCRIPTOR_HANDLE texture{};
     };
 
@@ -136,13 +141,8 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     UINT batchStart = 0;
     UINT batchCount = 0;
 
-    // ============================================================
-    // 7. flushBatch() - 현재까지 모은 배치를 ExecuteIndirect로 실행
-    // ------------------------------------------------------------
-    // batchCount > 0 일 때만 호출.
-    // ExecuteIndirect( batchCount, ArgumentBuffer, batchStart * stride )
-    //   → GPU가 ArgumentBuffer에서 batchCount개의 IndirectDrawCommand를 연속으로 해석하여 Draw
-    // ============================================================
+    // flushBatch: 현재까지 모은 명령 배치를 ExecuteIndirect로 실행
+
     auto flushBatch = [&]()
     {
         if (batchCount == 0)
@@ -159,17 +159,9 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
         batchCount = 0;
     };
 
-    // ============================================================
-    // 8. applyBindState() - 상태가 바뀐 경우에만 실제 바인딩 수행
-    // ------------------------------------------------------------
-    // 변경된 항목만 선택적으로 바인딩 (상태 변경 최소화)
-    //   - Mesh가 다르면 → IASetVertexBuffers / IASetIndexBuffer
-    //   - ObjectCB가 다르면 → SetGraphicsRootConstantBufferView(0, ...)
-    //   - Texture가 다르면 → SetGraphicsRootDescriptorTable(2, ...)
-    // ============================================================
-    auto applyBindState = [&](Mesh* mesh,
-        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-        D3D12_GPU_DESCRIPTOR_HANDLE texture)
+    // applyBindState: mesh 또는 texture가 바뀔 때만 바인딩 (상태 변경 최소화)
+    // mesh + texture 만 바인딩
+    auto applyBindState = [&](Mesh* mesh, D3D12_GPU_DESCRIPTOR_HANDLE texture)
     {
         if (mesh != activeState.mesh)
         {
@@ -180,12 +172,6 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
             activeState.mesh = mesh;
         }
 
-        if (objectCBAddress != activeState.objectCBAddress)
-        {
-            cmdList->SetGraphicsRootConstantBufferView(0, objectCBAddress);
-            activeState.objectCBAddress = objectCBAddress;
-        }
-
         if (texture.ptr != activeState.texture.ptr)
         {
             cmdList->SetGraphicsRootDescriptorTable(2, texture);
@@ -194,24 +180,12 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
     };
 
     // ============================================================
-    // 9. 메인 루프: ECS 엔티티 순회 + Indirect Command 기록
-    // ------------------------------------------------------------
-    // ForEach<Transform, Renderable> 로 모든 렌더 대상 엔티티 순회
-    //
-    // 처리 흐름 (엔티티당):
-    //   a. 유효성 검사 (visible, mesh 존재, 버퍼 존재, objectCBIndex 범위)
-    //   b. WorldMatrix 계산 → ObjectConstants 업로드 → GPU 주소 계산
-    //   c. Mesh의 모든 DrawArg(서브메시) 순회
-    //      - material 결정 (SubMesh 전용 material 우선, 없으면 Renderable 기본 material)
-    //      - 현재 상태(activeState)와 비교하여 stateChanged 여부 판정
-    //      - stateChanged == true → flushBatch() + applyBindState() + 새 배치 시작
-    //      - IndirectDrawCommand 채우기:
-    //          · objectCBIndex (CommandSignature의 CONSTANT 인자)
-    //          · D3D12_DRAW_INDEXED_ARGUMENTS (IndexCount, InstanceCount=1, Start/Offset 등)
-    //      - writeIndex++, batchCount++
-    //
-    // 버퍼 초과 시: flush 후 즉시 return (안전 종료)
+    // 그룹 수집 + InstanceBuffer 기록 + InstanceCount 적용
     // ============================================================
+    using DrawKey = std::tuple<Mesh*, Material*, UINT, UINT, INT>;
+
+    std::map<DrawKey, std::vector<XMMATRIX>> groups;
+
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
@@ -221,54 +195,110 @@ void RenderSystem::renderExecuteIndirect(ECS::World& world,
 
             XMMATRIX worldMat = tf.GetWorldMatrix();
 
+            // 기존 ObjectCB에도 기록 (다른 렌더 경로 호환)
             ObjectConstants objConst{};
             XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(worldMat));
             currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
 
-            const D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
-                GetObjectCBGpuAddress(currentFrameResource, rend.objectCBIndex);
-
             for (auto& pair : rend.mesh->DrawArgs)
             {
-                if (writeIndex >= maxCommandCount)
-                {
-                    flushBatch();
-                    return;
-                }
-
                 const auto& sub = pair.second;
                 Material* material = sub.material ? sub.material : rend.material.get();
                 if (!material) continue;
 
-                const D3D12_GPU_DESCRIPTOR_HANDLE textureHandle = material->mTextureHandle.GPU;
+                DrawKey key = std::make_tuple(
+                    rend.mesh, material,
+                    sub.IndexCount, sub.StartIndexLocation, sub.BaseVertexLocation);
 
-                // === 상태 변경 감지 ===
-                const bool stateChanged =
-                    rend.mesh != activeState.mesh ||
-                    objectCBAddress != activeState.objectCBAddress ||
-                    textureHandle.ptr != activeState.texture.ptr;
-
-                if (stateChanged)
-                {
-                    // 이전 배치 실행 + 새 상태 바인딩 + 새 배치 시작점 기록
-                    flushBatch();
-                    applyBindState(rend.mesh, objectCBAddress, textureHandle);
-                    batchStart = writeIndex;
-                }
-
-                // IndirectDrawCommand 기록 (CPU에서 ArgumentBuffer에 직접 씀)
-                cmdBuffer[writeIndex].objectCBIndex = rend.objectCBIndex;
-                cmdBuffer[writeIndex].drawArgs.IndexCountPerInstance = sub.IndexCount;
-                cmdBuffer[writeIndex].drawArgs.InstanceCount = 1;
-                cmdBuffer[writeIndex].drawArgs.StartIndexLocation = sub.StartIndexLocation;
-                cmdBuffer[writeIndex].drawArgs.BaseVertexLocation = sub.BaseVertexLocation;
-                cmdBuffer[writeIndex].drawArgs.StartInstanceLocation = 0;
-
-                ++writeIndex;
-                ++batchCount;
+                groups[key].push_back(worldMat);
             }
         });
 
-    // 10. 마지막에 남은 배치 실행
+    UINT instanceWritePos = 0;
+    bool emissionLimitReached = false;
+
+    for (const auto& kv : groups)
+    {
+        if (emissionLimitReached) break;
+
+        const auto& key = kv.first;
+        const auto& worldList = kv.second;
+
+        if (worldList.empty()) continue;
+
+        Mesh* meshPtr = std::get<0>(key);
+        Material* matPtr = std::get<1>(key);
+        UINT idxCount = std::get<2>(key);
+        UINT startIdx = std::get<3>(key);
+        INT baseVert = std::get<4>(key);
+
+        D3D12_GPU_DESCRIPTOR_HANDLE texHandle = matPtr ? matPtr->mTextureHandle.GPU : D3D12_GPU_DESCRIPTOR_HANDLE{};
+
+        const bool stateChanged =
+            (meshPtr != activeState.mesh) || (texHandle.ptr != activeState.texture.ptr);
+
+        if (stateChanged)
+        {
+            flushBatch();
+            applyBindState(meshPtr, texHandle);
+            batchStart = writeIndex;
+        }
+
+        // ============================================================
+        // 솔루션 3: 대형 그룹 Chunking 적용
+        // - 한 그룹(worldList)이 남은 슬롯보다 크면 여러 Indirect 명령으로 분할
+        // - 같은 (mesh + material + draw range) 이므로 IA/Texture 재바인딩 없이
+        //   동일 배치(ExecuteIndirect) 안에 여러 chunk 명령 포함 가능
+        // ============================================================
+        size_t groupPos = 0;
+        while (groupPos < worldList.size())
+        {
+            if (writeIndex >= maxCommandCount)
+            {
+                flushBatch();
+                emissionLimitReached = true;
+                break;
+            }
+
+            UINT remaining = (instanceWritePos < maxInstanceCount)
+                ? (maxInstanceCount - instanceWritePos)
+                : 0;
+
+            if (remaining == 0)
+            {
+                flushBatch();
+                emissionLimitReached = true;
+                break;
+            }
+
+            UINT chunkSize = min((UINT)(worldList.size() - groupPos), remaining);
+            if (chunkSize == 0) break;
+
+            const UINT baseInstance = instanceWritePos;
+
+            // chunk 단위로 InstanceBuffer 기록
+            for (size_t i = 0; i < chunkSize; ++i)
+            {
+                ObjectConstants oc{};
+                XMStoreFloat4x4(&oc.World, XMMatrixTranspose(worldList[groupPos + i]));
+                instanceData[baseInstance + i] = oc;
+            }
+            instanceWritePos += chunkSize;
+
+            // 한 덩어리(chunk)에 대한 IndirectDrawCommand 기록
+            cmdBuffer[writeIndex].baseInstance = baseInstance;
+            cmdBuffer[writeIndex].drawArgs.IndexCountPerInstance = idxCount;
+            cmdBuffer[writeIndex].drawArgs.InstanceCount = chunkSize;
+            cmdBuffer[writeIndex].drawArgs.StartIndexLocation = startIdx;
+            cmdBuffer[writeIndex].drawArgs.BaseVertexLocation = baseVert;
+            cmdBuffer[writeIndex].drawArgs.StartInstanceLocation = baseInstance;
+
+            ++writeIndex;
+            ++batchCount;
+
+            groupPos += chunkSize;
+        }
+    }
+
     flushBatch();
 }

@@ -48,16 +48,18 @@ void RootSignatureManager::CreateSceneRootSignature()
 
     CD3DX12_DESCRIPTOR_RANGE srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
-    // [0] CBV (b0) - ObjectConstants buffer (base address, indexed in shader)
+    // [0] CBV (b0) - ObjectConstants (하위 호환용, instancing path에서는 사용 안 함)
     // [1] CBV (b1) - PassConstants (camera view-proj)
     // [2] SRV table (t0) - per-draw texture
-    // [3] Root Constants - ExecuteIndirect 전용 (objectCBIndex)
-    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
+    // [3] Root Constants (1 DWORD) - ExecuteIndirect 전용 (baseInstance)
+    // [4] SRV (t1) - Instance StructuredBuffer<ObjectConstants> (instancing용)
+    CD3DX12_ROOT_PARAMETER slotRootParameter[5];
     slotRootParameter[0].InitAsConstantBufferView(0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[1].InitAsConstantBufferView(1, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
     // ShaderRegister 0(b0)은 slot 0 Object CBV와 겹치므로 13 사용
     slotRootParameter[3].InitAsConstants(1, 13, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[4].InitAsShaderResourceView(1, 0, D3D12_SHADER_VISIBILITY_ALL); // t1 - instance data
 
     // === 3. Static Sampler ===
     CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
@@ -69,7 +71,7 @@ void RootSignatureManager::CreateSceneRootSignature()
 
     // === 4. Root Signature Desc ===
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        4, slotRootParameter,
+        5, slotRootParameter,
         1, &samplerDesc,
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
@@ -112,6 +114,7 @@ ComPtr<ID3D12CommandSignature> RootSignatureManager::GetOrCreateCommandSignature
     D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[2] = {};
 
     // 1. CONSTANT를 먼저 선언 (중요!)
+    //    IndirectDrawCommand의 첫 uint32 (baseInstance)를 root param 3 (b13)로 전달
     argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
     argumentDescs[0].Constant.RootParameterIndex = 3;           // Indirect 전용 root constants 슬롯
     argumentDescs[0].Constant.Num32BitValuesToSet = 1;          // uint 1개 전달

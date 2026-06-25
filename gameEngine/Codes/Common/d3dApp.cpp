@@ -543,7 +543,11 @@ void D3DApp::CreateCommandObjects()
 	mFrameResources.resize(gNumFrameResources);
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
-		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), RenderLimits::MaxObjectCount, ArgumentBufferSize);
+		mFrameResources[i] = std::make_unique<FrameResource>(
+			md3dDevice.Get(),
+			RenderLimits::MaxObjectCount,
+			ArgumentBufferSize,
+			InstanceBufferSize);   // 솔루션 2: 별도 큰 InstanceBuffer 전달
 	}
 
 	mCurrFrameResourceIndex = 0;

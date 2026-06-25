@@ -14,6 +14,9 @@ struct ObjectConstants
 
 struct IndirectDrawCommand
 {
-	uint32_t objectCBIndex = 0;
+	// Instancing 지원을 위해 baseInstance로 재해석됨.
+	// CommandSignature의 CONSTANT 인자를 통해 root b13으로 전달.
+	// 셰이더에서 baseInstance + SV_InstanceID 로 인스턴스 데이터 인덱싱.
+	uint32_t baseInstance = 0;
 	D3D12_DRAW_INDEXED_ARGUMENTS drawArgs{};
 };
