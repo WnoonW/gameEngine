@@ -74,7 +74,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		std::wstring wMaterialName(len, L'\0');
 		MultiByteToWideChar(CP_UTF8, 0, sub.materialName.c_str(), -1, &wMaterialName[0], len);
 
-		std::wstring msg = L"  [" + std::to_wstring(i) + L"] materialName = [" + wMaterialName + L"]\n";
+		std::wstring msg = L"  [" + std::to_wstring(i) + L"] initMaterialName = [" + wMaterialName + L"]\n";
 		OutputDebugStringW(msg.c_str());
 	}
 	OutputDebugStringW(L"\n========================================\n\n");
@@ -118,7 +118,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		submesh.IndexCount = offsets[i].indexCount;
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
 		submesh.BaseVertexLocation = 0;                    // ← 여기 중요! 0으로 고정
-		submesh.materialName = cpuSub.materialName;
+		submesh.initMaterialName = cpuSub.materialName;
 		submesh.Bounds = localBounds;  // store local AABB per submesh
 		std::string key = "submesh_" + std::to_string(i);
 		mMesh.DrawArgs[key] = submesh;
@@ -140,24 +140,14 @@ void MeshManager::ResolveMeshMaterials(Mesh* mesh)
 
 	for (auto& [key, submesh] : mesh->DrawArgs)
 	{
-		if (!submesh.materialName.empty())
+		if (!submesh.initMaterialName.empty())
 		{
-			// 1. 이름으로 Material 찾기
-			auto mat = MaterialManager::Get().GetMaterial(submesh.materialName);
-
-			if (mat)
-			{
-				submesh.material = mat.get();           // 연결 성공
-			}
-			else
-			{
-				submesh.material = MaterialManager::Get().GetDefaultMaterial().get();
-			}
+			auto mat = MaterialManager::Get().GetMaterial(submesh.initMaterialName);
+			submesh.initMaterial = mat ? mat.get() : MaterialManager::Get().GetDefaultMaterial().get();
 		}
 		else
 		{
-			// materialName이 비어있으면 Default
-			submesh.material = MaterialManager::Get().GetDefaultMaterial().get();
+			submesh.initMaterial = MaterialManager::Get().GetDefaultMaterial().get();
 		}
 	}
 }

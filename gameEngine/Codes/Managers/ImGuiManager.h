@@ -33,6 +33,8 @@ public:
 };
 
 
+class Engine;
+
 class ImGuiManager
 {
 public:
@@ -44,7 +46,7 @@ public:
         DescriptorAllocator& globalDescriptorAllocator,
         IFunctionCallback* callback = nullptr);
 
-    void CustomUI();
+    void CustomUI(Engine* engine = nullptr);
 
     // for object creation from loaded assets
     const std::string& GetSelectedMesh() const { return mSelectedMesh; }

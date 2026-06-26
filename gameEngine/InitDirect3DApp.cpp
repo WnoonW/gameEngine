@@ -148,7 +148,7 @@ void InitDirect3DApp::OnResize()
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
-	mImGuiManager.CustomUI();
+	mImGuiManager.CustomUI(&mEngine);
 	mManipulateSelected = mImGuiManager.IsManipulateSelected();
 
 	// === 카메라 조작 (Minecraft Creative 스타일) ===
@@ -403,7 +403,7 @@ void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 
 	SetCapture(mhMainWnd);
 
-	if (btnState & MK_LBUTTON)
+	if (btnState & MK_RBUTTON)
 	{
 		Entity picked = mEngine.PickObject(x, y, (float)mClientWidth, (float)mClientHeight, mCurrentView, mCurrentProj);
 		if (picked != INVALID_ENTITY)
@@ -538,7 +538,6 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 		std::string mesh = mImGuiManager.GetSelectedMesh();
 		std::string mat = mImGuiManager.GetSelectedMaterial();
 		if (mesh.empty()) mesh = "bibian";
-		if (mat.empty()) mat = "Test";
 
 		// spawn in front of camera
 		XMFLOAT3 camPos{ mCamX, mCamY, mCamZ };

@@ -1,8 +1,44 @@
 #include "ImGuiManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/MaterialManager.h"
+#include "Engine.h"
+#include "Entity.h"
 #include <algorithm>
 #include <vector>
+
+namespace
+{
+    void LoadUIFonts(ImGuiIO& io)
+    {
+        io.Fonts->Clear();
+
+        const float fontSize = 18.0f;
+        ImFontConfig cfg;
+        cfg.OversampleH = 2;
+        cfg.OversampleV = 1;
+        cfg.PixelSnapH = true;
+
+        const char* koreanFont = "C:\\Windows\\Fonts\\malgun.ttf";
+        const char* japaneseFont = "C:\\Windows\\Fonts\\meiryo.ttc";
+        const char* chineseFont = "C:\\Windows\\Fonts\\msyh.ttc";
+
+        if (ImFont* font = io.Fonts->AddFontFromFileTTF(koreanFont, fontSize, &cfg))
+        {
+            ImFontConfig mergeCfg;
+            mergeCfg.MergeMode = true;
+            mergeCfg.PixelSnapH = true;
+            mergeCfg.FontNo = 0;
+            io.Fonts->AddFontFromFileTTF(japaneseFont, fontSize, &mergeCfg);
+            io.Fonts->AddFontFromFileTTF(chineseFont, fontSize, &mergeCfg);
+            return;
+        }
+
+        if (io.Fonts->AddFontFromFileTTF(chineseFont, fontSize, &cfg))
+            return;
+
+        io.Fonts->AddFontDefault();
+    }
+}
 
 bool ImGuiManager::Initialize(
     HWND hwnd,
@@ -18,6 +54,8 @@ bool ImGuiManager::Initialize(
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+    LoadUIFonts(io);
 
     static DescriptorAllocator* s_DescriptorAllocator = nullptr;
     s_DescriptorAllocator = &globalDescriptorAllocator;
@@ -56,7 +94,26 @@ bool ImGuiManager::Initialize(
     return true;
 }
 
-void ImGuiManager::CustomUI()
+namespace
+{
+    auto MainMaterialComboGetter = [](void* data, int idx) -> const char*
+    {
+        if (idx == 0) return "None";
+        auto* names = static_cast<std::vector<std::string>*>(data);
+        if (idx - 1 < 0 || idx - 1 >= (int)names->size()) return nullptr;
+        return (*names)[idx - 1].c_str();
+    };
+
+    auto SubMaterialComboGetter = [](void* data, int idx) -> const char*
+    {
+        if (idx == 0) return "(Cascade)";
+        auto* names = static_cast<std::vector<std::string>*>(data);
+        if (idx - 1 < 0 || idx - 1 >= (int)names->size()) return nullptr;
+        return (*names)[idx - 1].c_str();
+    };
+}
+
+void ImGuiManager::CustomUI(Engine* engine)
 {
     ImGui::Begin("V3.0-UI Debug Window");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
@@ -108,29 +165,21 @@ void ImGuiManager::CustomUI()
     }
 
     auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+    std::sort(matNames.begin(), matNames.end());
     if (!matNames.empty()) {
-        if (std::find(matNames.begin(), matNames.end(), mSelectedMaterial) == matNames.end() && !matNames.empty()) {
-            mSelectedMaterial = matNames[0];
-        }
-
         int matIdx = 0;
-        for (size_t i = 0; i < matNames.size(); ++i) {
-            if (matNames[i] == mSelectedMaterial) {
-                matIdx = (int)i;
-                break;
-            }
+        if (!mSelectedMaterial.empty())
+        {
+            auto it = std::find(matNames.begin(), matNames.end(), mSelectedMaterial);
+            if (it != matNames.end())
+                matIdx = 1 + (int)std::distance(matNames.begin(), it);
         }
 
-        auto matGetter = [](void* data, int idx) -> const char* {
-            auto* vec = (std::vector<std::string>*)data;
-            if (idx < 0 || idx >= (int)vec->size()) return nullptr;
-            return (*vec)[idx].c_str();
-        };
-        if (ImGui::Combo("Material", &matIdx, matGetter, &matNames, (int)matNames.size())) {
-            mSelectedMaterial = matNames[matIdx];
+        if (ImGui::Combo("Main Material (spawn)", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1)) {
+            mSelectedMaterial = (matIdx == 0) ? "" : matNames[matIdx - 1];
         }
     } else {
-        mSelectedMaterial = "Default";
+        mSelectedMaterial.clear();
     }
 
     if (ImGui::Button("Spawn Selected Mesh")) {
@@ -140,7 +189,74 @@ void ImGuiManager::CustomUI()
     }
 
     if (!mSelectedMesh.empty()) {
-        ImGui::Text("Selected: %s / %s", mSelectedMesh.c_str(), mSelectedMaterial.c_str());
+        const char* spawnMat = mSelectedMaterial.empty() ? "None (Init)" : mSelectedMaterial.c_str();
+        ImGui::Text("Spawn: %s / %s", mSelectedMesh.c_str(), spawnMat);
+    }
+
+    if (engine)
+    {
+        Entity selected = engine->GetSelectedEntity();
+        RenderableComponent* rend = engine->GetRenderable(selected);
+        if (rend && rend->mesh)
+        {
+            ImGui::Separator();
+            ImGui::Text("Entity Material (Sub > Main > Init)");
+
+            auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+            std::sort(matNames.begin(), matNames.end());
+
+            const std::string mainMaterialName = engine->GetEntityMainMaterial(selected);
+            int mainIdx = 0;
+            if (!mainMaterialName.empty())
+            {
+                auto it = std::find(matNames.begin(), matNames.end(), mainMaterialName);
+                if (it != matNames.end())
+                    mainIdx = 1 + (int)std::distance(matNames.begin(), it);
+            }
+
+            if (ImGui::Combo("Main Material", &mainIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+            {
+                std::string newMain = (mainIdx == 0) ? "" : matNames[mainIdx - 1];
+                engine->SetEntityMainMaterial(selected, newMain);
+            }
+
+            ImGui::Text("Submesh Overrides");
+            std::vector<std::string> submeshKeys;
+            submeshKeys.reserve(rend->mesh->DrawArgs.size());
+            for (const auto& pair : rend->mesh->DrawArgs)
+                submeshKeys.push_back(pair.first);
+            std::sort(submeshKeys.begin(), submeshKeys.end());
+
+            for (const auto& key : submeshKeys)
+            {
+                const auto& sub = rend->mesh->DrawArgs.at(key);
+                ImGui::PushID(key.c_str());
+                ImGui::Text("%s (Init: %s)", key.c_str(),
+                    sub.initMaterialName.empty() ? "Default" : sub.initMaterialName.c_str());
+
+                const std::string currentSub = engine->GetEntitySubMaterial(selected, key);
+
+                int subIdx = 0;
+                if (!currentSub.empty())
+                {
+                    auto it = std::find(matNames.begin(), matNames.end(), currentSub);
+                    if (it != matNames.end())
+                        subIdx = 1 + (int)std::distance(matNames.begin(), it);
+                }
+
+                if (ImGui::Combo("Sub Material", &subIdx, SubMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+                {
+                    std::string newSub = (subIdx == 0) ? "" : matNames[subIdx - 1];
+                    engine->SetEntitySubMaterial(selected, key, newSub);
+                }
+                ImGui::PopID();
+            }
+        }
+        else if (selected != INVALID_ENTITY)
+        {
+            ImGui::Separator();
+            ImGui::Text("Selected entity has no RenderableComponent");
+        }
     }
 
     ImGui::End();

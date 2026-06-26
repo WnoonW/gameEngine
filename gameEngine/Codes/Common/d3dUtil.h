@@ -154,8 +154,8 @@ struct SubmeshGeometry
 	UINT StartIndexLocation = 0;
 	INT BaseVertexLocation = 0;
 
-    std::string materialName;
-    Material* material = nullptr;
+    std::string initMaterialName;   // OBJ usemtl (Init layer)
+    Material* initMaterial = nullptr;
 	DirectX::BoundingBox Bounds;
 };
 

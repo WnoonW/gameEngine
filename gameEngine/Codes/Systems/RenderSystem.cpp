@@ -80,7 +80,7 @@ void RenderSystem::render(ECS::World& world,
             for (auto& pair : rend.mesh->DrawArgs)
             {
                 const auto& sub = pair.second;
-                Material* material = sub.material ? sub.material : rend.material.get();
+                Material* material = MaterialManager::Get().ResolveForDraw(e, pair.first, sub.initMaterial);
                 if (!material) continue;
 
                 // ObjectCB 직접 바인딩 (b0)

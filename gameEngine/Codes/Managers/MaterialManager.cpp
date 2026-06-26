@@ -47,6 +47,75 @@ std::shared_ptr<Material> MaterialManager::GetDefaultMaterial()
     return mat;
 }
 
+void MaterialManager::SetEntityMainMaterial(ECS::Entity entity, const std::string& materialName)
+{
+    if (entity == ECS::INVALID_ENTITY)
+        return;
+
+    if (!materialName.empty() && !GetMaterial(materialName))
+        return;
+
+    mEntityMaterials[entity].mainMaterialName = materialName;
+}
+
+void MaterialManager::SetEntitySubMaterial(ECS::Entity entity,
+    const std::string& submeshKey,
+    const std::string& materialName)
+{
+    if (entity == ECS::INVALID_ENTITY)
+        return;
+
+    if (materialName.empty())
+    {
+        auto it = mEntityMaterials.find(entity);
+        if (it != mEntityMaterials.end())
+            it->second.subMaterialNames.erase(submeshKey);
+        return;
+    }
+
+    if (!GetMaterial(materialName))
+        return;
+
+    mEntityMaterials[entity].subMaterialNames[submeshKey] = materialName;
+}
+
+void MaterialManager::ClearEntityMaterialData(ECS::Entity entity)
+{
+    mEntityMaterials.erase(entity);
+}
+
+const EntityMaterialData* MaterialManager::GetEntityMaterialData(ECS::Entity entity) const
+{
+    auto it = mEntityMaterials.find(entity);
+    return (it != mEntityMaterials.end()) ? &it->second : nullptr;
+}
+
+Material* MaterialManager::ResolveForDraw(ECS::Entity entity,
+    const std::string& submeshKey,
+    Material* initMaterial)
+{
+    if (const EntityMaterialData* entityMat = GetEntityMaterialData(entity))
+    {
+        auto subIt = entityMat->subMaterialNames.find(submeshKey);
+        if (subIt != entityMat->subMaterialNames.end() && !subIt->second.empty())
+        {
+            if (auto mat = GetMaterial(subIt->second))
+                return mat.get();
+        }
+
+        if (!entityMat->mainMaterialName.empty())
+        {
+            if (auto mat = GetMaterial(entityMat->mainMaterialName))
+                return mat.get();
+        }
+    }
+
+    if (initMaterial)
+        return initMaterial;
+
+    return GetDefaultMaterial().get();
+}
+
 std::vector<std::string> MaterialManager::GetLoadedMaterialNames() const
 {
     std::vector<std::string> names;
@@ -72,4 +141,5 @@ void MaterialManager::Shutdown()
 	}
 
 	mMaterials.clear();
+    mEntityMaterials.clear();
 }

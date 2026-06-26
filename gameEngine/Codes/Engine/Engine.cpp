@@ -144,11 +144,15 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
     XMFLOAT3 position)
 {
     Mesh* mesh = mResourceManager->GetMesh(meshName);
-    auto material = mResourceManager->GetMaterial(materialName);
-
-    if (!mesh || !material)
+    if (!mesh)
     {
-        OutputDebugStringA("[Engine] CreateRenderableEntity failed: mesh or material not found\n");
+        OutputDebugStringA("[Engine] CreateRenderableEntity failed: mesh not found\n");
+        return INVALID_ENTITY;
+    }
+
+    if (!materialName.empty() && !mResourceManager->GetMaterial(materialName))
+    {
+        OutputDebugStringA("[Engine] CreateRenderableEntity failed: material not found\n");
         return INVALID_ENTITY;
     }
 
@@ -157,13 +161,53 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
     mWorld.AddComponent(entity, TransformComponent{ .position = position });
     mWorld.AddComponent(entity, RenderableComponent{
         .mesh = mesh,
-        .material = material,
         .objectCBIndex = mNextObjectCBIndex++
         });
-    mWorld.AddComponent(entity, BoundsComponent{});  // for AABB management
+    mWorld.AddComponent(entity, BoundsComponent{});
 
-    // createCBV 제거됨 (이제 Root CBV 직접 바인딩 사용)
+    if (!materialName.empty())
+        MaterialManager::Get().SetEntityMainMaterial(entity, materialName);
+
     return entity;
+}
+
+RenderableComponent* Engine::GetRenderable(Entity entity)
+{
+    return mWorld.GetComponent<RenderableComponent>(entity);
+}
+
+void Engine::SetEntityMainMaterial(Entity entity, const std::string& materialName)
+{
+    if (!GetRenderable(entity))
+        return;
+
+    MaterialManager::Get().SetEntityMainMaterial(entity, materialName);
+}
+
+void Engine::SetEntitySubMaterial(Entity entity, const std::string& submeshKey, const std::string& materialName)
+{
+    if (!GetRenderable(entity))
+        return;
+
+    MaterialManager::Get().SetEntitySubMaterial(entity, submeshKey, materialName);
+}
+
+std::string Engine::GetEntityMainMaterial(Entity entity) const
+{
+    if (const EntityMaterialData* data = MaterialManager::Get().GetEntityMaterialData(entity))
+        return data->mainMaterialName;
+    return {};
+}
+
+std::string Engine::GetEntitySubMaterial(Entity entity, const std::string& submeshKey) const
+{
+    if (const EntityMaterialData* data = MaterialManager::Get().GetEntityMaterialData(entity))
+    {
+        auto it = data->subMaterialNames.find(submeshKey);
+        if (it != data->subMaterialNames.end())
+            return it->second;
+    }
+    return {};
 }
 
 void Engine::Shutdown()

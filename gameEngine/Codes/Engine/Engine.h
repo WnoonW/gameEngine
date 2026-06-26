@@ -71,6 +71,12 @@ public:
     Entity GetSelectedEntity() const { return mSelectedEntity; }
     void SetSelectedEntity(Entity e) { mSelectedEntity = e; }
 
+    RenderableComponent* GetRenderable(Entity entity);
+    void SetEntityMainMaterial(Entity entity, const std::string& materialName);
+    void SetEntitySubMaterial(Entity entity, const std::string& submeshKey, const std::string& materialName);
+    std::string GetEntityMainMaterial(Entity entity) const;
+    std::string GetEntitySubMaterial(Entity entity, const std::string& submeshKey) const;
+
     void RotateSelected(float dYaw, float dPitch);
     void MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view);
 
