@@ -1,4 +1,8 @@
 #include "ImGuiManager.h"
+#include "Managers/MeshManager.h"
+#include "Managers/MaterialManager.h"
+#include <algorithm>
+#include <vector>
 
 bool ImGuiManager::Initialize(
     HWND hwnd,
@@ -71,6 +75,72 @@ void ImGuiManager::CustomUI()
     }
     if (mManipulateSelected) {
         ImGui::Text("Object manipulation mode ON (like camera)");
+    }
+
+    // === Loaded Meshes & Object Creator ===
+    ImGui::Separator();
+    ImGui::Text("Loaded Meshes & Spawn");
+
+    auto meshNames = MeshManager::Get().GetLoadedMeshNames();
+    if (meshNames.empty()) {
+        ImGui::Text("No meshes loaded");
+    } else {
+        if (std::find(meshNames.begin(), meshNames.end(), mSelectedMesh) == meshNames.end() && !meshNames.empty()) {
+            mSelectedMesh = meshNames[0];
+        }
+
+        int meshIdx = 0;
+        for (size_t i = 0; i < meshNames.size(); ++i) {
+            if (meshNames[i] == mSelectedMesh) {
+                meshIdx = (int)i;
+                break;
+            }
+        }
+
+        auto meshGetter = [](void* data, int idx) -> const char* {
+            auto* vec = (std::vector<std::string>*)data;
+            if (idx < 0 || idx >= (int)vec->size()) return nullptr;
+            return (*vec)[idx].c_str();
+        };
+        if (ImGui::Combo("Mesh", &meshIdx, meshGetter, &meshNames, (int)meshNames.size())) {
+            mSelectedMesh = meshNames[meshIdx];
+        }
+    }
+
+    auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+    if (!matNames.empty()) {
+        if (std::find(matNames.begin(), matNames.end(), mSelectedMaterial) == matNames.end() && !matNames.empty()) {
+            mSelectedMaterial = matNames[0];
+        }
+
+        int matIdx = 0;
+        for (size_t i = 0; i < matNames.size(); ++i) {
+            if (matNames[i] == mSelectedMaterial) {
+                matIdx = (int)i;
+                break;
+            }
+        }
+
+        auto matGetter = [](void* data, int idx) -> const char* {
+            auto* vec = (std::vector<std::string>*)data;
+            if (idx < 0 || idx >= (int)vec->size()) return nullptr;
+            return (*vec)[idx].c_str();
+        };
+        if (ImGui::Combo("Material", &matIdx, matGetter, &matNames, (int)matNames.size())) {
+            mSelectedMaterial = matNames[matIdx];
+        }
+    } else {
+        mSelectedMaterial = "Default";
+    }
+
+    if (ImGui::Button("Spawn Selected Mesh")) {
+        if (m_Callback && !mSelectedMesh.empty()) {
+            m_Callback->buttonClicked(ButtonAction::SpawnSelectedMesh);
+        }
+    }
+
+    if (!mSelectedMesh.empty()) {
+        ImGui::Text("Selected: %s / %s", mSelectedMesh.c_str(), mSelectedMaterial.c_str());
     }
 
     ImGui::End();

@@ -68,6 +68,8 @@ public:
 
     Mesh* GetMesh(const std::string& name) const;
 
+    std::vector<std::string> GetLoadedMeshNames() const;
+
     void Shutdown();
 
 private:

@@ -47,6 +47,16 @@ std::shared_ptr<Material> MaterialManager::GetDefaultMaterial()
     return mat;
 }
 
+std::vector<std::string> MaterialManager::GetLoadedMaterialNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(mMaterials.size());
+    for (const auto& p : mMaterials) {
+        names.push_back(p.first);
+    }
+    return names;
+}
+
 void MaterialManager::Shutdown()
 {
 	for (auto& pair : mMaterials)

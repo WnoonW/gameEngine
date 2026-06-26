@@ -4,6 +4,9 @@
 #include <wrl.h>
 #include <Windows.h>
 
+#include <string>
+#include <vector>
+
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_dx12.h>
@@ -19,6 +22,7 @@ enum class ButtonAction
     ReloadShaders,
     PrintECSStats,
     ToggleManipulateSelected,
+    SpawnSelectedMesh,
     // ... 필요할 때마다 추가
 };
 
@@ -42,6 +46,10 @@ public:
 
     void CustomUI();
 
+    // for object creation from loaded assets
+    const std::string& GetSelectedMesh() const { return mSelectedMesh; }
+    const std::string& GetSelectedMaterial() const { return mSelectedMaterial; }
+
     void Shutdown();
 
     // 매 프레임 호출 (Update 또는 Render 시작 부분에서)
@@ -59,4 +67,7 @@ private:
     IFunctionCallback* m_Callback = nullptr;
 
     bool mManipulateSelected = false;
+
+    std::string mSelectedMesh;
+    std::string mSelectedMaterial;
 };

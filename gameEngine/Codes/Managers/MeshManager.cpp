@@ -77,7 +77,7 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		std::wstring msg = L"  [" + std::to_wstring(i) + L"] materialName = [" + wMaterialName + L"]\n";
 		OutputDebugStringW(msg.c_str());
 	}
-	OutputDebugStringW(L"========================================\n\n");
+	OutputDebugStringW(L"\n========================================\n\n");
 #endif
 
 
@@ -171,6 +171,16 @@ Mesh* MeshManager::GetMesh(const std::string& name) const
 		return it->second.get();
 	}
 	return nullptr;
+}
+
+std::vector<std::string> MeshManager::GetLoadedMeshNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(mMeshes.size());
+    for (const auto& p : mMeshes) {
+        names.push_back(p.first);
+    }
+    return names;
 }
 
 void MeshManager::Shutdown()

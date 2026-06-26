@@ -533,6 +533,22 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 	{
 		mManipulateSelected = mImGuiManager.IsManipulateSelected();
 	}
+	else if (action == ButtonAction::SpawnSelectedMesh)
+	{
+		std::string mesh = mImGuiManager.GetSelectedMesh();
+		std::string mat = mImGuiManager.GetSelectedMaterial();
+		if (mesh.empty()) mesh = "bibian";
+		if (mat.empty()) mat = "Test";
+
+		// spawn in front of camera
+		XMFLOAT3 camPos{ mCamX, mCamY, mCamZ };
+		float yaw = mTheta;
+		XMFLOAT3 spawnPos = camPos;
+		spawnPos.x += sinf(yaw) * 8.0f;
+		spawnPos.z += cosf(yaw) * 8.0f;
+		spawnPos.y += 2.0f;
+		mEngine.CreateRenderableEntity(mesh, mat, spawnPos);
+	}
 }
 #pragma endregion
 

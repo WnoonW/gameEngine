@@ -35,6 +35,7 @@ class MaterialManager
 
 	std::shared_ptr<Material> GetMaterial(const std::string& name);
     std::shared_ptr<Material> GetDefaultMaterial();
+    std::vector<std::string> GetLoadedMaterialNames() const;
 	void Shutdown();
 
 private:
