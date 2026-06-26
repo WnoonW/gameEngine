@@ -202,7 +202,7 @@ void Cube::Update(const GameTimer& gt, float mRadius, float mTheta, float mPhi, 
 	mCurrFrameIndex = currFrameIndex;
 
 	ObjectConstants objConstants;
-	XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
+	XMStoreFloat4x4(&objConstants.World, XMMatrixTranspose(worldViewProj));
 	mCurrFrameResource->ObjectCB->CopyData(mObjCBIndex, objConstants);
 }
 

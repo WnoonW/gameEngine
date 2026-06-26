@@ -41,22 +41,16 @@ ID3D12RootSignature* RootSignatureManager::GetRootSignature(RootSignatureType ty
 // =====================================================
 void RootSignatureManager::CreateSceneRootSignature()
 {
-    D3D12_ROOT_PARAMETER slotRootParameter[2] = {};
+    // Direct CBV (b0: Object, b1: Pass) + Descriptor Table for texture (t0)
+    CD3DX12_ROOT_PARAMETER slotRootParameter[3];
 
-    // b0 : Constant Buffer (CBV)
-    D3D12_DESCRIPTOR_RANGE cbvRange = {};
-    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.NumDescriptors = 1;
-    cbvRange.BaseShaderRegister = 0;
-    cbvRange.RegisterSpace = 0;
-    cbvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    // b0 - ObjectCB (direct root CBV)
+    slotRootParameter[0].InitAsConstantBufferView(0);
 
-    slotRootParameter[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    slotRootParameter[0].DescriptorTable.NumDescriptorRanges = 1;
-    slotRootParameter[0].DescriptorTable.pDescriptorRanges = &cbvRange;
-    slotRootParameter[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    // b1 - PassCB (direct root CBV)
+    slotRootParameter[1].InitAsConstantBufferView(1);
 
-    // t0 : Texture (SRV)
+    // t0 - Texture SRV (descriptor table)
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;
@@ -64,10 +58,7 @@ void RootSignatureManager::CreateSceneRootSignature()
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    slotRootParameter[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    slotRootParameter[1].DescriptorTable.NumDescriptorRanges = 1;
-    slotRootParameter[1].DescriptorTable.pDescriptorRanges = &srvRange;
-    slotRootParameter[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    slotRootParameter[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
     CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
         0,                                      // shaderRegister
@@ -77,7 +68,7 @@ void RootSignatureManager::CreateSceneRootSignature()
         D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        2, slotRootParameter,
+        3, slotRootParameter,
         1, &samplerDesc,
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 

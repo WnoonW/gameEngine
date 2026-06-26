@@ -72,9 +72,7 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         .objectCBIndex = mNextObjectCBIndex++
         });
 
-    mRenderSystem.createCBV(mDevice, *mFrameResources, mGNumFrameResources,
-        *mDescriptorAllocator, entity, mWorld);
-
+    // createCBV 제거됨 (이제 Root CBV 직접 바인딩 사용)
     return entity;
 }
 
