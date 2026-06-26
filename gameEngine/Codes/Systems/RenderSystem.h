@@ -28,6 +28,9 @@ public:
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);
 
+    // 추후 PassCB를 root에 바인딩할 때 사용 예정 (지금은 Fill만)
+    // void BindPassCB(ID3D12GraphicsCommandList* cmdList, FrameResource* fr);
+
 private:
     std::vector<std::vector<DescriptorAllocator::DescriptorHandle>> mEntityCBVHandles;
 };

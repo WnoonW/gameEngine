@@ -6,6 +6,8 @@
 #include "DescriptorAllocator.h"
 #include "ImGuiManager.h"
 #include "Engine.h"
+#include "Entity.h"
+#include "ComponentStruct.h"
 
 using namespace DirectX;
 
@@ -52,6 +54,8 @@ private:
 	XMFLOAT4X4 mView = {};
 	XMFLOAT4X4 mProj = {};
 	POINT mLastMousePos = {0, 0};
+
+	Entity mMainCamera = INVALID_ENTITY;   // ECS 메인 카메라
 };
 
 DescriptorAllocator InitDirect3DApp::mGlobalDescriptorAllocator;
@@ -167,17 +171,41 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	// View 행렬 계산
+	// === View 계산 (기존 orbit 로직 유지) ===
 	float x = mRadius * sinf(mPhi) * cosf(mTheta);
 	float z = mRadius * sinf(mPhi) * sinf(mTheta);
 	float y = mRadius * cosf(mPhi) + mTargetY;
 
-	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR target = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);
-	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMVECTOR posV   = XMVectorSet(x, y, z, 1.0f);
+	XMVECTOR tgtV   = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);
+	XMVECTOR upV    = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
-	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
+	XMMATRIX view = XMMatrixLookAtLH(posV, tgtV, upV);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+
+	// === ECS CameraComponent 동기화 (위치/회전 기록) ===
+	if (mMainCamera != INVALID_ENTITY)
+	{
+		XMFLOAT3 camPos = { x, y, z };
+
+		// target 방향으로부터 rotation (pitch, yaw) 계산하여 Transform에 기록
+		XMVECTOR dirV = XMVector3Normalize(XMVectorSubtract(tgtV, posV));
+		XMFLOAT3 dir{};
+		XMStoreFloat3(&dir, dirV);
+
+		float yaw   = atan2f(dir.x, dir.z);
+		float pitch = -asinf(dir.y);
+
+		mEngine.SetCameraTransform(mMainCamera, camPos, { pitch, yaw, 0.0f });
+	}
+
+	// === PassCB 채우기 (ECS의 CameraComponent 활용하여 EyePos, Near/Far 등 채움) ===
+	mEngine.FillPassCB(mCurrFrameResource, view, proj,
+		static_cast<float>(mClientWidth),
+		static_cast<float>(mClientHeight),
+		AspectRatio(),
+		gt.TotalTime(),
+		gt.DeltaTime());
 
 	// === Engine을 통해 렌더링 ===
 	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
@@ -270,6 +298,10 @@ void InitDirect3DApp::LoadAssets()
 // =====================================================
 void InitDirect3DApp::CreateInitialScene()
 {
+	// ECS CameraComponent를 이용한 메인 카메라 생성
+	mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -10.0f });
+
+	// 기존 렌더 오브젝트
 	mEngine.CreateRenderableEntity("bibian", "Test", { 0.0f, 0.0f, 0.0f });
 }
 
