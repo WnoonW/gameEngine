@@ -5,6 +5,7 @@
 
 #include "World.h"
 #include "RenderSystem.h"
+#include "BoundsSystem.h"
 #include "DescriptorAllocator.h"
 #include "AppStruct.h"
 #include "ResourceManager.h"
@@ -26,6 +27,9 @@ public:
 
     // 매 프레임 업데이트 (나중에 시스템들 추가 예정)
     void Update();
+
+    // AABB 업데이트 시스템
+    void UpdateBounds();
 
     // 렌더링
     void Render(ID3D12GraphicsCommandList* cmdList,
@@ -64,6 +68,7 @@ public:
 private:
     ECS::World mWorld;
     RenderSystem mRenderSystem;
+    BoundsSystem mBoundsSystem;
     ResourceManager* mResourceManager = nullptr;
 
     ID3D12Device* mDevice = nullptr;

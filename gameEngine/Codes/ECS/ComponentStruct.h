@@ -1,5 +1,6 @@
 #pragma once
 #include <DirectXMath.h>
+#include <DirectXCollision.h>
 #include <string>
 #include <memory>
 
@@ -38,4 +39,9 @@ struct CameraComponent {
     bool useWindowAspect = true;         // true면 창 크기에 맞춰 aspect 자동 계산
     float aspectRatio = 16.0f / 9.0f;    // useWindowAspect가 false일 때 사용
     bool isMainCamera = true;            // 여러 카메라 중 메인 카메라 구분용
+};
+
+struct BoundsComponent {
+    DirectX::BoundingBox localBounds;   // per-object union of all submeshes (local space)
+    DirectX::BoundingBox worldBounds;   // transformed to world space
 };

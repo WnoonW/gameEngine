@@ -38,6 +38,12 @@ bool Engine::Initialize(ID3D12Device* device,
 void Engine::Update()
 {
     // 나중에 TransformSystem, AnimationSystem 등 추가 예정
+    UpdateBounds();
+}
+
+void Engine::UpdateBounds()
+{
+    mBoundsSystem.Update(mWorld);
 }
 
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
@@ -71,6 +77,7 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         .material = material,
         .objectCBIndex = mNextObjectCBIndex++
         });
+    mWorld.AddComponent(entity, BoundsComponent{});  // for AABB management
 
     // createCBV 제거됨 (이제 Root CBV 직접 바인딩 사용)
     return entity;

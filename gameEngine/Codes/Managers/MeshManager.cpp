@@ -86,11 +86,40 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 	{
 		if (offsets[i].indexCount == 0) continue;
 
+		const auto& cpuSub = mMesh.cpuModel.submeshes[i];
+
+		// Compute local AABB for this submesh
+		DirectX::BoundingBox localBounds{};
+		if (!cpuSub.vertices.empty()) {
+			DirectX::XMVECTOR vMin = DirectX::XMVectorSet(FLT_MAX, FLT_MAX, FLT_MAX, 0);
+			DirectX::XMVECTOR vMax = DirectX::XMVectorSet(-FLT_MAX, -FLT_MAX, -FLT_MAX, 0);
+			for (const auto& vert : cpuSub.vertices) {
+				DirectX::XMVECTOR p = DirectX::XMLoadFloat3(&vert.position);
+				vMin = DirectX::XMVectorMin(vMin, p);
+				vMax = DirectX::XMVectorMax(vMax, p);
+			}
+			DirectX::XMFLOAT3 minF, maxF;
+			DirectX::XMStoreFloat3(&minF, vMin);
+			DirectX::XMStoreFloat3(&maxF, vMax);
+
+			localBounds.Center = {
+				(minF.x + maxF.x) * 0.5f,
+				(minF.y + maxF.y) * 0.5f,
+				(minF.z + maxF.z) * 0.5f
+			};
+			localBounds.Extents = {
+				(maxF.x - minF.x) * 0.5f,
+				(maxF.y - minF.y) * 0.5f,
+				(maxF.z - minF.z) * 0.5f
+			};
+		}
+
 		SubmeshGeometry submesh;
 		submesh.IndexCount = offsets[i].indexCount;
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
 		submesh.BaseVertexLocation = 0;                    // ← 여기 중요! 0으로 고정
-		submesh.materialName = mMesh.cpuModel.submeshes[i].materialName;
+		submesh.materialName = cpuSub.materialName;
+		submesh.Bounds = localBounds;  // store local AABB per submesh
 		std::string key = "submesh_" + std::to_string(i);
 		mMesh.DrawArgs[key] = submesh;
 	}

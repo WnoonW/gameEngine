@@ -175,6 +175,7 @@
     <ClCompile Include="Codes\Managers\ShaderManager.cpp" />
     <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp" />
     <ClCompile Include="Codes\Systems\RenderSystem.cpp" />
+    <ClCompile Include="Codes\Systems\BoundsSystem.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -212,6 +213,7 @@
     <ClInclude Include="Codes\Structs\constantStruct.h" />
     <ClInclude Include="Codes\Structs\modelStruct.h" />
     <ClInclude Include="Codes\Systems\RenderSystem.h" />
+    <ClInclude Include="Codes\Systems\BoundsSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
