@@ -156,8 +156,9 @@ bool D3DApp::Initialize()
 LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
-		return true;
+	ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
+	// Do not early return; we want game input (e.g. camera keys) to always process
+	// even if ImGui "wants" the keyboard for its debug UI.
 
 	switch( msg )
 	{
@@ -294,6 +295,7 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         else if((int)wParam == VK_F2)
             Set4xMsaaState(!m4xMsaaState);
 
+        D3DApp::GetApp()->OnKeyUp(wParam);
         return 0;
 	}
 

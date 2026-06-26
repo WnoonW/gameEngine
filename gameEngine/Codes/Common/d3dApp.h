@@ -59,6 +59,7 @@ protected:
 	virtual void OnMouseWheel(short wheelDelta, int x, int y) {}
 
 	virtual void OnKeyDown(WPARAM key) {}
+	virtual void OnKeyUp(WPARAM key) {}
 
 protected:
 	bool InitMainWindow();

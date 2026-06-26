@@ -24,8 +24,31 @@ void RenderSystem::render(ECS::World& world,
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-    ID3D12RootSignature* lastRS = nullptr;
-    ID3D12PipelineState* lastPSO = nullptr;
+    PSOKey key{};
+    key.shaderName = "object_cb";   // 새로 만든 셰이더
+    key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    key.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+
+    ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
+    ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(key, sceneRS);
+
+    // 공통 상태는 루프 바깥에서 한 번만 설정 (순서 중요: RootSig -> PSO)
+    if (sceneRS)
+    {
+        cmdList->SetGraphicsRootSignature(sceneRS);
+    }
+    if (pso)
+    {
+        cmdList->SetPipelineState(pso);
+    }
+
+    // PassCB (b1)는 한 번만 바인딩
+    if (currentFrameResource && currentFrameResource->PassCB)
+    {
+        auto passCB = currentFrameResource->PassCB->Resource();
+        cmdList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
+    }
 
     // === ECS 렌더링 ===
     world.ForEach<TransformComponent, RenderableComponent>(
@@ -53,31 +76,7 @@ void RenderSystem::render(ECS::World& world,
             cmdList->IASetIndexBuffer(&ibv);
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            // 3. RootSignature + PSO (새 셰이더 object_cb 사용)
-            ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
-
-            PSOKey key{};
-            key.shaderName = "object_cb";   // 새로 만든 셰이더
-            key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-            key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-            key.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-
-            ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(key, sceneRS);
-
-            if (sceneRS != lastRS)
-            {
-                cmdList->SetGraphicsRootSignature(sceneRS);
-                lastRS = sceneRS;
-
-                // PassCB 바인딩 (b1) - root signature 설정 직후
-                if (currentFrameResource && currentFrameResource->PassCB)
-                {
-                    auto passCB = currentFrameResource->PassCB->Resource();
-                    cmdList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
-                }
-            }
-
-            // 4. Constant Buffer + Texture 바인딩 + 그리기
+            // 3. Per-object 바인딩 + 그리기
             for (auto& pair : rend.mesh->DrawArgs)
             {
                 const auto& sub = pair.second;

@@ -132,7 +132,7 @@ void Engine::FillPassCB(FrameResource* currentFrame,
     if (!currentFrame || !currentFrame->PassCB)
         return;
 
-    XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+    XMMATRIX viewProj = XMMatrixMultiply(proj, view);  // correct order for combined gViewProj storage (transpose(proj*view) == tv * tp)
 
     XMVECTOR det;
     XMMATRIX invView     = XMMatrixInverse(&det, view);

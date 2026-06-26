@@ -38,6 +38,7 @@ private:
 	virtual void OnMouseWheel(short wheelDelta, int x, int y) override;
 
 	virtual void OnKeyDown(WPARAM key)override;
+	virtual void OnKeyUp(WPARAM key)override;
 
 	virtual void buttonClicked(ButtonAction action) override;
 
@@ -47,15 +48,29 @@ private:
 	void CreateInitialScene();
 
 private:
-	float mTheta = 1.5f * XM_PI;
-	float mPhi = XM_PIDIV4;
-	float mRadius = 5.0f;
-	float mTargetY = 0.0f;
+	float mTheta = 0.0f; // yaw
+	float mPhi = 0.0f; // pitch
+	float mCamX = 0.0f;
+	float mCamY = 5.0f;
+	float mCamZ = -10.0f;
+	float mFlySpeed = 20.0f;
 	XMFLOAT4X4 mView = {};
 	XMFLOAT4X4 mProj = {};
 	POINT mLastMousePos = {0, 0};
 
 	Entity mMainCamera = INVALID_ENTITY;   // ECS 메인 카메라
+
+	// Camera key states (for OnKeyDown/OnKeyUp based movement)
+	bool mKeyW = false;
+	bool mKeyS = false;
+	bool mKeyA = false;
+	bool mKeyD = false;
+	bool mKeyQ = false;
+	bool mKeyE = false;
+	bool mKeyR = false;
+	bool mKeyF = false;
+	bool mKeySpace = false;
+	bool mKeyShift = false;
 };
 
 DescriptorAllocator InitDirect3DApp::mGlobalDescriptorAllocator;
@@ -129,6 +144,55 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	mImGuiManager.NewFrame();
 	mImGuiManager.CustomUI();
 
+	// === 카메라 조작 (Minecraft Creative 스타일) ===
+	// WASD: look 방향 기준 XZ 이동
+	// Space: 상승, Shift: 하강
+	// 마우스 왼쪽: look (yaw/pitch)
+	// QE: 상승/하강 (대안)
+	float dt = gt.DeltaTime();
+	float speed = mFlySpeed * dt;
+
+	float yaw = mTheta;
+	float pitch = mPhi;
+
+	// forward (look dir projected)
+	float fx = sinf(yaw) * cosf(pitch);
+	float fy = sinf(pitch);
+	float fz = cosf(yaw) * cosf(pitch);
+
+	// right
+	float rx = cosf(yaw);
+	float rz = -sinf(yaw);
+
+	if (mKeyW) {
+		mCamX += fx * speed;
+		mCamY += fy * speed;
+		mCamZ += fz * speed;
+	}
+	if (mKeyS) {
+		mCamX -= fx * speed;
+		mCamY -= fy * speed;
+		mCamZ -= fz * speed;
+	}
+	if (mKeyA) {
+		mCamX -= rx * speed;
+		mCamZ -= rz * speed;
+	}
+	if (mKeyD) {
+		mCamX += rx * speed;
+		mCamZ += rz * speed;
+	}
+
+	if (mKeySpace) mCamY += speed;
+	if (mKeyShift) mCamY -= speed;
+
+	// QE 대안 상승/하강
+	if (mKeyQ) mCamY += speed;
+	if (mKeyE) mCamY -= speed;
+
+	// pitch clamp
+	mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+
 	mEngine.Update();
 }
 
@@ -171,32 +235,28 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	// === View 계산 (기존 orbit 로직 유지) ===
-	float x = mRadius * sinf(mPhi) * cosf(mTheta);
-	float z = mRadius * sinf(mPhi) * sinf(mTheta);
-	float y = mRadius * cosf(mPhi) + mTargetY;
+	// === View 계산 (Minecraft creative 스타일 free cam) ===
+	float x = mCamX;
+	float y = mCamY;
+	float z = mCamZ;
 
 	XMVECTOR posV   = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR tgtV   = XMVectorSet(0.0f, mTargetY, 0.0f, 1.0f);
+	XMVECTOR forwardV = XMVectorSet(
+		sinf(mTheta) * cosf(mPhi),
+		sinf(mPhi),
+		cosf(mTheta) * cosf(mPhi),
+		0.0f
+	);
 	XMVECTOR upV    = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
-	XMMATRIX view = XMMatrixLookAtLH(posV, tgtV, upV);
+	XMMATRIX view = XMMatrixLookToLH(posV, forwardV, upV);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
 	// === ECS CameraComponent 동기화 (위치/회전 기록) ===
 	if (mMainCamera != INVALID_ENTITY)
 	{
-		XMFLOAT3 camPos = { x, y, z };
-
-		// target 방향으로부터 rotation (pitch, yaw) 계산하여 Transform에 기록
-		XMVECTOR dirV = XMVector3Normalize(XMVectorSubtract(tgtV, posV));
-		XMFLOAT3 dir{};
-		XMStoreFloat3(&dir, dirV);
-
-		float yaw   = atan2f(dir.x, dir.z);
-		float pitch = -asinf(dir.y);
-
-		mEngine.SetCameraTransform(mMainCamera, camPos, { pitch, yaw, 0.0f });
+		XMFLOAT3 camPos = { mCamX, mCamY, mCamZ };
+		mEngine.SetCameraTransform(mMainCamera, camPos, { mPhi, mTheta, 0.0f });
 	}
 
 	// === PassCB 채우기 (ECS의 CameraComponent 활용하여 EyePos, Near/Far 등 채움) ===
@@ -298,7 +358,7 @@ void InitDirect3DApp::LoadAssets()
 // =====================================================
 void InitDirect3DApp::CreateInitialScene()
 {
-	// ECS CameraComponent를 이용한 메인 카메라 생성
+	// Minecraft creative 스타일 초기 위치 (0,0,0에서 떨어짐)
 	mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -10.0f });
 
 	// 기존 렌더 오브젝트
@@ -324,21 +384,15 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
-		// === 기존 왼쪽 드래그: 공전 ===
+		// 왼쪽 드래그: look (yaw/pitch)
 		float dx = XMConvertToRadians(0.25f * static_cast<float>(x - mLastMousePos.x));
 		float dy = XMConvertToRadians(0.25f * static_cast<float>(y - mLastMousePos.y));
 
-		mTheta -= dx;
+		mTheta += dx;
 		mPhi -= dy;
 
-		// mPhi 제한 (너무 위아래로 가지 않게)
-		mPhi = MathHelper::Clamp(mPhi, 0.1f, XM_PI - 0.1f);
-	}
-	else if ((btnState & MK_RBUTTON) != 0)
-	{
-		float dy = 0.005f * static_cast<float>(y - mLastMousePos.y);
-		mTargetY += dy;                    // 타겟 Y 이동
-		mTargetY = MathHelper::Clamp(mTargetY, -50.0f, 50.0f);
+		// pitch 제한 (free look)
+		mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
 	}
 
 	mLastMousePos.x = x;
@@ -347,12 +401,31 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
 {
-	mRadius -= wheelDelta * 0.005f;                    // 감도 조절 (필요하면 0.001 ~ 0.005 사이로 조정)
-	mRadius = MathHelper::Clamp(mRadius, 0.1f, 150.0f);
+	// 지수함수적(멱함수) 속도 조절: 한 칸당 약 20% 배율
+	const float factor = 1.2f;
+	mFlySpeed *= powf(factor, wheelDelta / 120.0f);
+	mFlySpeed = MathHelper::Clamp(mFlySpeed, 1.0f, 500.0f);
 }
 
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 {
+	// Camera controls via flags (used in Update with dt)
+	// WASD now for XZ movement (not rotation)
+	switch (wParam)
+	{
+	case 'W': mKeyW = true; break;
+	case 'S': mKeyS = true; break;
+	case 'A': mKeyA = true; break;
+	case 'D': mKeyD = true; break;
+	case 'Q': mKeyQ = true; break;
+	case 'E': mKeyE = true; break;
+	case 'R': mKeyR = true; break;
+	case 'F': mKeyF = true; break;
+	case VK_SPACE: mKeySpace = true; break;
+	case VK_SHIFT: mKeyShift = true; break;
+	}
+
+	// Existing logic
 	switch (wParam)
 	{
 	case VK_UP:
@@ -385,6 +458,23 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 
 	case 'R': 
 		break;
+	}
+}
+
+void InitDirect3DApp::OnKeyUp(WPARAM wParam)
+{
+	switch (wParam)
+	{
+	case 'W': mKeyW = false; break;
+	case 'S': mKeyS = false; break;
+	case 'A': mKeyA = false; break;
+	case 'D': mKeyD = false; break;
+	case 'Q': mKeyQ = false; break;
+	case 'E': mKeyE = false; break;
+	case 'R': mKeyR = false; break;
+	case 'F': mKeyF = false; break;
+	case VK_SPACE: mKeySpace = false; break;
+	case VK_SHIFT: mKeyShift = false; break;
 	}
 }
 
