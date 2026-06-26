@@ -232,8 +232,7 @@ bool Engine::GetMainCameraViewProj(XMMATRIX& outView, XMMATRIX& outProj, float a
             // View 행렬: Transform의 position + rotation 사용
             XMVECTOR camPos = XMLoadFloat3(&tf.position);
             // rotation.x = pitch, rotation.y = yaw 로 저장한다고 가정
-            // XMMatrixRotationRollPitchYaw(Roll, Pitch, Yaw)
-            XMMATRIX rot = XMMatrixRotationRollPitchYaw(0.0f, tf.rotation.x, tf.rotation.y);
+            XMMATRIX rot = XMMatrixRotationRollPitchYaw(tf.rotation.x, tf.rotation.y, 0.0f);
 
             // 기본 forward = +Z 
             XMVECTOR forward = XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rot);

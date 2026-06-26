@@ -2,6 +2,8 @@
 #pragma warning(disable: 28251)
 #pragma warning(disable: 6387)
 #include <DirectXColors.h>
+#include <cmath>
+#include <vector>
 #include "d3dApp.h"
 #include "DescriptorAllocator.h"
 #include "ImGuiManager.h"
@@ -25,6 +27,7 @@ private:
 	int mSpiralIndex = 0;
 
     virtual void OnResize()override;
+    virtual LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
 	virtual void BeginFrame()override;
@@ -46,6 +49,12 @@ private:
 	void InitializeCoreSystems();
 	void LoadAssets();
 	void CreateInitialScene();
+	void UpdateCamera(float dt);
+	void SetMouseLookActive(bool active);
+	void CenterMouseCursor();
+	void UpdateCursorClip();
+	void SyncMouseLookState();
+	void RegisterMouseRawInput();
 
 private:
 	float mTheta = 0.0f; // yaw
@@ -53,10 +62,14 @@ private:
 	float mCamX = 0.0f;
 	float mCamY = 5.0f;
 	float mCamZ = -10.0f;
-	float mFlySpeed = 20.0f;
+	float mFlySpeed = 11.0f; // Minecraft creative fly speed (blocks/s)
+	float mMouseSensitivity = 0.12f; // degrees per pixel
 	XMFLOAT4X4 mView = {};
 	XMFLOAT4X4 mProj = {};
-	POINT mLastMousePos = {0, 0};
+	bool mMouseLookActive = false;
+	bool mMouseLookRequested = true;
+	float mPendingMouseDx = 0.0f;
+	float mPendingMouseDy = 0.0f;
 
 	Entity mMainCamera = INVALID_ENTITY;   // ECS 메인 카메라
 
@@ -71,6 +84,7 @@ private:
 	bool mKeyF = false;
 	bool mKeySpace = false;
 	bool mKeyShift = false;
+	bool mKeyCtrl = false;
 
 	bool mManipulateSelected = false;  // IMGUI toggle for manipulating selected object like camera
 
@@ -118,6 +132,8 @@ bool InitDirect3DApp::Initialize()
 	if (!D3DApp::Initialize())
 		return false;
 
+	RegisterMouseRawInput();
+
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
 
 	InitializeCoreSystems();
@@ -129,6 +145,9 @@ bool InitDirect3DApp::Initialize()
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
 
+	UpdateCamera(0.0f);
+	SyncMouseLookState();
+
 	return true;
 }
 
@@ -136,13 +155,61 @@ void InitDirect3DApp::OnResize()
 {
 	D3DApp::OnResize();
 
-	XMMATRIX proj = XMMatrixPerspectiveFovLH(
-		XM_PIDIV4,
-		AspectRatio(),           // ← 중요
-		0.1f,
-		1000.0f
-	);
+	const float aspect = AspectRatio();
+	const float fovY = 2.0f * atanf(tanf(XMConvertToRadians(70.0f) * 0.5f) / aspect);
+	XMMATRIX proj = XMMatrixPerspectiveFovLH(fovY, aspect, 0.1f, 1000.0f);
 	XMStoreFloat4x4(&mProj, proj);
+
+	if (mMouseLookActive)
+		UpdateCursorClip();
+}
+
+void InitDirect3DApp::RegisterMouseRawInput()
+{
+	RAWINPUTDEVICE rid{};
+	rid.usUsagePage = 0x01;
+	rid.usUsage = 0x02;
+	rid.dwFlags = RIDEV_INPUTSINK;
+	rid.hwndTarget = mhMainWnd;
+	RegisterRawInputDevices(&rid, 1, sizeof(RAWINPUTDEVICE));
+}
+
+LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	if (msg == WM_ACTIVATE)
+	{
+		if (LOWORD(wParam) == WA_INACTIVE)
+			SetMouseLookActive(false);
+		else if (mMouseLookRequested)
+			SetMouseLookActive(true);
+	}
+	else if (msg == WM_INPUT && mMouseLookActive)
+	{
+		UINT size = 0;
+		GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
+		if (size == 0)
+			return 0;
+
+		std::vector<BYTE> data(size);
+		if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, data.data(), &size, sizeof(RAWINPUTHEADER)) != size)
+			return 0;
+
+		const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(data.data());
+		if (raw->header.dwType == RIM_TYPEMOUSE
+			&& raw->data.mouse.usFlags == MOUSE_MOVE_RELATIVE)
+		{
+			const LONG mx = raw->data.mouse.lLastX;
+			const LONG my = raw->data.mouse.lLastY;
+			if (mx != 0 || my != 0)
+			{
+				mPendingMouseDx += XMConvertToRadians(mMouseSensitivity * static_cast<float>(mx));
+				mPendingMouseDy += XMConvertToRadians(mMouseSensitivity * static_cast<float>(my));
+			}
+		}
+		return 0;
+	}
+
+	return D3DApp::MsgProc(hwnd, msg, wParam, lParam);
 }
 
 void InitDirect3DApp::Update(const GameTimer& gt)
@@ -151,74 +218,83 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	mImGuiManager.CustomUI(&mEngine);
 	mManipulateSelected = mImGuiManager.IsManipulateSelected();
 
-	// === 카메라 조작 (Minecraft Creative 스타일) ===
-	// WASD: look 방향 기준 XZ 이동
-	// Space: 상승, Shift: 하강
-	// 마우스 왼쪽: look (yaw/pitch)
-	// QE: 상승/하강 (대안)
 	float dt = gt.DeltaTime();
+	if (dt > 0.033f)
+		dt = 0.033f;
+
+	UpdateCamera(dt);
+	mEngine.Update();
+
+	SyncMouseLookState();
+}
+
+void InitDirect3DApp::UpdateCamera(float dt)
+{
+	if (mPendingMouseDx != 0.0f || mPendingMouseDy != 0.0f)
+	{
+		if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
+			mEngine.RotateSelected(mPendingMouseDx, mPendingMouseDy);
+		else
+		{
+			mTheta += mPendingMouseDx;
+			mPhi += mPendingMouseDy;
+		}
+		mPendingMouseDx = 0.0f;
+		mPendingMouseDy = 0.0f;
+	}
+
+	mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+
+	XMMATRIX yawRot = XMMatrixRotationY(mTheta);
+	XMMATRIX rot = XMMatrixRotationRollPitchYaw(mPhi, mTheta, 0.0f);
+	XMVECTOR lookForward = XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rot);
+	XMVECTOR horizRight = XMVector3TransformNormal(XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), yawRot);
+	XMVECTOR worldUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
 	float speed = mFlySpeed * dt;
-
-	float yaw = mTheta;
-	float pitch = mPhi;
-
-	// forward (look dir projected)
-	float fx = sinf(yaw) * cosf(pitch);
-	float fy = sinf(pitch);
-	float fz = cosf(yaw) * cosf(pitch);
-
-	// right
-	float rx = cosf(yaw);
-	float rz = -sinf(yaw);
+	if (mKeyCtrl)
+		speed *= 2.0f;
 
 	float fwdAmt = (mKeyW ? 1.f : 0.f) - (mKeyS ? 1.f : 0.f);
-	float rightAmt = (mKeyD ? 1.f : 0.f) - (mKeyA ? 1.f : 0.f);
-	float upAmt = (mKeySpace ? 1.f : 0.f) - (mKeyShift ? 1.f : 0.f);
+	float strafeAmt = (mKeyD ? 1.f : 0.f) - (mKeyA ? 1.f : 0.f);
+	float ascendAmt = (mKeySpace ? 1.f : 0.f) - (mKeyShift ? 1.f : 0.f);
+
+	float horizLenSq = fwdAmt * fwdAmt + strafeAmt * strafeAmt;
+	if (horizLenSq > 1.0f)
+	{
+		float invLen = 1.0f / sqrtf(horizLenSq);
+		fwdAmt *= invLen;
+		strafeAmt *= invLen;
+	}
+
+	XMVECTOR pos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
+	XMMATRIX viewForMove = XMMatrixLookToLH(pos, lookForward, worldUp);
 
 	if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
 	{
-		// manipulate selected object like camera (relative to current view)
-		mEngine.MoveSelectedViewRelative(fwdAmt, rightAmt, upAmt, speed, mCurrentView);
-
-		// QE as up/down for object
-		float qe = (mKeyQ ? 1.f : 0.f) - (mKeyE ? 1.f : 0.f);
-		if (qe != 0.0f) {
-			mEngine.MoveSelectedViewRelative(0, 0, qe, speed, mCurrentView);
-		}
+		mEngine.MoveSelectedViewRelative(fwdAmt, strafeAmt, ascendAmt, speed, viewForMove);
 	}
-	else
+	else if (fwdAmt != 0.0f || strafeAmt != 0.0f || ascendAmt != 0.0f)
 	{
-		if (mKeyW) {
-			mCamX += fx * speed;
-			mCamY += fy * speed;
-			mCamZ += fz * speed;
-		}
-		if (mKeyS) {
-			mCamX -= fx * speed;
-			mCamY -= fy * speed;
-			mCamZ -= fz * speed;
-		}
-		if (mKeyA) {
-			mCamX -= rx * speed;
-			mCamZ -= rz * speed;
-		}
-		if (mKeyD) {
-			mCamX += rx * speed;
-			mCamZ += rz * speed;
-		}
+		pos = XMVectorAdd(pos, XMVectorScale(lookForward, fwdAmt * speed));
+		pos = XMVectorAdd(pos, XMVectorScale(horizRight, strafeAmt * speed));
+		pos = XMVectorAdd(pos, XMVectorScale(worldUp, ascendAmt * speed));
 
-		if (mKeySpace) mCamY += speed;
-		if (mKeyShift) mCamY -= speed;
-
-		// QE 대안 상승/하강
-		if (mKeyQ) mCamY += speed;
-		if (mKeyE) mCamY -= speed;
+		XMFLOAT3 p;
+		XMStoreFloat3(&p, pos);
+		mCamX = p.x;
+		mCamY = p.y;
+		mCamZ = p.z;
 	}
 
-	// pitch clamp
-	mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+	rot = XMMatrixRotationRollPitchYaw(mPhi, mTheta, 0.0f);
+	lookForward = XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rot);
 
-	mEngine.Update();
+	pos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
+	XMMATRIX view = XMMatrixLookToLH(pos, lookForward, worldUp);
+	XMStoreFloat4x4(&mView, view);
+	mCurrentView = view;
+	mCurrentProj = XMLoadFloat4x4(&mProj);
 }
 
 void InitDirect3DApp::BeginFrame()
@@ -260,21 +336,7 @@ void InitDirect3DApp::BeginFrame()
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
-	// === View 계산 (Minecraft creative 스타일 free cam) ===
-	float x = mCamX;
-	float y = mCamY;
-	float z = mCamZ;
-
-	XMVECTOR posV   = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR forwardV = XMVectorSet(
-		sinf(mTheta) * cosf(mPhi),
-		sinf(mPhi),
-		cosf(mTheta) * cosf(mPhi),
-		0.0f
-	);
-	XMVECTOR upV    = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-
-	XMMATRIX view = XMMatrixLookToLH(posV, forwardV, upV);
+	XMMATRIX view = XMLoadFloat4x4(&mView);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
 	// === ECS CameraComponent 동기화 (위치/회전 기록) ===
@@ -291,10 +353,6 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 		AspectRatio(),
 		gt.TotalTime(),
 		gt.DeltaTime());
-
-	// store for picking
-	mCurrentView = view;
-	mCurrentProj = proj;
 
 	// === Engine을 통해 렌더링 ===
 	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
@@ -316,7 +374,7 @@ void InitDirect3DApp::EndFrame()
 	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
 	// swap the back and front buffers
-	ThrowIfFailed(mSwapChain->Present(0, 0));
+	ThrowIfFailed(mSwapChain->Present(1, 0));
 	mCurrBackBuffer = (mCurrBackBuffer + 1) % SwapChainBufferCount;
 
 	mCurrFrameResource->FenceValue = ++mCurrentFence;
@@ -396,16 +454,73 @@ void InitDirect3DApp::CreateInitialScene()
 
 #pragma region Input Handling
 //입력처리
+void InitDirect3DApp::SetMouseLookActive(bool active)
+{
+	if (mMouseLookActive == active)
+		return;
+
+	mMouseLookActive = active;
+	if (active)
+	{
+		while (ShowCursor(FALSE) >= 0) {}
+		SetCapture(mhMainWnd);
+		CenterMouseCursor();
+		UpdateCursorClip();
+	}
+	else
+	{
+		while (ShowCursor(TRUE) < 0) {}
+		ReleaseCapture();
+		ClipCursor(nullptr);
+	}
+}
+
+void InitDirect3DApp::CenterMouseCursor()
+{
+	if (!mhMainWnd)
+		return;
+
+	POINT center{
+		mClientWidth / 2,
+		mClientHeight / 2
+	};
+	ClientToScreen(mhMainWnd, &center);
+	SetCursorPos(center.x, center.y);
+}
+
+void InitDirect3DApp::UpdateCursorClip()
+{
+	if (!mhMainWnd)
+		return;
+
+	RECT rect{};
+	GetClientRect(mhMainWnd, &rect);
+	MapWindowPoints(mhMainWnd, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&rect), 2);
+	ClipCursor(&rect);
+}
+
+void InitDirect3DApp::SyncMouseLookState()
+{
+	const bool wantActive = mMouseLookRequested
+		&& !ImGui::GetIO().WantCaptureMouse
+		&& GetForegroundWindow() == mhMainWnd
+		&& !mAppPaused;
+	SetMouseLookActive(wantActive);
+}
+
 void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
-	mLastMousePos.x = x;
-	mLastMousePos.y = y;
-
-	SetCapture(mhMainWnd);
+	if (btnState & MK_MBUTTON)
+	{
+		mMouseLookRequested = !mMouseLookRequested;
+		SyncMouseLookState();
+	}
 
 	if (btnState & MK_RBUTTON)
 	{
-		Entity picked = mEngine.PickObject(x, y, (float)mClientWidth, (float)mClientHeight, mCurrentView, mCurrentProj);
+		const int pickX = mMouseLookActive ? mClientWidth / 2 : x;
+		const int pickY = mMouseLookActive ? mClientHeight / 2 : y;
+		Entity picked = mEngine.PickObject(pickX, pickY, (float)mClientWidth, (float)mClientHeight, mCurrentView, mCurrentProj);
 		if (picked != INVALID_ENTITY)
 		{
 			OutputDebugStringA("Object picked!\n");
@@ -415,33 +530,16 @@ void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
-	ReleaseCapture();
+	(void)btnState;
+	(void)x;
+	(void)y;
 }
 
 void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
-	if ((btnState & MK_LBUTTON) != 0)
-	{
-		// 왼쪽 드래그: look (yaw/pitch)
-		float dx = XMConvertToRadians(0.25f * static_cast<float>(x - mLastMousePos.x));
-		float dy = XMConvertToRadians(0.25f * static_cast<float>(y - mLastMousePos.y));
-
-		if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
-		{
-			mEngine.RotateSelected(dx, -dy);
-		}
-		else
-		{
-			mTheta += dx;
-			mPhi -= dy;
-
-			// pitch 제한 (free look)
-			mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
-		}
-	}
-
-	mLastMousePos.x = x;
-	mLastMousePos.y = y;
+	(void)btnState;
+	(void)x;
+	(void)y;
 }
 
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
@@ -468,6 +566,7 @@ void InitDirect3DApp::OnKeyDown(WPARAM wParam)
 	case 'F': mKeyF = true; break;
 	case VK_SPACE: mKeySpace = true; break;
 	case VK_SHIFT: mKeyShift = true; break;
+	case VK_CONTROL: mKeyCtrl = true; break;
 	}
 
 	// Existing logic
@@ -520,6 +619,7 @@ void InitDirect3DApp::OnKeyUp(WPARAM wParam)
 	case 'F': mKeyF = false; break;
 	case VK_SPACE: mKeySpace = false; break;
 	case VK_SHIFT: mKeyShift = false; break;
+	case VK_CONTROL: mKeyCtrl = false; break;
 	}
 }
 
@@ -553,11 +653,11 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 
 void InitDirect3DApp::OnDestroy()
 {
-	mEngine.Shutdown();
+	SetMouseLookActive(false);
+	FlushCommandQueue();
 
-	ImGui_ImplDX12_Shutdown();
-	ImGui_ImplWin32_Shutdown();
-	ImGui::DestroyContext();
+	mImGuiManager.Shutdown();
+	mEngine.Shutdown();
 
 	MeshManager::Get().Shutdown();
 	MaterialManager::Get().Shutdown();

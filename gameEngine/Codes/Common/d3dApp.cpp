@@ -104,31 +104,27 @@ int D3DApp::Run()
 
 	while(msg.message != WM_QUIT)
 	{
-		// If there are Window messages then process them.
-		if(PeekMessage( &msg, 0, 0, 0, PM_REMOVE ))
+		while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
 		{
-            TranslateMessage( &msg );
-            DispatchMessage( &msg );
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
 		}
-		// Otherwise, do animation/game stuff.
-		else
-        {	
-			mTimer.Tick();
 
-			if( !mAppPaused )
-			{
-				CalculateFrameStats();
-				BeginFrame();
-				Update(mTimer);	
-                Draw(mTimer);
-				EndFrame();
-			}
-			else
-			{
-				Sleep(100);
-			}
-        }
-    }
+		mTimer.Tick();
+
+		if (!mAppPaused)
+		{
+			CalculateFrameStats();
+			BeginFrame();
+			Update(mTimer);
+			Draw(mTimer);
+			EndFrame();
+		}
+		else
+		{
+			Sleep(100);
+		}
+	}
 
 	OnDestroy();
 	return (int)msg.wParam;
