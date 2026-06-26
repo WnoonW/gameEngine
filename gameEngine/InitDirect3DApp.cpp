@@ -71,6 +71,12 @@ private:
 	bool mKeyF = false;
 	bool mKeySpace = false;
 	bool mKeyShift = false;
+
+	bool mManipulateSelected = false;  // IMGUI toggle for manipulating selected object like camera
+
+	// For picking
+	DirectX::XMMATRIX mCurrentView = DirectX::XMMatrixIdentity();
+	DirectX::XMMATRIX mCurrentProj = DirectX::XMMatrixIdentity();
 };
 
 DescriptorAllocator InitDirect3DApp::mGlobalDescriptorAllocator;
@@ -143,6 +149,7 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
 	mImGuiManager.CustomUI();
+	mManipulateSelected = mImGuiManager.IsManipulateSelected();
 
 	// === 카메라 조작 (Minecraft Creative 스타일) ===
 	// WASD: look 방향 기준 XZ 이동
@@ -164,31 +171,49 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	float rx = cosf(yaw);
 	float rz = -sinf(yaw);
 
-	if (mKeyW) {
-		mCamX += fx * speed;
-		mCamY += fy * speed;
-		mCamZ += fz * speed;
-	}
-	if (mKeyS) {
-		mCamX -= fx * speed;
-		mCamY -= fy * speed;
-		mCamZ -= fz * speed;
-	}
-	if (mKeyA) {
-		mCamX -= rx * speed;
-		mCamZ -= rz * speed;
-	}
-	if (mKeyD) {
-		mCamX += rx * speed;
-		mCamZ += rz * speed;
-	}
+	float fwdAmt = (mKeyW ? 1.f : 0.f) - (mKeyS ? 1.f : 0.f);
+	float rightAmt = (mKeyD ? 1.f : 0.f) - (mKeyA ? 1.f : 0.f);
+	float upAmt = (mKeySpace ? 1.f : 0.f) - (mKeyShift ? 1.f : 0.f);
 
-	if (mKeySpace) mCamY += speed;
-	if (mKeyShift) mCamY -= speed;
+	if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
+	{
+		// manipulate selected object like camera (relative to current view)
+		mEngine.MoveSelectedViewRelative(fwdAmt, rightAmt, upAmt, speed, mCurrentView);
 
-	// QE 대안 상승/하강
-	if (mKeyQ) mCamY += speed;
-	if (mKeyE) mCamY -= speed;
+		// QE as up/down for object
+		float qe = (mKeyQ ? 1.f : 0.f) - (mKeyE ? 1.f : 0.f);
+		if (qe != 0.0f) {
+			mEngine.MoveSelectedViewRelative(0, 0, qe, speed, mCurrentView);
+		}
+	}
+	else
+	{
+		if (mKeyW) {
+			mCamX += fx * speed;
+			mCamY += fy * speed;
+			mCamZ += fz * speed;
+		}
+		if (mKeyS) {
+			mCamX -= fx * speed;
+			mCamY -= fy * speed;
+			mCamZ -= fz * speed;
+		}
+		if (mKeyA) {
+			mCamX -= rx * speed;
+			mCamZ -= rz * speed;
+		}
+		if (mKeyD) {
+			mCamX += rx * speed;
+			mCamZ += rz * speed;
+		}
+
+		if (mKeySpace) mCamY += speed;
+		if (mKeyShift) mCamY -= speed;
+
+		// QE 대안 상승/하강
+		if (mKeyQ) mCamY += speed;
+		if (mKeyE) mCamY -= speed;
+	}
 
 	// pitch clamp
 	mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
@@ -266,6 +291,10 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 		AspectRatio(),
 		gt.TotalTime(),
 		gt.DeltaTime());
+
+	// store for picking
+	mCurrentView = view;
+	mCurrentProj = proj;
 
 	// === Engine을 통해 렌더링 ===
 	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
@@ -373,6 +402,15 @@ void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 	mLastMousePos.y = y;
 
 	SetCapture(mhMainWnd);
+
+	if (btnState & MK_LBUTTON)
+	{
+		Entity picked = mEngine.PickObject(x, y, (float)mClientWidth, (float)mClientHeight, mCurrentView, mCurrentProj);
+		if (picked != INVALID_ENTITY)
+		{
+			OutputDebugStringA("Object picked!\n");
+		}
+	}
 }
 
 void InitDirect3DApp::OnMouseUp(WPARAM btnState, int x, int y)
@@ -388,11 +426,18 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 		float dx = XMConvertToRadians(0.25f * static_cast<float>(x - mLastMousePos.x));
 		float dy = XMConvertToRadians(0.25f * static_cast<float>(y - mLastMousePos.y));
 
-		mTheta += dx;
-		mPhi -= dy;
+		if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
+		{
+			mEngine.RotateSelected(dx, -dy);
+		}
+		else
+		{
+			mTheta += dx;
+			mPhi -= dy;
 
-		// pitch 제한 (free look)
-		mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+			// pitch 제한 (free look)
+			mPhi = MathHelper::Clamp(mPhi, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+		}
 	}
 
 	mLastMousePos.x = x;
@@ -483,6 +528,10 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 	if (action == ButtonAction::SpawnTestObject)
 	{
 		mEngine.CreateRenderableEntity("bibian", "Test", { 0, 1, 0 });
+	}
+	else if (action == ButtonAction::ToggleManipulateSelected)
+	{
+		mManipulateSelected = mImGuiManager.IsManipulateSelected();
 	}
 }
 #pragma endregion

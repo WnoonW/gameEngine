@@ -18,6 +18,7 @@ enum class ButtonAction
     ToggleWireframe,
     ReloadShaders,
     PrintECSStats,
+    ToggleManipulateSelected,
     // ... 필요할 때마다 추가
 };
 
@@ -49,8 +50,13 @@ public:
     // ImGui 창을 다 그린 후에 호출 (CommandList에 실제 그리기)
     void Render(ID3D12GraphicsCommandList* cmdList);
 
+    void SetManipulateSelected(bool on) { mManipulateSelected = on; }
+    bool IsManipulateSelected() const { return mManipulateSelected; }
+
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
     ID3D12Device* m_Device = nullptr;
     IFunctionCallback* m_Callback = nullptr;
+
+    bool mManipulateSelected = false;
 };

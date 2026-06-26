@@ -66,6 +66,13 @@ void ImGuiManager::CustomUI()
     if (ImGui::Button("Toggle Wireframe"))
         if (m_Callback) m_Callback->buttonClicked(ButtonAction::ToggleWireframe);
 
+    if (ImGui::Checkbox("Manipulate Selected Object", &mManipulateSelected)) {
+        if (m_Callback) m_Callback->buttonClicked(ButtonAction::ToggleManipulateSelected);
+    }
+    if (mManipulateSelected) {
+        ImGui::Text("Object manipulation mode ON (like camera)");
+    }
+
     ImGui::End();
 }
 

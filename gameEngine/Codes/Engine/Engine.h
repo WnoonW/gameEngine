@@ -2,6 +2,7 @@
 #include <string>
 #include <DirectXMath.h>
 #include <optional>
+#include <DirectXCollision.h>
 
 #include "World.h"
 #include "RenderSystem.h"
@@ -64,6 +65,15 @@ public:
     // ECS 카메라의 Transform 업데이트 (orbit 컨트롤 연동용)
     void SetCameraTransform(Entity camEntity, const DirectX::XMFLOAT3& position, const DirectX::XMFLOAT3& rotation);
 
+    Entity PickObject(int mouseX, int mouseY, float clientWidth, float clientHeight,
+                      const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& proj);
+
+    Entity GetSelectedEntity() const { return mSelectedEntity; }
+    void SetSelectedEntity(Entity e) { mSelectedEntity = e; }
+
+    void RotateSelected(float dYaw, float dPitch);
+    void MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view);
+
     void Shutdown();
 private:
     ECS::World mWorld;
@@ -77,4 +87,6 @@ private:
     DescriptorAllocator* mDescriptorAllocator = nullptr;
 
     uint32_t mNextObjectCBIndex = 0;
+
+    Entity mSelectedEntity = INVALID_ENTITY;
 };

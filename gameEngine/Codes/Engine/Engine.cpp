@@ -46,6 +46,89 @@ void Engine::UpdateBounds()
     mBoundsSystem.Update(mWorld);
 }
 
+Entity Engine::PickObject(int mouseX, int mouseY, float clientWidth, float clientHeight,
+                          const XMMATRIX& view, const XMMATRIX& proj)
+{
+    // ensure bounds fresh
+    mBoundsSystem.Update(mWorld);
+
+    // Generate ray from mouse
+    float vx = (2.0f * mouseX / clientWidth) - 1.0f;
+    float vy = 1.0f - (2.0f * mouseY / clientHeight);
+
+    XMMATRIX invView = XMMatrixInverse(nullptr, view);
+    XMMATRIX invProj = XMMatrixInverse(nullptr, proj);
+
+    XMVECTOR clipNear = XMVectorSet(vx, vy, 0.0f, 1.0f);
+    XMVECTOR clipFar  = XMVectorSet(vx, vy, 1.0f, 1.0f);
+
+    XMVECTOR nearPoint = XMVector3TransformCoord(clipNear, invProj);
+    nearPoint = XMVector3TransformCoord(nearPoint, invView);
+
+    XMVECTOR farPoint = XMVector3TransformCoord(clipFar, invProj);
+    farPoint = XMVector3TransformCoord(farPoint, invView);
+
+    XMVECTOR rayOrigin = nearPoint;
+    XMVECTOR rayDir = XMVector3Normalize(farPoint - nearPoint);
+
+    Entity closest = INVALID_ENTITY;
+    float minDist = FLT_MAX;
+
+    mWorld.ForEach<TransformComponent, RenderableComponent, BoundsComponent>(
+        [&](Entity e, TransformComponent& tf, RenderableComponent& rend, BoundsComponent& bnds)
+        {
+            if (!rend.visible || !rend.mesh) return;
+
+            float dist;
+            if (bnds.worldBounds.Intersects(rayOrigin, rayDir, dist))
+            {
+                if (dist < minDist && dist > 0.001f)
+                {
+                    minDist = dist;
+                    closest = e;
+                }
+            }
+        });
+
+    mSelectedEntity = closest;
+    return closest;
+}
+
+void Engine::RotateSelected(float dYaw, float dPitch)
+{
+    if (mSelectedEntity == INVALID_ENTITY) return;
+    auto* tf = mWorld.GetComponent<TransformComponent>(mSelectedEntity);
+    if (tf) {
+        tf->rotation.y += dYaw;
+        tf->rotation.x += dPitch;
+        tf->rotation.x = MathHelper::Clamp(tf->rotation.x, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+    }
+}
+
+void Engine::MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view)
+{
+    if (mSelectedEntity == INVALID_ENTITY) return;
+    auto* tf = mWorld.GetComponent<TransformComponent>(mSelectedEntity);
+    if (!tf) return;
+
+    XMMATRIX invView = XMMatrixInverse(nullptr, view);
+    XMVECTOR cFwd = -invView.r[2];
+    XMVECTOR cRight = invView.r[0];
+    XMVECTOR cUp = invView.r[1];
+
+    XMVECTOR delta = XMVectorAdd(
+        XMVectorScale(cFwd, forward * speed),
+        XMVectorScale(cRight, right * speed)
+    );
+    delta = XMVectorAdd(delta, XMVectorScale(cUp, up * speed));
+
+    XMFLOAT3 d;
+    XMStoreFloat3(&d, delta);
+    tf->position.x += d.x;
+    tf->position.y += d.y;
+    tf->position.z += d.z;
+}
+
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
     int currentFrameIndex,
