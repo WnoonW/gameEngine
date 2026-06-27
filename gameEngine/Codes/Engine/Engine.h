@@ -69,8 +69,10 @@ public:
     Entity PickObject(int mouseX, int mouseY, float clientWidth, float clientHeight,
                       const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& proj);
 
-    Entity GetSelectedEntity() const { return mSelectedEntity; }
-    void SetSelectedEntity(Entity e) { mSelectedEntity = e; }
+    Entity GetSelectedEntity();
+    void SetSelectedEntity(Entity e);
+    void ClearSelection();
+    bool IsEntitySelected(Entity entity);
 
     RenderableComponent* GetRenderable(Entity entity);
     void SetEntityMainMaterial(Entity entity, const std::string& materialName);
@@ -80,6 +82,8 @@ public:
 
     void RotateSelected(float dYaw, float dPitch);
     void MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view);
+    void MoveSelectedPlanar(float forward, float right, float up, float speed,
+        const XMFLOAT3& horizForward, const XMFLOAT3& horizRight);
 
     TransformComponent* GetTransform(Entity entity);
     bool HasGravityComponent(Entity entity);
@@ -105,6 +109,4 @@ private:
     DescriptorAllocator* mDescriptorAllocator = nullptr;
 
     uint32_t mNextObjectCBIndex = 0;
-
-    Entity mSelectedEntity = INVALID_ENTITY;
 };

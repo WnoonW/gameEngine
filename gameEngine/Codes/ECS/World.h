@@ -22,7 +22,9 @@ namespace ECS {
 
             auto [arch, index] = it->second;
             if (arch) {
-                arch->RemoveEntity(entity);
+                const size_t removedIndex = arch->RemoveEntity(entity);
+                if (removedIndex != SIZE_MAX)
+                    FixEntityIndicesAfterRemoval(arch, removedIndex);
             }
             mEntityLocation.erase(entity);
         }
@@ -59,7 +61,9 @@ namespace ECS {
                         newArch->componentSizes[type] = size;
                     }
                 }
-                oldArch->RemoveEntity(entity);
+                const size_t removedIndex = oldArch->RemoveEntity(entity);
+                if (removedIndex != SIZE_MAX)
+                    FixEntityIndicesAfterRemoval(oldArch, removedIndex);
             }
 
             // 새 엔티티 등록
@@ -93,8 +97,9 @@ namespace ECS {
             }
 
             if (newTypes.empty()) {
-                // 모든 컴포넌트가 제거된 경우
-                oldArch->RemoveEntity(entity);
+                const size_t removedIndex = oldArch->RemoveEntity(entity);
+                if (removedIndex != SIZE_MAX)
+                    FixEntityIndicesAfterRemoval(oldArch, removedIndex);
                 mEntityLocation[entity] = { nullptr, 0 };
                 return;
             }
@@ -115,7 +120,9 @@ namespace ECS {
                 }
             }
 
-            oldArch->RemoveEntity(entity);
+            const size_t removedIndex = oldArch->RemoveEntity(entity);
+            if (removedIndex != SIZE_MAX)
+                FixEntityIndicesAfterRemoval(oldArch, removedIndex);
             newArch->entities.push_back(entity);
             mEntityLocation[entity] = { newArch, newIndex };
         }
@@ -147,6 +154,15 @@ namespace ECS {
         }
 
     private:
+        void FixEntityIndicesAfterRemoval(Archetype* arch, size_t removedIndex)
+        {
+            if (!arch)
+                return;
+
+            for (size_t i = removedIndex; i < arch->entities.size(); ++i)
+                mEntityLocation[arch->entities[i]] = { arch, i };
+        }
+
         ArchetypeManager mArchetypeManager;
         std::unordered_map<Entity, std::pair<Archetype*, size_t>> mEntityLocation;
         Entity mNextEntityID = 1;

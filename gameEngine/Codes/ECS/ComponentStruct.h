@@ -53,3 +53,7 @@ struct CollisionComponent {
     bool isStatic = false;
     float restitution = 0.0f;
 };
+
+struct SelectedComponent {
+    // Editor tag: this entity is the active viewport selection.
+};

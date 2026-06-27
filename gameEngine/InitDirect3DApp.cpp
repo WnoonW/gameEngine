@@ -13,6 +13,58 @@
 
 using namespace DirectX;
 
+namespace
+{
+	constexpr float kMinOrbitRadius = 2.0f;
+	constexpr float kMaxOrbitRadius = 80.0f;
+	constexpr float kDefaultOrbitPitch = -0.3f;
+
+	XMVECTOR FlattenHorizForward(XMVECTOR lookForward, XMMATRIX yawRot)
+	{
+		XMFLOAT3 hf{};
+		XMStoreFloat3(&hf, lookForward);
+		hf.y = 0.0f;
+		XMVECTOR horizForward = XMLoadFloat3(&hf);
+		const float fwdLenSq = XMVectorGetX(XMVector3LengthSq(horizForward));
+		if (fwdLenSq < 1e-6f)
+			return XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), yawRot);
+		return XMVector3Normalize(horizForward);
+	}
+
+	XMVECTOR ComputeThirdPersonCameraPosition(XMVECTOR pivot, float objectYaw, float pitch, float theta, float radius)
+	{
+		const XMMATRIX objectRot = XMMatrixRotationY(objectYaw);
+		const XMMATRIX orbitRot = XMMatrixRotationRollPitchYaw(pitch, theta, 0.0f);
+		const XMMATRIX combined = XMMatrixMultiply(orbitRot, objectRot);
+		const XMVECTOR offsetDir = XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), combined);
+		return XMVectorAdd(pivot, XMVectorScale(offsetDir, radius));
+	}
+
+	void ExtractPitchYawFromView(const XMMATRIX& view, float& outPitch, float& outYaw)
+	{
+		XMVECTOR det;
+		XMMATRIX invView = XMMatrixInverse(&det, view);
+		XMVECTOR forward = XMVector3Normalize(
+			XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), invView));
+
+		XMFLOAT3 f{};
+		XMStoreFloat3(&f, forward);
+		outPitch = asinf(MathHelper::Clamp(f.y, -1.0f, 1.0f));
+		outYaw = atan2f(f.x, f.z);
+	}
+
+	XMMATRIX BuildOrbitView(XMVECTOR camPos, XMVECTOR pivot, XMVECTOR worldUp,
+		float& outCamX, float& outCamY, float& outCamZ)
+	{
+		XMFLOAT3 p{};
+		XMStoreFloat3(&p, camPos);
+		outCamX = p.x;
+		outCamY = p.y;
+		outCamZ = p.z;
+		return XMMatrixLookAtLH(camPos, pivot, worldUp);
+	}
+}
+
 class InitDirect3DApp : public D3DApp, public IFunctionCallback
 {
 public:
@@ -50,6 +102,7 @@ private:
 	void LoadAssets();
 	void CreateInitialScene();
 	void UpdateCamera(float dt);
+	void InitializeOrbitFromSelection();
 	void SetMouseLookActive(bool active);
 	void CenterMouseCursor();
 	void UpdateCursorClip();
@@ -86,7 +139,10 @@ private:
 	bool mKeyShift = false;
 	bool mKeyCtrl = false;
 
-	bool mManipulateSelected = false;  // IMGUI toggle for manipulating selected object like camera
+	bool mManipulateSelected = false;
+	bool mWasManipulateSelected = false;
+	float mOrbitRadius = 10.0f;
+	Entity mOrbitTarget = INVALID_ENTITY;
 
 	// For picking
 	DirectX::XMMATRIX mCurrentView = DirectX::XMMatrixIdentity();
@@ -217,6 +273,12 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	mImGuiManager.NewFrame();
 	mImGuiManager.CustomUI(&mEngine);
 	mManipulateSelected = mImGuiManager.IsManipulateSelected();
+	if (mManipulateSelected && !mWasManipulateSelected
+		&& mEngine.GetSelectedEntity() != INVALID_ENTITY)
+	{
+		InitializeOrbitFromSelection();
+	}
+	mWasManipulateSelected = mManipulateSelected;
 
 	float dt = gt.DeltaTime();
 	if (dt > 0.033f)
@@ -228,17 +290,54 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	SyncMouseLookState();
 }
 
+void InitDirect3DApp::InitializeOrbitFromSelection()
+{
+	const Entity selected = mEngine.GetSelectedEntity();
+	TransformComponent* tf = mEngine.GetTransform(selected);
+	if (!tf)
+	{
+		mOrbitTarget = INVALID_ENTITY;
+		return;
+	}
+
+	mOrbitTarget = selected;
+
+	XMVECTOR pivot = XMLoadFloat3(&tf->position);
+	XMVECTOR camPos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
+	XMVECTOR toCam = XMVectorSubtract(camPos, pivot);
+	const float dist = XMVectorGetX(XMVector3Length(toCam));
+
+	if (dist > 0.001f)
+	{
+		mOrbitRadius = MathHelper::Clamp(dist, kMinOrbitRadius, kMaxOrbitRadius);
+		XMVECTOR offsetDir = XMVector3Normalize(toCam);
+		XMFLOAT3 o{};
+		XMStoreFloat3(&o, offsetDir);
+		mPhi = asinf(MathHelper::Clamp(o.y, -1.0f, 1.0f));
+		mTheta = atan2f(o.x, o.z) - tf->rotation.y;
+	}
+	else
+	{
+		mTheta = 0.0f;
+		mPhi = kDefaultOrbitPitch;
+		mOrbitRadius = kMinOrbitRadius;
+	}
+}
+
 void InitDirect3DApp::UpdateCamera(float dt)
 {
+	const Entity selected = mEngine.GetSelectedEntity();
+	const bool thirdPersonMode = mManipulateSelected && selected != INVALID_ENTITY;
+
+	if (thirdPersonMode && selected != mOrbitTarget)
+		InitializeOrbitFromSelection();
+	else if (!thirdPersonMode)
+		mOrbitTarget = INVALID_ENTITY;
+
 	if (mPendingMouseDx != 0.0f || mPendingMouseDy != 0.0f)
 	{
-		if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
-			mEngine.RotateSelected(mPendingMouseDx, mPendingMouseDy);
-		else
-		{
-			mTheta += mPendingMouseDx;
-			mPhi += mPendingMouseDy;
-		}
+		mTheta += mPendingMouseDx;
+		mPhi += mPendingMouseDy;
 		mPendingMouseDx = 0.0f;
 		mPendingMouseDy = 0.0f;
 	}
@@ -267,29 +366,57 @@ void InitDirect3DApp::UpdateCamera(float dt)
 		strafeAmt *= invLen;
 	}
 
-	XMVECTOR pos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
-	XMMATRIX viewForMove = XMMatrixLookToLH(pos, lookForward, worldUp);
+	XMVECTOR horizForward = FlattenHorizForward(lookForward, yawRot);
+	XMFLOAT3 horizFwd{};
+	XMFLOAT3 horizRgt{};
+	XMStoreFloat3(&horizFwd, horizForward);
+	XMStoreFloat3(&horizRgt, horizRight);
 
-	if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
+	if (thirdPersonMode)
 	{
-		mEngine.MoveSelectedViewRelative(fwdAmt, strafeAmt, ascendAmt, speed, viewForMove);
+		TransformComponent* targetTf = mEngine.GetTransform(selected);
+		if (!targetTf)
+		{
+			mOrbitTarget = INVALID_ENTITY;
+			mEngine.ClearSelection();
+
+			XMVECTOR pos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
+			XMMATRIX view = XMMatrixLookToLH(pos, lookForward, worldUp);
+			XMStoreFloat4x4(&mView, view);
+			mCurrentView = view;
+			mCurrentProj = XMLoadFloat4x4(&mProj);
+			return;
+		}
+
+		if (fwdAmt != 0.0f || strafeAmt != 0.0f || ascendAmt != 0.0f)
+			mEngine.MoveSelectedPlanar(fwdAmt, strafeAmt, ascendAmt, speed, horizFwd, horizRgt);
+
+		XMVECTOR pivot = XMLoadFloat3(&targetTf->position);
+		XMVECTOR camPos = ComputeThirdPersonCameraPosition(
+			pivot, targetTf->rotation.y, mPhi, mTheta, mOrbitRadius);
+
+		XMMATRIX view = BuildOrbitView(camPos, pivot, worldUp, mCamX, mCamY, mCamZ);
+		XMStoreFloat4x4(&mView, view);
+		mCurrentView = view;
+		mCurrentProj = XMLoadFloat4x4(&mProj);
+		return;
 	}
-	else if (fwdAmt != 0.0f || strafeAmt != 0.0f || ascendAmt != 0.0f)
+
+	XMVECTOR pos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
+	if (fwdAmt != 0.0f || strafeAmt != 0.0f || ascendAmt != 0.0f)
 	{
-		pos = XMVectorAdd(pos, XMVectorScale(lookForward, fwdAmt * speed));
+		pos = XMVectorAdd(pos, XMVectorScale(horizForward, fwdAmt * speed));
 		pos = XMVectorAdd(pos, XMVectorScale(horizRight, strafeAmt * speed));
 		pos = XMVectorAdd(pos, XMVectorScale(worldUp, ascendAmt * speed));
 
-		XMFLOAT3 p;
+		XMFLOAT3 p{};
 		XMStoreFloat3(&p, pos);
 		mCamX = p.x;
 		mCamY = p.y;
 		mCamZ = p.z;
 	}
 
-	rot = XMMatrixRotationRollPitchYaw(mPhi, mTheta, 0.0f);
 	lookForward = XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rot);
-
 	pos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
 	XMMATRIX view = XMMatrixLookToLH(pos, lookForward, worldUp);
 	XMStoreFloat4x4(&mView, view);
@@ -339,11 +466,15 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	XMMATRIX view = XMLoadFloat4x4(&mView);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 
-	// === ECS CameraComponent 동기화 (위치/회전 기록) ===
+	// === ECS CameraComponent 동기화 (mView 기준 실제 시선 방향) ===
 	if (mMainCamera != INVALID_ENTITY)
 	{
+		float camPitch = mPhi;
+		float camYaw = mTheta;
+		ExtractPitchYawFromView(view, camPitch, camYaw);
+
 		XMFLOAT3 camPos = { mCamX, mCamY, mCamZ };
-		mEngine.SetCameraTransform(mMainCamera, camPos, { mPhi, mTheta, 0.0f });
+		mEngine.SetCameraTransform(mMainCamera, camPos, { camPitch, camYaw, 0.0f });
 	}
 
 	// === PassCB 채우기 (ECS의 CameraComponent 활용하여 EyePos, Near/Far 등 채움) ===
@@ -446,7 +577,7 @@ void InitDirect3DApp::LoadAssets()
 void InitDirect3DApp::CreateInitialScene()
 {
 	// Minecraft creative 스타일 초기 위치 (0,0,0에서 떨어짐)
-	mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -10.0f });
+	mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -5.0f });
 
 	// 기존 렌더 오브젝트
 	mEngine.CreateRenderableEntity("bibian", "Test", { 0.0f, 0.0f, 0.0f });
@@ -518,12 +649,17 @@ void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 
 	if (btnState & MK_RBUTTON)
 	{
+		if (ImGui::GetIO().WantCaptureMouse)
+			return;
+
 		const int pickX = mMouseLookActive ? mClientWidth / 2 : x;
 		const int pickY = mMouseLookActive ? mClientHeight / 2 : y;
 		Entity picked = mEngine.PickObject(pickX, pickY, (float)mClientWidth, (float)mClientHeight, mCurrentView, mCurrentProj);
 		if (picked != INVALID_ENTITY)
 		{
 			OutputDebugStringA("Object picked!\n");
+			if (mManipulateSelected)
+				InitializeOrbitFromSelection();
 		}
 	}
 }
@@ -544,10 +680,22 @@ void InitDirect3DApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void InitDirect3DApp::OnMouseWheel(short wheelDelta, int x, int y)
 {
-	// 지수함수적(멱함수) 속도 조절: 한 칸당 약 20% 배율
-	const float factor = 1.2f;
-	mFlySpeed *= powf(factor, wheelDelta / 120.0f);
-	mFlySpeed = MathHelper::Clamp(mFlySpeed, 1.0f, 500.0f);
+	(void)x;
+	(void)y;
+
+	const float factor = 1.1f;
+	const float scroll = wheelDelta / 120.0f;
+
+	if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
+	{
+		mOrbitRadius *= powf(factor, scroll);
+		mOrbitRadius = MathHelper::Clamp(mOrbitRadius, kMinOrbitRadius, kMaxOrbitRadius);
+	}
+	else
+	{
+		mFlySpeed *= powf(1.2f, scroll);
+		mFlySpeed = MathHelper::Clamp(mFlySpeed, 1.0f, 500.0f);
+	}
 }
 
 void InitDirect3DApp::OnKeyDown(WPARAM wParam)

@@ -10,7 +10,7 @@ using namespace DirectX;
 
 namespace
 {
-    constexpr int kSolverIterations = 6;
+    constexpr int kMaxSolverIterations = 4;
 
     struct ColliderEntry
     {
@@ -33,6 +33,20 @@ namespace
             box.Center.y + box.Extents.y,
             box.Center.z + box.Extents.z
         };
+    }
+
+    bool AABBsOverlap(const XMFLOAT3& aMin, const XMFLOAT3& aMax,
+        const XMFLOAT3& bMin, const XMFLOAT3& bMax,
+        float& overlapX, float& overlapY, float& overlapZ)
+    {
+        if (aMax.x < bMin.x || aMin.x > bMax.x) return false;
+        if (aMax.y < bMin.y || aMin.y > bMax.y) return false;
+        if (aMax.z < bMin.z || aMin.z > bMax.z) return false;
+
+        overlapX = std::min(aMax.x, bMax.x) - std::max(aMin.x, bMin.x);
+        overlapY = std::min(aMax.y, bMax.y) - std::max(aMin.y, bMin.y);
+        overlapZ = std::min(aMax.z, bMax.z) - std::max(aMin.z, bMin.z);
+        return overlapX > 0.0f && overlapY > 0.0f && overlapZ > 0.0f;
     }
 
     void ApplyAxisMove(ColliderEntry& entry, int axis, float move)
@@ -114,8 +128,10 @@ namespace
             entry.gravity->velocity.y = 0.0f;
     }
 
-    void SolveCollisions(std::vector<ColliderEntry>& colliders)
+    bool SolveCollisions(std::vector<ColliderEntry>& colliders)
     {
+        bool anyResolved = false;
+
         for (size_t i = 0; i < colliders.size(); ++i)
         {
             if (!colliders[i].collision->isStatic)
@@ -129,18 +145,23 @@ namespace
                 auto& a = colliders[i];
                 auto& b = colliders[j];
 
+                if (a.collision->isStatic && b.collision->isStatic)
+                    continue;
+
                 XMFLOAT3 aMin, aMax, bMin, bMax;
                 GetAABBMinMax(a.bounds->worldBounds, aMin, aMax);
                 GetAABBMinMax(b.bounds->worldBounds, bMin, bMax);
 
-                const float overlapX = std::min(aMax.x, bMax.x) - std::max(aMin.x, bMin.x);
-                const float overlapY = std::min(aMax.y, bMax.y) - std::max(aMin.y, bMin.y);
-                const float overlapZ = std::min(aMax.z, bMax.z) - std::max(aMin.z, bMin.z);
+                float overlapX = 0.0f, overlapY = 0.0f, overlapZ = 0.0f;
+                if (!AABBsOverlap(aMin, aMax, bMin, bMax, overlapX, overlapY, overlapZ))
+                    continue;
 
-                if (overlapX > 0.0f && overlapY > 0.0f && overlapZ > 0.0f)
-                    ResolveOverlap(a, b, overlapX, overlapY, overlapZ);
+                ResolveOverlap(a, b, overlapX, overlapY, overlapZ);
+                anyResolved = true;
             }
         }
+
+        return anyResolved;
     }
 }
 
@@ -164,6 +185,12 @@ void CollisionSystem::Update(World& world)
             });
         });
 
-    for (int iter = 0; iter < kSolverIterations; ++iter)
-        SolveCollisions(colliders);
+    if (colliders.size() <= 1)
+        return;
+
+    for (int iter = 0; iter < kMaxSolverIterations; ++iter)
+    {
+        if (!SolveCollisions(colliders))
+            break;
+    }
 }

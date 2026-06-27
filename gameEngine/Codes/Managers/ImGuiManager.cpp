@@ -131,7 +131,8 @@ void ImGuiManager::CustomUI(Engine* engine)
         if (m_Callback) m_Callback->buttonClicked(ButtonAction::ToggleManipulateSelected);
     }
     if (mManipulateSelected) {
-        ImGui::Text("Object manipulation mode ON (like camera)");
+        ImGui::Text("3rd-person follow mode ON");
+        ImGui::Text("Mouse: orbit | WASD: XZ move | Space/Shift: Y move | Wheel: zoom");
     }
 
     // === Loaded Meshes & Object Creator ===

@@ -48,6 +48,51 @@ void Engine::UpdateBounds()
     mBoundsSystem.Update(mWorld);
 }
 
+Entity Engine::GetSelectedEntity()
+{
+    Entity selected = INVALID_ENTITY;
+    mWorld.ForEach<SelectedComponent>(
+        [&](Entity e, SelectedComponent&)
+        {
+            if (selected == INVALID_ENTITY)
+                selected = e;
+        });
+    return selected;
+}
+
+void Engine::ClearSelection()
+{
+    std::vector<Entity> selectedEntities;
+    selectedEntities.reserve(4);
+
+    mWorld.ForEach<SelectedComponent>(
+        [&](Entity e, SelectedComponent&)
+        {
+            selectedEntities.push_back(e);
+        });
+
+    for (Entity e : selectedEntities)
+        mWorld.RemoveComponent<SelectedComponent>(e);
+}
+
+void Engine::SetSelectedEntity(Entity entity)
+{
+    ClearSelection();
+
+    if (entity == INVALID_ENTITY)
+        return;
+
+    if (!mWorld.GetComponent<TransformComponent>(entity))
+        return;
+
+    mWorld.AddComponent(entity, SelectedComponent{});
+}
+
+bool Engine::IsEntitySelected(Entity entity)
+{
+    return mWorld.GetComponent<SelectedComponent>(entity) != nullptr;
+}
+
 Entity Engine::PickObject(int mouseX, int mouseY, float clientWidth, float clientHeight,
                           const XMMATRIX& view, const XMMATRIX& proj)
 {
@@ -81,25 +126,35 @@ Entity Engine::PickObject(int mouseX, int mouseY, float clientWidth, float clien
         {
             if (!rend.visible || !rend.mesh) return;
 
-            float dist;
-            if (bnds.worldBounds.Intersects(rayOrigin, rayDir, dist))
+            const auto& wb = bnds.worldBounds;
+            if (wb.Extents.x <= 0.0f && wb.Extents.y <= 0.0f && wb.Extents.z <= 0.0f)
+                return;
+
+            float dist = 0.0f;
+            bool hit = wb.Intersects(rayOrigin, rayDir, dist);
+            if (!hit && wb.Contains(rayOrigin) != DISJOINT)
             {
-                if (dist < minDist && dist > 0.001f)
-                {
-                    minDist = dist;
-                    closest = e;
-                }
+                hit = true;
+                dist = 0.0f;
+            }
+
+            if (hit && dist >= 0.0f && dist < minDist)
+            {
+                minDist = dist;
+                closest = e;
             }
         });
 
-    mSelectedEntity = closest;
+    if (closest != INVALID_ENTITY)
+        SetSelectedEntity(closest);
     return closest;
 }
 
 void Engine::RotateSelected(float dYaw, float dPitch)
 {
-    if (mSelectedEntity == INVALID_ENTITY) return;
-    auto* tf = mWorld.GetComponent<TransformComponent>(mSelectedEntity);
+    const Entity selected = GetSelectedEntity();
+    if (selected == INVALID_ENTITY) return;
+    auto* tf = mWorld.GetComponent<TransformComponent>(selected);
     if (tf) {
         tf->rotation.y += dYaw;
         tf->rotation.x += dPitch;
@@ -107,28 +162,60 @@ void Engine::RotateSelected(float dYaw, float dPitch)
     }
 }
 
+namespace
+{
+    XMVECTOR FlattenToXZ(XMVECTOR v, XMVECTOR fallback)
+    {
+        XMFLOAT3 f{};
+        XMStoreFloat3(&f, v);
+        f.y = 0.0f;
+        XMVECTOR flat = XMLoadFloat3(&f);
+        const float lenSq = XMVectorGetX(XMVector3LengthSq(flat));
+        if (lenSq < 1e-6f)
+            return fallback;
+        return XMVector3Normalize(flat);
+    }
+}
+
 void Engine::MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view)
 {
-    if (mSelectedEntity == INVALID_ENTITY) return;
-    auto* tf = mWorld.GetComponent<TransformComponent>(mSelectedEntity);
+    const Entity selected = GetSelectedEntity();
+    if (selected == INVALID_ENTITY) return;
+    auto* tf = mWorld.GetComponent<TransformComponent>(selected);
     if (!tf) return;
 
     XMMATRIX invView = XMMatrixInverse(nullptr, view);
-    XMVECTOR cFwd = -invView.r[2];
-    XMVECTOR cRight = invView.r[0];
-    XMVECTOR cUp = invView.r[1];
+    const XMVECTOR cFwd = FlattenToXZ(-invView.r[2], XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f));
+    const XMVECTOR cRight = FlattenToXZ(invView.r[0], XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f));
+    const XMVECTOR worldUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
     XMVECTOR delta = XMVectorAdd(
         XMVectorScale(cFwd, forward * speed),
         XMVectorScale(cRight, right * speed)
     );
-    delta = XMVectorAdd(delta, XMVectorScale(cUp, up * speed));
+    delta = XMVectorAdd(delta, XMVectorScale(worldUp, up * speed));
 
     XMFLOAT3 d;
     XMStoreFloat3(&d, delta);
     tf->position.x += d.x;
     tf->position.y += d.y;
     tf->position.z += d.z;
+}
+
+void Engine::MoveSelectedPlanar(float forward, float right, float up, float speed,
+    const XMFLOAT3& horizForward, const XMFLOAT3& horizRight)
+{
+    const Entity selected = GetSelectedEntity();
+    if (selected == INVALID_ENTITY)
+        return;
+
+    auto* tf = mWorld.GetComponent<TransformComponent>(selected);
+    if (!tf)
+        return;
+
+    tf->position.x += horizForward.x * forward * speed + horizRight.x * right * speed;
+    tf->position.y += up * speed;
+    tf->position.z += horizForward.z * forward * speed + horizRight.z * right * speed;
 }
 
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
@@ -166,9 +253,6 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         .objectCBIndex = mNextObjectCBIndex++
         });
     mWorld.AddComponent(entity, BoundsComponent{});
-
-    if (!materialName.empty())
-        MaterialManager::Get().SetEntityMainMaterial(entity, materialName);
 
     return entity;
 }
