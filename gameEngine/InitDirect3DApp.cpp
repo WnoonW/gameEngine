@@ -223,7 +223,7 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 		dt = 0.033f;
 
 	UpdateCamera(dt);
-	mEngine.Update();
+	mEngine.Update(dt);
 
 	SyncMouseLookState();
 }

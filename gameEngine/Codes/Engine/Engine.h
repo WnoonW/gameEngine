@@ -7,6 +7,8 @@
 #include "World.h"
 #include "RenderSystem.h"
 #include "BoundsSystem.h"
+#include "GravitySystem.h"
+#include "CollisionSystem.h"
 #include "DescriptorAllocator.h"
 #include "AppStruct.h"
 #include "ResourceManager.h"
@@ -26,8 +28,7 @@ public:
         int gNumFrameResources,
         DescriptorAllocator& descriptorAllocator);
 
-    // 매 프레임 업데이트 (나중에 시스템들 추가 예정)
-    void Update();
+    void Update(float deltaTime);
 
     // AABB 업데이트 시스템
     void UpdateBounds();
@@ -80,11 +81,22 @@ public:
     void RotateSelected(float dYaw, float dPitch);
     void MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view);
 
+    TransformComponent* GetTransform(Entity entity);
+    bool HasGravityComponent(Entity entity);
+    GravityComponent* GetGravityComponent(Entity entity);
+    void SetEntityGravityEnabled(Entity entity, bool enabled);
+
+    bool HasCollisionComponent(Entity entity);
+    CollisionComponent* GetCollisionComponent(Entity entity);
+    void SetEntityCollisionEnabled(Entity entity, bool enabled);
+
     void Shutdown();
 private:
     ECS::World mWorld;
     RenderSystem mRenderSystem;
     BoundsSystem mBoundsSystem;
+    GravitySystem mGravitySystem;
+    CollisionSystem mCollisionSystem;
     ResourceManager* mResourceManager = nullptr;
 
     ID3D12Device* mDevice = nullptr;

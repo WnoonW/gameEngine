@@ -196,6 +196,38 @@ void ImGuiManager::CustomUI(Engine* engine)
     if (engine)
     {
         Entity selected = engine->GetSelectedEntity();
+        if (selected != INVALID_ENTITY)
+        {
+            ImGui::Separator();
+            ImGui::Text("Selected Entity: %u", selected);
+
+            bool hasGravity = engine->HasGravityComponent(selected);
+            if (ImGui::Checkbox("Gravity Component", &hasGravity))
+                engine->SetEntityGravityEnabled(selected, hasGravity);
+
+            if (GravityComponent* gravity = engine->GetGravityComponent(selected))
+            {
+                ImGui::Indent();
+                ImGui::Checkbox("Enabled##Gravity", &gravity->enabled);
+                ImGui::DragFloat("Strength", &gravity->strength, 0.1f, 0.0f, 50.0f);
+                ImGui::DragFloat3("Velocity", &gravity->velocity.x, 0.1f);
+                ImGui::Unindent();
+            }
+
+            bool hasCollision = engine->HasCollisionComponent(selected);
+            if (ImGui::Checkbox("Collision Component", &hasCollision))
+                engine->SetEntityCollisionEnabled(selected, hasCollision);
+
+            if (CollisionComponent* collision = engine->GetCollisionComponent(selected))
+            {
+                ImGui::Indent();
+                ImGui::Checkbox("Enabled##Collision", &collision->enabled);
+                ImGui::Checkbox("Static", &collision->isStatic);
+                ImGui::DragFloat("Restitution", &collision->restitution, 0.01f, 0.0f, 1.0f);
+                ImGui::Unindent();
+            }
+        }
+
         RenderableComponent* rend = engine->GetRenderable(selected);
         if (rend && rend->mesh)
         {
@@ -252,7 +284,7 @@ void ImGuiManager::CustomUI(Engine* engine)
                 ImGui::PopID();
             }
         }
-        else if (selected != INVALID_ENTITY)
+        else if (selected != INVALID_ENTITY && !engine->HasGravityComponent(selected) && !engine->HasCollisionComponent(selected))
         {
             ImGui::Separator();
             ImGui::Text("Selected entity has no RenderableComponent");

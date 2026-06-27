@@ -176,6 +176,8 @@
     <ClCompile Include="Codes\Memory\DescriptorAllocator.cpp" />
     <ClCompile Include="Codes\Systems\RenderSystem.cpp" />
     <ClCompile Include="Codes\Systems\BoundsSystem.cpp" />
+    <ClCompile Include="Codes\Systems\GravitySystem.cpp" />
+    <ClCompile Include="Codes\Systems\CollisionSystem.cpp" />
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -214,6 +216,8 @@
     <ClInclude Include="Codes\Structs\modelStruct.h" />
     <ClInclude Include="Codes\Systems\RenderSystem.h" />
     <ClInclude Include="Codes\Systems\BoundsSystem.h" />
+    <ClInclude Include="Codes\Systems\GravitySystem.h" />
+    <ClInclude Include="Codes\Systems\CollisionSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">

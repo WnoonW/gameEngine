@@ -124,6 +124,4 @@ void RootSignatureManager::CreateCommandSignature()
         nullptr,
         IID_PPV_ARGS(&commandSignature)
     );
-
-    mRootSignatures[RootSignatureType::Command] = commandSignature;
 }

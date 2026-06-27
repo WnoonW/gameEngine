@@ -35,9 +35,11 @@ bool Engine::Initialize(ID3D12Device* device,
     return true;
 }
 
-void Engine::Update()
+void Engine::Update(float deltaTime)
 {
-    // 나중에 TransformSystem, AnimationSystem 등 추가 예정
+    mGravitySystem.Update(mWorld, deltaTime);
+    UpdateBounds();
+    mCollisionSystem.Update(mWorld);
     UpdateBounds();
 }
 
@@ -340,5 +342,65 @@ void Engine::SetCameraTransform(Entity camEntity, const XMFLOAT3& position, cons
     {
         tf->position = position;
         tf->rotation = rotation;
+    }
+}
+
+TransformComponent* Engine::GetTransform(Entity entity)
+{
+    return mWorld.GetComponent<TransformComponent>(entity);
+}
+
+bool Engine::HasGravityComponent(Entity entity)
+{
+    return mWorld.GetComponent<GravityComponent>(entity) != nullptr;
+}
+
+GravityComponent* Engine::GetGravityComponent(Entity entity)
+{
+    return mWorld.GetComponent<GravityComponent>(entity);
+}
+
+void Engine::SetEntityGravityEnabled(Entity entity, bool enabled)
+{
+    if (entity == INVALID_ENTITY)
+        return;
+
+    if (enabled)
+    {
+        if (!HasGravityComponent(entity))
+            mWorld.AddComponent(entity, GravityComponent{});
+    }
+    else if (HasGravityComponent(entity))
+    {
+        mWorld.RemoveComponent<GravityComponent>(entity);
+    }
+}
+
+bool Engine::HasCollisionComponent(Entity entity)
+{
+    return mWorld.GetComponent<CollisionComponent>(entity) != nullptr;
+}
+
+CollisionComponent* Engine::GetCollisionComponent(Entity entity)
+{
+    return mWorld.GetComponent<CollisionComponent>(entity);
+}
+
+void Engine::SetEntityCollisionEnabled(Entity entity, bool enabled)
+{
+    if (entity == INVALID_ENTITY)
+        return;
+
+    if (enabled)
+    {
+        if (!mWorld.GetComponent<BoundsComponent>(entity) && GetRenderable(entity))
+            mWorld.AddComponent(entity, BoundsComponent{});
+
+        if (!HasCollisionComponent(entity))
+            mWorld.AddComponent(entity, CollisionComponent{});
+    }
+    else if (HasCollisionComponent(entity))
+    {
+        mWorld.RemoveComponent<CollisionComponent>(entity);
     }
 }

@@ -41,3 +41,15 @@ struct BoundsComponent {
     DirectX::BoundingBox localBounds;   // per-object union of all submeshes (local space)
     DirectX::BoundingBox worldBounds;   // transformed to world space
 };
+
+struct GravityComponent {
+    bool enabled = true;
+    float strength = 9.81f;
+    XMFLOAT3 velocity{ 0.0f, 0.0f, 0.0f };
+};
+
+struct CollisionComponent {
+    bool enabled = true;
+    bool isStatic = false;
+    float restitution = 0.0f;
+};

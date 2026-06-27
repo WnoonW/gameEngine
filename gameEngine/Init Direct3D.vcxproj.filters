@@ -123,6 +123,15 @@
     <ClCompile Include="Codes\Systems\RenderSystem.cpp">
       <Filter>Systems</Filter>
     </ClCompile>
+    <ClCompile Include="Codes\Systems\BoundsSystem.cpp">
+      <Filter>Systems</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Systems\GravitySystem.cpp">
+      <Filter>Systems</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Systems\CollisionSystem.cpp">
+      <Filter>Systems</Filter>
+    </ClCompile>
     <ClCompile Include="Codes\Engine\Engine.cpp">
       <Filter>Engine</Filter>
     </ClCompile>
@@ -225,6 +234,15 @@
       <Filter>ECS</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Systems\RenderSystem.h">
+      <Filter>Systems</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Systems\BoundsSystem.h">
+      <Filter>Systems</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Systems\GravitySystem.h">
+      <Filter>Systems</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Systems\CollisionSystem.h">
       <Filter>Systems</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Engine\Engine.h">
