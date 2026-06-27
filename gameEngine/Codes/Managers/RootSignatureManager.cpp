@@ -95,3 +95,35 @@ void RootSignatureManager::CreateSceneRootSignature()
 
     mRootSignatures[RootSignatureType::Scene] = rootSig;
 }
+
+void RootSignatureManager::CreateCommandSignature()
+{
+    // 1. 간접 명령 버퍼에 들어갈 구조체를 정확히 정의
+    struct IndirectCommand
+    {
+        D3D12_GPU_VIRTUAL_ADDRESS cbv;              // ConstantBufferView 주소
+        D3D12_DRAW_ARGUMENTS      drawArguments;    // Draw 파라미터
+    };
+
+    // 2. Command Signature 생성
+    D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[2] = {};
+
+    argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW;
+    argumentDescs[0].ConstantBufferView.RootParameterIndex = 0;   // Root Signature의 해당 인덱스
+
+    argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+
+    D3D12_COMMAND_SIGNATURE_DESC cmdSigDesc = {};
+    cmdSigDesc.pArgumentDescs = argumentDescs;
+    cmdSigDesc.NumArgumentDescs = _countof(argumentDescs);
+    cmdSigDesc.ByteStride = sizeof(IndirectCommand);        // 가장 중요!
+
+    ComPtr<ID3D12CommandSignature> commandSignature;
+    mDevice->CreateCommandSignature(
+        &cmdSigDesc,
+        nullptr,
+        IID_PPV_ARGS(&commandSignature)
+    );
+
+    mRootSignatures[RootSignatureType::Command] = commandSignature;
+}

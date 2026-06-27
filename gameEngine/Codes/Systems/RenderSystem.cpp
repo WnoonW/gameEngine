@@ -96,3 +96,14 @@ void RenderSystem::render(ECS::World& world,
             }
         });
 }
+
+/*void RenderSystem::renderExecuteIndirect(ID3D12GraphicsCommandList* cmdList)
+{
+	cmdList->ExecuteIndirect(
+		mCommandSignature.Get(),
+		1,
+		mCommandBuffer.Get(),
+		0,
+		nullptr,
+		0);
+}*/

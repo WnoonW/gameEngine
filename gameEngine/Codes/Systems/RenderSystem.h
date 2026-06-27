@@ -20,4 +20,6 @@ public:
         int currentFrameIndex,
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);
+
+    void renderExecuteIndirect(ID3D12GraphicsCommandList* cmdList);
 };
