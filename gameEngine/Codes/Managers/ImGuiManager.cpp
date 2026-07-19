@@ -46,6 +46,7 @@ bool ImGuiManager::Initialize(
     ID3D12CommandQueue* commandQueue,
     UINT numFramesInFlight,
     DXGI_FORMAT rtvFormat,
+    DXGI_FORMAT depthFormat,
     DescriptorAllocator& globalDescriptorAllocator,
     IFunctionCallback* callback)
 {
@@ -54,13 +55,19 @@ bool ImGuiManager::Initialize(
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     LoadUIFonts(io);
 
     static DescriptorAllocator* s_DescriptorAllocator = nullptr;
     s_DescriptorAllocator = &globalDescriptorAllocator;
 
+    m_Device = device;
+    // ClipCursor/ClientToScreen 변환에 필요. 창 위치 변경 시 스크린 좌표를 다시 계산한다.
+    m_Hwnd = hwnd;
     m_Callback = callback;
+    m_DescriptorAllocator = &globalDescriptorAllocator;
+    mDepthFormat = depthFormat;
 
     ImGui_ImplDX12_InitInfo init_info = {};
     init_info.Device = device;
@@ -91,6 +98,8 @@ bool ImGuiManager::Initialize(
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX12_Init(&init_info);
 
+    mSceneViewport.Initialize(device, globalDescriptorAllocator, rtvFormat, depthFormat);
+
     return true;
 }
 
@@ -113,7 +122,7 @@ namespace
     };
 }
 
-void ImGuiManager::CustomUI(Engine* engine)
+/*void ImGuiManager::CustomUI(Engine* engine)
 {
     ImGui::Begin("V3.0-UI Debug Window");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
@@ -293,13 +302,210 @@ void ImGuiManager::CustomUI(Engine* engine)
     }
 
     ImGui::End();
+}*/
+
+#pragma region docking UI
+// ==================== Step 1: DockSpace 구조 ====================
+
+void ImGuiManager::SetupDockspace()
+{
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+
+    ImGuiWindowFlags window_flags =
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+        ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
+
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("##MainDockSpace", nullptr, window_flags);
+    ImGui::PopStyleVar(2);
+
+    ImGuiID dockspace_id = ImGui::GetID("EditorDockSpace");
+    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+
+    // 최초 실행 시 레이아웃 자동 배치
+    static bool first_time = true;
+    if (first_time)
+    {
+        first_time = false;
+
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+
+        ImGuiID dock_id_left, dock_id_right, dock_id_down, dock_id_center;
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.20f, &dock_id_left, &dock_id_center);
+        ImGui::DockBuilderSplitNode(dock_id_center, ImGuiDir_Right, 0.25f, &dock_id_right, &dock_id_center);
+        ImGui::DockBuilderSplitNode(dock_id_center, ImGuiDir_Down, 0.30f, &dock_id_down, &dock_id_center);
+
+        ImGui::DockBuilderDockWindow("Scene", dock_id_center);
+        ImGui::DockBuilderDockWindow("Hierarchy", dock_id_left);
+        ImGui::DockBuilderDockWindow("Inspector", dock_id_right);
+        ImGui::DockBuilderDockWindow("Project", dock_id_down);
+
+        ImGui::DockBuilderFinish(dockspace_id);
+    }
+
+    ImGui::End();
 }
+
+// ==================== 각 패널 ====================
+
+void ImGuiManager::DrawScenePanel()
+{
+    ImGui::Begin("Scene");
+
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const UINT width = static_cast<UINT>((std::max)(1.0f, avail.x));
+    const UINT height = static_cast<UINT>((std::max)(1.0f, avail.y));
+    mDesiredSceneWidth = width;
+    mDesiredSceneHeight = height;
+
+    // 매 프레임 초기화. 아래 Image/placeholder 기준으로 다시 채운다.
+    // 이유: 패널이 안 그려지거나 가려진 프레임에 이전 hover/click이 남지 않게 하기 위함.
+    mSceneHovered = false;
+    mSceneClientRectValid = false;
+
+    if (mSceneViewport.IsValid())
+    {
+        // GPU handle stays stable across Resize (SRV descriptor reused).
+        ImTextureID texId = (ImTextureID)mSceneViewport.GetSrvGpu().ptr;
+        ImGui::Image(texId, avail);
+
+        // Image 아이템 기준으로 hover/영역/클릭을 읽는다.
+        // 이유: 창 타이틀바나 다른 UI가 아니라 "Scene 뷰 본체" 클릭일 때만 마우스 고정을 켜야 함.
+        mSceneHovered = ImGui::IsItemHovered();
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+
+        // 스크린 절대좌표가 아니라 클라이언트 상대좌표로 저장한다.
+        // 이유: 창을 옮기면 스크린 좌표는 바로 무효가 되고, 이동 중 Update가 멈춰도
+        //       ClientToScreen만 다시 하면 clip/센터를 맞출 수 있음.
+        const ImVec2 vpPos = ImGui::GetMainViewport()->Pos;
+        mSceneClientMinX = min.x - vpPos.x;
+        mSceneClientMinY = min.y - vpPos.y;
+        mSceneClientMaxX = max.x - vpPos.x;
+        mSceneClientMaxY = max.y - vpPos.y;
+        mSceneClientRectValid = (mSceneClientMaxX > mSceneClientMinX && mSceneClientMaxY > mSceneClientMinY);
+
+        // 왼쪽 클릭으로 캡처 요청 플래그를 세운다 (앱 Update에서 Consume).
+        // 이유: Win32 좌표만으로는 도킹된 Scene 패널 위인지 알기 어렵고, ImGui 아이템 hit-test가 정확함.
+        if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            mSceneCaptureClick = true;
+    }
+    else
+    {
+        ImGui::TextDisabled("Scene render target not ready (%u x %u)", width, height);
+    }
+
+    ImGui::End();
+}
+
+bool ImGuiManager::ConsumeSceneCaptureClick()
+{
+    // 한 번 읽으면 내린다. 이유: 같은 클릭으로 매 프레임 마우스 룩을 재진입하지 않게 하기 위함.
+    const bool clicked = mSceneCaptureClick;
+    mSceneCaptureClick = false;
+    return clicked;
+}
+
+bool ImGuiManager::TryGetSceneClientRect(RECT& outRect) const
+{
+    if (!mSceneClientRectValid)
+        return false;
+
+    outRect.left = static_cast<LONG>(mSceneClientMinX);
+    outRect.top = static_cast<LONG>(mSceneClientMinY);
+    outRect.right = static_cast<LONG>(mSceneClientMaxX);
+    outRect.bottom = static_cast<LONG>(mSceneClientMaxY);
+    return outRect.right > outRect.left && outRect.bottom > outRect.top;
+}
+
+bool ImGuiManager::TryGetSceneScreenRect(RECT& outRect) const
+{
+    // 저장은 클라이언트 좌표, 사용 시점에 현재 창 위치로 스크린 변환한다.
+    // 이유: 창 이동 직후에도 마지막 Scene 레이아웃을 새 스크린 위치에 바로 적용 가능.
+    if (!m_Hwnd)
+        return false;
+
+    RECT clientRect{};
+    if (!TryGetSceneClientRect(clientRect))
+        return false;
+
+    POINT tl{ clientRect.left, clientRect.top };
+    POINT br{ clientRect.right, clientRect.bottom };
+    if (!ClientToScreen(m_Hwnd, &tl) || !ClientToScreen(m_Hwnd, &br))
+        return false;
+
+    outRect.left = tl.x;
+    outRect.top = tl.y;
+    outRect.right = br.x;
+    outRect.bottom = br.y;
+    return outRect.right > outRect.left && outRect.bottom > outRect.top;
+}
+
+void ImGuiManager::EnsureSceneViewport(const std::function<void()>& flushGpu)
+{
+    if (!m_Device)
+        return;
+
+    const UINT width = (std::max)(1u, mDesiredSceneWidth);
+    const UINT height = (std::max)(1u, mDesiredSceneHeight);
+
+    if (mSceneViewport.IsValid()
+        && mSceneViewport.GetWidth() == width
+        && mSceneViewport.GetHeight() == height)
+    {
+        return;
+    }
+
+    if (flushGpu)
+        flushGpu();
+
+    mSceneViewport.Resize(width, height);
+}
+
+void ImGuiManager::DrawHierarchyPanel()
+{
+    ImGui::Begin("Hierarchy");
+    ImGui::Text("Entity List will be here");
+    // 나중에 ForEach로 엔티티 목록 띄울 예정
+    ImGui::End();
+}
+
+void ImGuiManager::DrawInspectorPanel()
+{
+    ImGui::Begin("Inspector");
+    ImGui::Text("Selected Object Properties");
+    ImGui::End();
+}
+
+void ImGuiManager::DrawProjectPanel()
+{
+    ImGui::Begin("Project");
+    ImGui::Text("Assets / Meshes / Materials");
+    ImGui::End();
+}
+#pragma endregion 
 
 void ImGuiManager::Shutdown()
 {
+    mSceneViewport.Shutdown();
+
     ImGui_ImplDX12_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+
+    m_Device = nullptr;
+    m_Hwnd = nullptr;
+    m_DescriptorAllocator = nullptr;
+    m_Callback = nullptr;
 }
 
 void ImGuiManager::NewFrame()

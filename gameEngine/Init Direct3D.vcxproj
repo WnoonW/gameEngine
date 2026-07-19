@@ -102,7 +102,7 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\API\imgui-master\imgui-master;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\API\imgui-docking\imgui-docking;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -137,7 +137,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\API\imgui-master\imgui-master;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\API\imgui-docking\imgui-docking;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -150,13 +150,13 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp" />
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp" />
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp" />
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp" />
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp" />
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp" />
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_demo.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_tables.cpp" />
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_widgets.cpp" />
     <ClCompile Include="Codes\Common\Camera.cpp" />
     <ClCompile Include="Codes\Common\d3dApp.cpp" />
     <ClCompile Include="Codes\Common\d3dUtil.cpp" />
@@ -167,6 +167,7 @@
     <ClCompile Include="Codes\Engine\Engine.cpp" />
     <ClCompile Include="Codes\File_IO\ResourceLoader.cpp" />
     <ClCompile Include="Codes\Managers\ImGuiManager.cpp" />
+    <ClCompile Include="Codes\Managers\SceneViewport.cpp" />
     <ClCompile Include="Codes\Managers\MaterialManager.cpp" />
     <ClCompile Include="Codes\Managers\MeshManager.cpp" />
     <ClCompile Include="Codes\Managers\PipelineStateManager.cpp" />
@@ -181,10 +182,12 @@
     <ClCompile Include="InitDirect3DApp.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h" />
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h" />
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h" />
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_internal.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imstb_rectpack.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imstb_textedit.h" />
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imstb_truetype.h" />
     <ClInclude Include="Codes\Common\Camera.h" />
     <ClInclude Include="Codes\Common\d3dApp.h" />
     <ClInclude Include="Codes\Common\d3dUtil.h" />
@@ -204,6 +207,7 @@
     <ClInclude Include="Codes\Engine\Engine.h" />
     <ClInclude Include="Codes\File_IO\ResourceLoader.h" />
     <ClInclude Include="Codes\Managers\ImGuiManager.h" />
+    <ClInclude Include="Codes\Managers\SceneViewport.h" />
     <ClInclude Include="Codes\Managers\MaterialManager.h" />
     <ClInclude Include="Codes\Managers\MeshManager.h" />
     <ClInclude Include="Codes\Managers\PipelineStateManager.h" />

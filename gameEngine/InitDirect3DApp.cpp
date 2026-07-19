@@ -106,6 +106,8 @@ private:
 	void SetMouseLookActive(bool active);
 	void CenterMouseCursor();
 	void UpdateCursorClip();
+	// 창 이동/리사이즈 후에도 clip·커서 중앙을 현재 Scene 스크린 위치에 맞춤.
+	void RefreshMouseLookCursorPlacement();
 	void SyncMouseLookState();
 	void RegisterMouseRawInput();
 
@@ -120,7 +122,8 @@ private:
 	XMFLOAT4X4 mView = {};
 	XMFLOAT4X4 mProj = {};
 	bool mMouseLookActive = false;
-	bool mMouseLookRequested = true;
+	// false로 시작: 앱 실행 직후부터 커서를 가두고 있으면 창 크기 조절/UI 클릭이 안 됨.
+	bool mMouseLookRequested = false;
 	float mPendingMouseDx = 0.0f;
 	float mPendingMouseDy = 0.0f;
 
@@ -216,8 +219,11 @@ void InitDirect3DApp::OnResize()
 	XMMATRIX proj = XMMatrixPerspectiveFovLH(fovY, aspect, 0.1f, 1000.0f);
 	XMStoreFloat4x4(&mProj, proj);
 
+	// 스왑체인 리사이즈 직후 clip/센터를 현재 창 위치로 재적용.
+	// 이유: 이동/최대화 후 이전 스크린 좌표 clip이 남으면 커서가 창 밖에 묶임.
+	// 클라이언트 상대 Scene rect + ClientToScreen 변환이라 창 위치는 즉시 반영됨.
 	if (mMouseLookActive)
-		UpdateCursorClip();
+		RefreshMouseLookCursorPlacement();
 }
 
 void InitDirect3DApp::RegisterMouseRawInput()
@@ -232,6 +238,29 @@ void InitDirect3DApp::RegisterMouseRawInput()
 
 LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+	// ESC는 기본 MsgProc에서 앱 종료로 처리된다.
+	// 마우스 룩 중에는 종료 대신 고정만 풀어 에디터 UI/창 조절이 가능하게 한다.
+	if (msg == WM_KEYUP && wParam == VK_ESCAPE)
+	{
+		if (mMouseLookRequested || mMouseLookActive)
+		{
+			mMouseLookRequested = false;
+			// 요청 플래그와 실제 캡처 상태를 같이 끈다.
+			// 이유: 플래그만 끄면 다음 Sync/ACTIVATE에서 다시 켜질 수 있음.
+			SetMouseLookActive(false);
+			return 0;
+		}
+		// 룩이 꺼진 상태의 ESC는 기존처럼 base에서 종료 처리.
+	}
+
+	// 창 이동/크기 변경 중에는 Update가 pause되어 clip이 옛 스크린 좌표에 남을 수 있음.
+	// 메시지 시점에 바로 재배치한다. 이유: pause 루프는 Sleep만 하고 DrawScenePanel을 안 돌림.
+	if (mMouseLookActive
+		&& (msg == WM_MOVE || msg == WM_SIZE || msg == WM_EXITSIZEMOVE || msg == WM_DISPLAYCHANGE))
+	{
+		RefreshMouseLookCursorPlacement();
+	}
+
 	if (msg == WM_ACTIVATE)
 	{
 		if (LOWORD(wParam) == WA_INACTIVE)
@@ -271,14 +300,20 @@ LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
-	mImGuiManager.CustomUI(&mEngine);
-	mManipulateSelected = mImGuiManager.IsManipulateSelected();
-	if (mManipulateSelected && !mWasManipulateSelected
-		&& mEngine.GetSelectedEntity() != INVALID_ENTITY)
+	mImGuiManager.SetupDockspace(); 
+	mImGuiManager.DrawScenePanel();
+	mImGuiManager.DrawHierarchyPanel();
+	mImGuiManager.DrawInspectorPanel();
+	mImGuiManager.DrawProjectPanel();
+
+	// Scene 패널 Image를 좌클릭하면 마우스 룩 요청을 켠다.
+	// 이유: 전역 기본 고정 대신, 사용자가 Scene을 조작하겠다고 명시할 때만 커서를 가둔다.
+	if (mImGuiManager.ConsumeSceneCaptureClick())
 	{
-		InitializeOrbitFromSelection();
+		mMouseLookRequested = true;
+		// 클릭 직후 바로 캡처를 걸어 첫 프레임부터 시야 조작이 되게 함.
+		SyncMouseLookState();
 	}
-	mWasManipulateSelected = mManipulateSelected;
 
 	float dt = gt.DeltaTime();
 	if (dt > 0.033f)
@@ -287,6 +322,8 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	UpdateCamera(dt);
 	mEngine.Update(dt);
 
+	// 패널 리사이즈로 Scene 영역이 바뀌면 clip rect도 다시 맞춰야 함.
+	// 이유: ClipCursor가 옛 Scene 박스에 묶여 있으면 커서가 어색하게 막힘.
 	SyncMouseLookState();
 }
 
@@ -444,27 +481,33 @@ void InitDirect3DApp::BeginFrame()
 		}
 	}
 
+	// Scene RT 리사이즈는 커맨드 리스트가 열리기 전에 처리 (GPU idle 보장)
+	mImGuiManager.EnsureSceneViewport([this]() { FlushCommandQueue(); });
+
 	// 3. Allocator + CommandList Reset
 	ThrowIfFailed(mCurrFrameResource->CmdListAlloc->Reset());
 	ThrowIfFailed(mCommandList->Reset(mCurrFrameResource->CmdListAlloc.Get(), nullptr));
 
-	// 4. 렌더 타겟 준비 (BeginFrame에 두는 건 임시, 나중에 Draw로 옮겨도 됨)
+	// 4. 백버퍼는 에디터 UI(ImGui)용. 3D는 Scene offscreen RT에 그림.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
 		CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
-	mCommandList->RSSetViewports(1, &mScreenViewport);
-	mCommandList->RSSetScissorRects(1, &mScissorRect);
-
-	mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
-	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+	const float editorClear[] = { 0.12f, 0.12f, 0.14f, 1.0f };
+	mCommandList->ClearRenderTargetView(CurrentBackBufferView(), editorClear, 0, nullptr);
 }
 
 void InitDirect3DApp::Draw(const GameTimer& gt)
 {
 	XMMATRIX view = XMLoadFloat4x4(&mView);
-	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+
+	// === Scene 패널 비율로 projection 재계산 ===
+	SceneViewport& sceneVP = mImGuiManager.GetSceneViewport();
+	const float aspect = sceneVP.IsValid() ? sceneVP.GetAspectRatio() : AspectRatio();
+	const float fovY = 2.0f * atanf(tanf(XMConvertToRadians(70.0f) * 0.5f) / aspect);
+	XMMATRIX proj = XMMatrixPerspectiveFovLH(fovY, aspect, 0.1f, 1000.0f);
+	XMStoreFloat4x4(&mProj, proj);
+	mCurrentView = view;
+	mCurrentProj = proj;
 
 	// === ECS CameraComponent 동기화 (mView 기준 실제 시선 방향) ===
 	if (mMainCamera != INVALID_ENTITY)
@@ -477,16 +520,33 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 		mEngine.SetCameraTransform(mMainCamera, camPos, { camPitch, camYaw, 0.0f });
 	}
 
-	// === PassCB 채우기 (ECS의 CameraComponent 활용하여 EyePos, Near/Far 등 채움) ===
-	mEngine.FillPassCB(mCurrFrameResource, view, proj,
-		static_cast<float>(mClientWidth),
-		static_cast<float>(mClientHeight),
-		AspectRatio(),
-		gt.TotalTime(),
-		gt.DeltaTime());
+	// === 1) Scene offscreen RT에 3D 렌더 ===
+	if (sceneVP.IsValid())
+	{
+		const float sceneClear[] = {
+			Colors::LightSteelBlue.f[0],
+			Colors::LightSteelBlue.f[1],
+			Colors::LightSteelBlue.f[2],
+			Colors::LightSteelBlue.f[3]
+		};
+		sceneVP.Begin(mCommandList.Get(), sceneClear);
 
-	// === Engine을 통해 렌더링 ===
-	mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
+		mEngine.FillPassCB(mCurrFrameResource, view, proj,
+			static_cast<float>(sceneVP.GetWidth()),
+			static_cast<float>(sceneVP.GetHeight()),
+			aspect,
+			gt.TotalTime(),
+			gt.DeltaTime());
+
+		mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
+
+		sceneVP.End(mCommandList.Get());
+	}
+
+	// === 2) 백버퍼에 ImGui (Scene 패널이 offscreen 결과를 Image로 표시) ===
+	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, nullptr);
+	mCommandList->RSSetViewports(1, &mScreenViewport);
+	mCommandList->RSSetScissorRects(1, &mScissorRect);
 
 	mImGuiManager.Render(mCommandList.Get());
 }
@@ -520,7 +580,7 @@ void InitDirect3DApp::InitializeCoreSystems()
 	mGlobalDescriptorAllocator.Initialize(md3dDevice.Get(), 8192);
 
 	mImGuiManager.Initialize(mhMainWnd, md3dDevice.Get(), mCommandQueue.Get(),
-		gNumFrameResources, mBackBufferFormat, mGlobalDescriptorAllocator, this);
+		gNumFrameResources, mBackBufferFormat, mDepthStencilFormat, mGlobalDescriptorAllocator, this);
 
 	// === Engine 초기화 ===
 	mEngine.Initialize(md3dDevice.Get(), mFrameResources, gNumFrameResources, mGlobalDescriptorAllocator);
@@ -588,20 +648,34 @@ void InitDirect3DApp::CreateInitialScene()
 void InitDirect3DApp::SetMouseLookActive(bool active)
 {
 	if (mMouseLookActive == active)
+	{
+		// 이미 켜져 있어도 매 프레임 clip/센터를 갱신한다.
+		// 이유: Scene 패널 크기 변경 + 창 이동이 Update 경로로만 올 때도 즉시 반영.
+		if (active)
+			RefreshMouseLookCursorPlacement();
 		return;
+	}
 
 	mMouseLookActive = active;
+	ImGuiIO& io = ImGui::GetIO();
 	if (active)
 	{
+		// 마우스 룩 중 ImGui가 마우스 이벤트를 먹으면 도킹 패널이 드래그될 수 있음.
+		// 이유: 커서 숨김+캡처 상태에서도 ImGui는 Scene 위 마우스를 계속 받음.
+		io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+
 		while (ShowCursor(FALSE) >= 0) {}
 		SetCapture(mhMainWnd);
-		CenterMouseCursor();
-		UpdateCursorClip();
+		RefreshMouseLookCursorPlacement();
 	}
 	else
 	{
+		// 룩 해제 시 ImGui 마우스 입력 복구 — UI 클릭/창 조작 가능해야 함.
+		io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+
 		while (ShowCursor(TRUE) < 0) {}
 		ReleaseCapture();
+		// clip 해제로 OS가 창 테두리/바깥으로 커서 이동 허용 → 창 크기 조절 가능.
 		ClipCursor(nullptr);
 	}
 }
@@ -610,6 +684,20 @@ void InitDirect3DApp::CenterMouseCursor()
 {
 	if (!mhMainWnd)
 		return;
+
+	// 가능하면 Scene 뷰 중앙으로 보낸다.
+	// 이유: 전체 클라이언트 중앙은 Hierarchy/Inspector 쪽일 수 있어, 고정 범위(Scene)와 맞춤.
+	// TryGetSceneScreenRect는 호출 시점 ClientToScreen을 쓰므로 창 이동 후에도 맞음.
+	RECT sceneRect{};
+	if (mImGuiManager.TryGetSceneScreenRect(sceneRect))
+	{
+		const POINT center{
+			(sceneRect.left + sceneRect.right) / 2,
+			(sceneRect.top + sceneRect.bottom) / 2
+		};
+		SetCursorPos(center.x, center.y);
+		return;
+	}
 
 	POINT center{
 		mClientWidth / 2,
@@ -624,37 +712,91 @@ void InitDirect3DApp::UpdateCursorClip()
 	if (!mhMainWnd)
 		return;
 
+	// Scene 패널 Image 영역으로만 커서를 가둔다.
+	// 이유: 전체 창 clip이면 룩 중에도 창 가장자리 동작이 꼬이고, 요청은 "Scene에만 고정"임.
+	// 스크린 RECT는 매번 현재 창 위치 기준으로 재계산된다.
+	RECT sceneRect{};
+	if (mImGuiManager.TryGetSceneScreenRect(sceneRect))
+	{
+		ClipCursor(&sceneRect);
+		return;
+	}
+
+	// Scene rect가 아직 없으면(첫 프레임 등) 임시로 클라이언트 전체.
+	// 이유: clip 없이 SetCapture만 하면 커서가 창 밖으로 나가 입력이 끊길 수 있음.
 	RECT rect{};
 	GetClientRect(mhMainWnd, &rect);
 	MapWindowPoints(mhMainWnd, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&rect), 2);
 	ClipCursor(&rect);
 }
 
+void InitDirect3DApp::RefreshMouseLookCursorPlacement()
+{
+	// clip 범위와 커서 중앙을 한 묶음으로 갱신.
+	// 이유: 창만 옮기고 clip만 바꾸면 커서가 새 영역 밖에 남아 ClipCursor가 이상 동작할 수 있음.
+	if (!mMouseLookActive)
+		return;
+
+	UpdateCursorClip();
+	CenterMouseCursor();
+}
+
 void InitDirect3DApp::SyncMouseLookState()
 {
+	// WantCaptureMouse 조건은 제거했다.
+	// 이유: Scene 자체가 ImGui 창이라, 그 조건을 쓰면 Scene 클릭 후에도 룩이 바로 꺼짐.
+	// pause 중에는 끄지 않는다.
+	// 이유: 이동/리사이즈 중 Update가 안 돌아 Sync로 끄는 경로가 없고,
+	//       메시지 핸들러의 RefreshMouseLookCursorPlacement가 clip을 유지/갱신한다.
+	//       pause 때 강제로 끄면 EXITSIZEMOVE 전후로 커서 표시가 깜빡임.
 	const bool wantActive = mMouseLookRequested
-		&& !ImGui::GetIO().WantCaptureMouse
-		&& GetForegroundWindow() == mhMainWnd
-		&& !mAppPaused;
+		&& GetForegroundWindow() == mhMainWnd;
 	SetMouseLookActive(wantActive);
 }
 
 void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
-	if (btnState & MK_MBUTTON)
-	{
-		mMouseLookRequested = !mMouseLookRequested;
-		SyncMouseLookState();
-	}
+	// 휠 클릭 토글은 제거/비활성.
+	// 이유: 진입은 Scene 좌클릭, 해제는 ESC로 통일해 입력 경로를 단순화함.
 
 	if (btnState & MK_RBUTTON)
 	{
-		if (ImGui::GetIO().WantCaptureMouse)
+		// 마우스 룩 중이 아닐 때만 ImGui 점유를 존중한다.
+		// 이유: 룩 중에는 NoMouse로 ImGui를 끄지만, 자유 모드에서는 UI 위 우클릭이 피킹되면 안 됨.
+		if (!mMouseLookActive && ImGui::GetIO().WantCaptureMouse)
 			return;
 
-		const int pickX = mMouseLookActive ? mClientWidth / 2 : x;
-		const int pickY = mMouseLookActive ? mClientHeight / 2 : y;
-		Entity picked = mEngine.PickObject(pickX, pickY, (float)mClientWidth, (float)mClientHeight, mCurrentView, mCurrentProj);
+		// 피킹 해상도는 Scene RT 기준으로 맞춘다 (창 전체가 아님).
+		// 이유: 3D는 Scene offscreen에 그려지므로 pick 정규화도 그 크기여야 함.
+		const SceneViewport& sceneVP = mImGuiManager.GetSceneViewport();
+		const int pickW = sceneVP.IsValid() ? static_cast<int>(sceneVP.GetWidth()) : mClientWidth;
+		const int pickH = sceneVP.IsValid() ? static_cast<int>(sceneVP.GetHeight()) : mClientHeight;
+
+		int pickX = x;
+		int pickY = y;
+		if (mMouseLookActive)
+		{
+			// 룩 중 커서는 Scene 중앙에 있으므로 중앙 픽셀로 피킹.
+			pickX = pickW / 2;
+			pickY = pickH / 2;
+		}
+		else
+		{
+			// 자유 모드: 창 클라이언트 좌표 → Scene 이미지 로컬 좌표.
+			// 이유: OnMouseDown의 x,y는 윈도우 클라이언트 기준이고, Scene Image는 그 안 일부임.
+			RECT sceneScreen{};
+			if (mImGuiManager.TryGetSceneScreenRect(sceneScreen))
+			{
+				POINT pt{ x, y };
+				ClientToScreen(mhMainWnd, &pt);
+				pickX = pt.x - sceneScreen.left;
+				pickY = pt.y - sceneScreen.top;
+				if (pickX < 0 || pickY < 0 || pickX >= pickW || pickY >= pickH)
+					return;
+			}
+		}
+
+		Entity picked = mEngine.PickObject(pickX, pickY, (float)pickW, (float)pickH, mCurrentView, mCurrentProj);
 		if (picked != INVALID_ENTITY)
 		{
 			OutputDebugStringA("Object picked!\n");
@@ -779,7 +921,7 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 	}
 	else if (action == ButtonAction::ToggleManipulateSelected)
 	{
-		mManipulateSelected = mImGuiManager.IsManipulateSelected();
+		//mManipulateSelected = mImGuiManager.IsManipulateSelected();
 	}
 	else if (action == ButtonAction::SpawnSelectedMesh)
 	{

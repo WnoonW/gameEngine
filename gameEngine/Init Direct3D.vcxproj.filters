@@ -75,28 +75,10 @@
     <ClCompile Include="Codes\Common\MathHelper.cpp">
       <Filter>Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_demo.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_draw.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_tables.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\API\imgui-master\imgui-master\imgui_widgets.cpp">
-      <Filter>IMGUI\ect</Filter>
-    </ClCompile>
     <ClCompile Include="Codes\Managers\ImGuiManager.cpp">
+      <Filter>Managers</Filter>
+    </ClCompile>
+    <ClCompile Include="Codes\Managers\SceneViewport.cpp">
       <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Codes\Managers\MeshManager.cpp">
@@ -137,6 +119,27 @@
     </ClCompile>
     <ClCompile Include="Codes\Managers\ResourceManager.cpp">
       <Filter>Managers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_demo.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_draw.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_tables.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_widgets.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\backends\imgui_impl_dx12.cpp">
+      <Filter>IMGUI\ect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\API\imgui-docking\imgui-docking\backends\imgui_impl_win32.cpp">
+      <Filter>IMGUI\ect</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -185,19 +188,10 @@
     <ClInclude Include="Codes\ECS\Registry.h">
       <Filter>ECS</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui.h">
-      <Filter>IMGUI\ect</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_dx12.h">
-      <Filter>IMGUI\ect</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\backends\imgui_impl_win32.h">
-      <Filter>IMGUI\ect</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\..\API\imgui-master\imgui-master\imgui_internal.h">
-      <Filter>IMGUI\ect</Filter>
-    </ClInclude>
     <ClInclude Include="Codes\Managers\ImGuiManager.h">
+      <Filter>Managers</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\Managers\SceneViewport.h">
       <Filter>Managers</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\MeshManager.h">
@@ -251,6 +245,24 @@
     <ClInclude Include="Codes\Managers\ResourceManager.h">
       <Filter>Managers</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imgui_internal.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imstb_rectpack.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imstb_textedit.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\imstb_truetype.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\API\imgui-docking\imgui-docking\backends\imgui_impl_dx12.h">
+      <Filter>IMGUI\ect</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\color.hlsl">
@@ -265,5 +277,6 @@
     <FxCompile Include="Resources\Shaders\instancing.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Resources\Shaders\object_cb.hlsl" />
   </ItemGroup>
 </Project>
