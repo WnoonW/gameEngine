@@ -140,15 +140,24 @@ void MeshManager::ResolveMeshMaterials(Mesh* mesh)
 
 	for (auto& [key, submesh] : mesh->DrawArgs)
 	{
+		Material* resolved = nullptr;
 		if (!submesh.initMaterialName.empty())
 		{
-			auto mat = MaterialManager::Get().GetMaterial(submesh.initMaterialName);
-			submesh.initMaterial = mat ? mat.get() : MaterialManager::Get().GetDefaultMaterial().get();
+			if (auto mat = MaterialManager::Get().GetMaterial(submesh.initMaterialName))
+				resolved = mat->HasValidTexture() ? mat.get() : nullptr;
 		}
-		else
+
+		if (!resolved)
 		{
-			submesh.initMaterial = MaterialManager::Get().GetDefaultMaterial().get();
+			if (auto def = MaterialManager::Get().GetDefaultMaterial())
+				resolved = def->HasValidTexture() ? def.get() : nullptr;
 		}
+
+		// 이름 매칭/기본 머티리얼 실패 → 마젠타 디버그 머티리얼
+		if (!resolved)
+			resolved = MaterialManager::Get().GetMissingTextureMaterial();
+
+		submesh.initMaterial = resolved;
 	}
 }
 

@@ -81,7 +81,10 @@ void RenderSystem::render(ECS::World& world,
             {
                 const auto& sub = pair.second;
                 Material* material = MaterialManager::Get().ResolveForDraw(e, pair.first, sub.initMaterial);
-                if (!material) continue;
+                // ResolveForDraw는 실패 시 마젠타 디버그 머티리얼을 돌려줌.
+                // 그래도 null이면(초기화 전 등) 해당 서브메시만 스킵.
+                if (!material || !material->HasValidTexture())
+                    continue;
 
                 // ObjectCB 직접 바인딩 (b0)
                 cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);

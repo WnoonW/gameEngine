@@ -62,13 +62,8 @@ VertexOut VS(VertexIn vin)
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    float4 color = gTexture.Sample(gSampler, pin.TexC);
-
-    // 텍스처 값을 제대로 받지 못한 경우 (black에 가까운 샘플) 보라색(magenta)으로 표시
-    // 디버그용: texture binding 실패나 잘못된 uv 등을 쉽게 파악할 수 있게 함
-    if (color.r < 0.01f && color.g < 0.01f && color.b < 0.01f) {
-        return float4(1.0f, 0.0f, 1.0f, 1.0f);
-    }
-
-    return color;
+    // 샘플 그대로 출력.
+    // 바인딩/해석 실패 디버그는 CPU에서 마젠타 1x1 텍스처 머티리얼을 붙이는 방식으로 처리
+    // (정상 검정 알베도를 "실패"로 오인하지 않음).
+    return gTexture.Sample(gSampler, pin.TexC);
 }

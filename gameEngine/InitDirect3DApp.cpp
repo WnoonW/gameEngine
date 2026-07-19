@@ -591,6 +591,10 @@ void InitDirect3DApp::InitializeCoreSystems()
 // =====================================================
 void InitDirect3DApp::LoadAssets()
 {
+	// 바인딩 실패 시 쓸 마젠타 1x1 디버그 머티리얼 (다른 머티리얼보다 먼저)
+	MaterialManager::Get().EnsureMissingTextureMaterial(
+		md3dDevice.Get(), mCommandList.Get(), mGlobalDescriptorAllocator);
+
 	// Material 로딩
 	MaterialManager::Get().CreateMaterial("Default", L"Resources/Textures/bricks.dds",
 		md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
