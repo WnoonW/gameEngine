@@ -44,7 +44,8 @@ ID3D12CommandSignature* RootSignatureManager::GetSceneCommandSignature()
 
 void RootSignatureManager::CreateSceneRootSignature()
 {
-    CD3DX12_ROOT_PARAMETER slotRootParameter[3];
+    // b0 ObjectCB | b1 PassCB | table t0 texture | root SRV t1 instances
+    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
 
     slotRootParameter[0].InitAsConstantBufferView(0);
     slotRootParameter[1].InitAsConstantBufferView(1);
@@ -57,6 +58,7 @@ void RootSignatureManager::CreateSceneRootSignature()
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
     slotRootParameter[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
+    slotRootParameter[3].InitAsShaderResourceView(1); // t1 instance worlds
 
     CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
         0,
@@ -66,7 +68,7 @@ void RootSignatureManager::CreateSceneRootSignature()
         D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        3, slotRootParameter,
+        4, slotRootParameter,
         1, &samplerDesc,
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
@@ -96,15 +98,16 @@ void RootSignatureManager::CreateSceneRootSignature()
 
 void RootSignatureManager::CreateIndirectBuildRootSignature()
 {
-    // b0 constants | t0 requests (root SRV) | u0 commands | u1 counter
-    CD3DX12_ROOT_PARAMETER params[4];
+    // b0 | t0 requests | u0 instances | u1 counter | u2 drawCmd
+    CD3DX12_ROOT_PARAMETER params[5];
     params[0].InitAsConstantBufferView(0);
     params[1].InitAsShaderResourceView(0);
     params[2].InitAsUnorderedAccessView(0);
     params[3].InitAsUnorderedAccessView(1);
+    params[4].InitAsUnorderedAccessView(2);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(
-        4, params,
+        5, params,
         0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
@@ -129,21 +132,19 @@ void RootSignatureManager::CreateIndirectBuildRootSignature()
 
 void RootSignatureManager::CreateSceneCommandSignature()
 {
-    ID3D12RootSignature* sceneRS = GetRootSignature(RootSignatureType::Scene);
-
-    D3D12_INDIRECT_ARGUMENT_DESC args[2] = {};
-    args[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW;
-    args[0].ConstantBufferView.RootParameterIndex = 0; // ObjectCB b0
-    args[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+    // Instanced path: DRAW_INDEXED only (worlds in t1 SRV)
+    D3D12_INDIRECT_ARGUMENT_DESC args[1] = {};
+    args[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
 
     D3D12_COMMAND_SIGNATURE_DESC desc = {};
     desc.pArgumentDescs = args;
-    desc.NumArgumentDescs = _countof(args);
+    desc.NumArgumentDescs = 1;
     desc.ByteStride = sizeof(IndirectCommand);
     desc.NodeMask = 0;
 
+    // DRAW_INDEXED only does not require a root signature
     ThrowIfFailed(mDevice->CreateCommandSignature(
         &desc,
-        sceneRS,
+        nullptr,
         IID_PPV_ARGS(&mSceneCommandSignature)));
 }

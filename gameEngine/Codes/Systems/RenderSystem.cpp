@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <map>
 #include <vector>
+#include <cstring>
 #include "RenderSystem.h"
 #include "MaterialManager.h"
 #include "MeshManager.h"
@@ -16,18 +17,12 @@ using namespace DirectX;
 
 namespace
 {
-    struct DrawGroupKey
+    void StoreWorldTransposed(const XMMATRIX& world, float out[16])
     {
-        Mesh* mesh = nullptr;
-        UINT64 materialGpu = 0;
-
-        bool operator<(const DrawGroupKey& o) const
-        {
-            if (mesh != o.mesh)
-                return mesh < o.mesh;
-            return materialGpu < o.materialGpu;
-        }
-    };
+        XMFLOAT4X4 m;
+        XMStoreFloat4x4(&m, XMMatrixTranspose(world));
+        std::memcpy(out, &m, sizeof(XMFLOAT4X4));
+    }
 }
 
 UINT RenderSystem::BuildCBAlignedSize()
@@ -47,13 +42,13 @@ void RenderSystem::Initialize(ID3D12Device* device)
         RootSignatureManager::Get().GetRootSignature(RootSignatureType::IndirectBuild);
 
     auto csBlob = ShaderManager::Get().GetShader(
-        L"Resources\\Shaders\\build_indirect_commands.hlsl",
-        "CS",
-        "cs_5_1");
+        L"Resources\\Shaders\\build_indirect_commands.hlsl", "CS", "cs_5_1");
+    auto csFinBlob = ShaderManager::Get().GetShader(
+        L"Resources\\Shaders\\build_indirect_commands.hlsl", "CSFinalize", "cs_5_1");
 
-    if (!csBlob)
+    if (!csBlob || !csFinBlob)
     {
-        OutputDebugStringA("[RenderSystem] build_indirect_commands.hlsl compile failed; Indirect disabled.\n");
+        OutputDebugStringA("[RenderSystem] compute shaders failed; Indirect disabled.\n");
         mRenderPath = RenderPath::Direct;
         return;
     }
@@ -61,13 +56,37 @@ void RenderSystem::Initialize(ID3D12Device* device)
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
     psoDesc.pRootSignature = buildRS;
     psoDesc.CS = { csBlob->GetBufferPointer(), csBlob->GetBufferSize() };
-
-    HRESULT hr = mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mIndirectBuildPSO));
-    if (FAILED(hr))
+    if (FAILED(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mIndirectBuildPSO))))
     {
-        OutputDebugStringA("[RenderSystem] CreateComputePipelineState failed; Indirect disabled.\n");
         mRenderPath = RenderPath::Direct;
         return;
+    }
+
+    psoDesc.CS = { csFinBlob->GetBufferPointer(), csFinBlob->GetBufferSize() };
+    if (FAILED(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mIndirectFinalizePSO))))
+    {
+        mRenderPath = RenderPath::Direct;
+        return;
+    }
+
+    // Dummy 1-element instance buffer for Direct path root SRV binding
+    {
+        InstanceWorld dummy{};
+        StoreWorldTransposed(XMMatrixIdentity(), dummy.worldMatrix);
+
+        const UINT64 sz = sizeof(InstanceWorld);
+        ThrowIfFailed(mDevice->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(sz),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&mDummyInstanceBuffer)));
+
+        void* mapped = nullptr;
+        ThrowIfFailed(mDummyInstanceBuffer->Map(0, nullptr, &mapped));
+        std::memcpy(mapped, &dummy, sizeof(dummy));
+        mDummyInstanceBuffer->Unmap(0, nullptr);
     }
 
     mIndirectReady = true;
@@ -89,56 +108,67 @@ void RenderSystem::DestroyIndirectResources()
             f.buildCBMapped = nullptr;
         }
         f.requestUpload.Reset();
-        f.commandBuffer.Reset();
+        f.instanceBuffer.Reset();
         f.countBuffer.Reset();
+        f.drawCmdBuffer.Reset();
         f.buildCBUpload.Reset();
-        f.commandState = D3D12_RESOURCE_STATE_COMMON;
+        f.instanceState = D3D12_RESOURCE_STATE_COMMON;
         f.countState = D3D12_RESOURCE_STATE_COMMON;
+        f.drawCmdState = D3D12_RESOURCE_STATE_COMMON;
     }
     mCountZeroUpload.Reset();
+    mDummyInstanceBuffer.Reset();
 }
 
 void RenderSystem::Shutdown()
 {
     DestroyIndirectResources();
     mIndirectBuildPSO.Reset();
+    mIndirectFinalizePSO.Reset();
     mIndirectReady = false;
     mDevice = nullptr;
 }
 
 void RenderSystem::EnsureIndirectResources(ID3D12Device* device)
 {
-    if (mFrames[0].commandBuffer)
+    if (mFrames[0].instanceBuffer)
         return;
 
-    const UINT64 cmdBufSize = sizeof(IndirectCommand) * kMaxIndirectDraws;
     const UINT64 reqBufSize = sizeof(IndirectDrawRequest) * kMaxIndirectDraws;
+    const UINT64 instBufSize = sizeof(InstanceWorld) * kMaxInstancesPerDraw;
     const UINT buildCbSlot = BuildCBAlignedSize();
     const UINT64 buildCbTotal = static_cast<UINT64>(buildCbSlot) * kMaxIndirectGroups;
-    const UINT64 countBufSize = sizeof(UINT) * kMaxIndirectGroups;
 
     for (UINT fi = 0; fi < kIndirectFrameCount; ++fi)
     {
         auto& f = mFrames[fi];
 
-        // 버퍼는 COMMON으로 생성 (UAV 초기 상태는 드라이버가 무시함)
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
             D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(cmdBufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+            &CD3DX12_RESOURCE_DESC::Buffer(instBufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
             D3D12_RESOURCE_STATE_COMMON,
             nullptr,
-            IID_PPV_ARGS(&f.commandBuffer)));
-        f.commandState = D3D12_RESOURCE_STATE_COMMON;
+            IID_PPV_ARGS(&f.instanceBuffer)));
+        f.instanceState = D3D12_RESOURCE_STATE_COMMON;
 
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
             D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(countBufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+            &CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
             D3D12_RESOURCE_STATE_COMMON,
             nullptr,
             IID_PPV_ARGS(&f.countBuffer)));
         f.countState = D3D12_RESOURCE_STATE_COMMON;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(sizeof(IndirectCommand), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&f.drawCmdBuffer)));
+        f.drawCmdState = D3D12_RESOURCE_STATE_COMMON;
 
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
@@ -162,15 +192,14 @@ void RenderSystem::EnsureIndirectResources(ID3D12Device* device)
     ThrowIfFailed(device->CreateCommittedResource(
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
         D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT) * kMaxIndirectGroups),
+        &CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT)),
         D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
         IID_PPV_ARGS(&mCountZeroUpload)));
-
-    std::vector<UINT> zeros(kMaxIndirectGroups, 0);
+    UINT zero = 0;
     BYTE* mapped = nullptr;
     ThrowIfFailed(mCountZeroUpload->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
-    memcpy(mapped, zeros.data(), sizeof(UINT) * kMaxIndirectGroups);
+    std::memcpy(mapped, &zero, sizeof(UINT));
     mCountZeroUpload->Unmap(0, nullptr);
 }
 
@@ -184,7 +213,7 @@ void RenderSystem::ExtractFrustumPlanes(const XMMATRIX& viewProj, float outPlane
         { m._14 - m._11, m._24 - m._21, m._34 - m._31, m._44 - m._41 },
         { m._14 + m._12, m._24 + m._22, m._34 + m._32, m._44 + m._42 },
         { m._14 - m._12, m._24 - m._22, m._34 - m._32, m._44 - m._42 },
-        { m._13,         m._23,         m._33,         m._43         },
+        { m._13, m._23, m._33, m._43 },
         { m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43 },
     };
 
@@ -215,6 +244,7 @@ void RenderSystem::render(ECS::World& world,
     if (mRenderPath == RenderPath::Indirect
         && mIndirectReady
         && mIndirectBuildPSO
+        && mIndirectFinalizePSO
         && RootSignatureManager::Get().GetSceneCommandSignature())
     {
         renderIndirect(world, cmdList, currentFrameResource, descriptorAllocator,
@@ -252,6 +282,9 @@ void RenderSystem::renderDirect(ECS::World& world,
     if (pso)
         cmdList->SetPipelineState(pso);
 
+    if (mDummyInstanceBuffer)
+        cmdList->SetGraphicsRootShaderResourceView(3, mDummyInstanceBuffer->GetGPUVirtualAddress());
+
     if (currentFrameResource && currentFrameResource->PassCB)
     {
         cmdList->SetGraphicsRootConstantBufferView(
@@ -262,11 +295,15 @@ void RenderSystem::renderDirect(ECS::World& world,
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
             if (!rend.visible || !rend.mesh) return;
+            if (rend.objectCBIndex >= kMaxSceneObjects) return;
 
-            XMMATRIX worldMat = tf.GetWorldMatrix();
-            ObjectConstants objConst{};
-            XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(worldMat));
-            currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
+            if (tf.dirtyFrames > 0)
+            {
+                ObjectConstants objConst{};
+                XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
+                currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
+                --tf.dirtyFrames;
+            }
 
             auto objectCB = currentFrameResource->ObjectCB->Resource();
             UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
@@ -304,258 +341,132 @@ void RenderSystem::renderIndirect(ECS::World& world,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
+    // 메시 단위 인스턴싱 (CPU 업로드 + DrawIndexedInstanced).
+    // GPU compact/EI는 컬링·카운터 레이스로 화면이 비는 문제가 있어,
+    // 동일 메시 대량 복제 이득은 유지하면서 확실한 경로로 고정.
+    (void)viewMatrix;
+    (void)projMatrix;
+
     EnsureIndirectResources(mDevice);
 
-    const int frameIdx = ((currentFrameIndex % static_cast<int>(kIndirectFrameCount)) + static_cast<int>(kIndirectFrameCount))
-        % static_cast<int>(kIndirectFrameCount);
+    const int frameIdx = ((currentFrameIndex % (int)kIndirectFrameCount) + (int)kIndirectFrameCount)
+        % (int)kIndirectFrameCount;
     FrameIndirectResources& frame = mFrames[frameIdx];
 
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-    // --- 1) 수집 & 그룹 ---
-    std::map<DrawGroupKey, std::vector<IndirectDrawRequest>> groups;
+    // mesh → 인스턴스 월드 행렬들 (오브젝트당 1개)
+    std::map<Mesh*, std::vector<InstanceWorld>> meshInstances;
+    UINT totalObjects = 0;
 
-    const UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-    const D3D12_GPU_VIRTUAL_ADDRESS objectCBBase =
-        currentFrameResource->ObjectCB->Resource()->GetGPUVirtualAddress();
-
-    UINT totalRequests = 0;
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
+            (void)e;
             if (!rend.visible || !rend.mesh) return;
-            if (totalRequests >= kMaxIndirectDraws) return;
+            if (totalObjects >= kMaxInstancesPerDraw) return;
 
-            XMMATRIX worldMat = tf.GetWorldMatrix();
-            ObjectConstants objConst{};
-            XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(worldMat));
-            currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
-
-            D3D12_GPU_VIRTUAL_ADDRESS objCbv =
-                objectCBBase + (UINT64)rend.objectCBIndex * objCBByteSize;
-
-            XMFLOAT3 center{ 0, 0, 0 };
-            XMFLOAT3 extents{ 0, 0, 0 };
-            if (BoundsComponent* bounds = world.GetComponent<BoundsComponent>(e))
+            if (tf.dirtyFrames > 0 && rend.objectCBIndex < kMaxSceneObjects)
             {
-                center = bounds->worldBounds.Center;
-                extents = bounds->worldBounds.Extents;
+                ObjectConstants objConst{};
+                XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
+                currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
+                --tf.dirtyFrames;
             }
 
-            for (auto& pair : rend.mesh->DrawArgs)
-            {
-                if (totalRequests >= kMaxIndirectDraws)
-                    break;
-
-                const auto& sub = pair.second;
-                Material* material = MaterialManager::Get().ResolveForDraw(e, pair.first, sub.initMaterial);
-                if (!material || !material->HasValidTexture())
-                    continue;
-
-                IndirectDrawRequest req{};
-                req.objectCbvLow = static_cast<uint32_t>(objCbv & 0xffffffffu);
-                req.objectCbvHigh = static_cast<uint32_t>(objCbv >> 32);
-                req.indexCount = sub.IndexCount;
-                req.startIndexLocation = sub.StartIndexLocation;
-                req.baseVertexLocation = sub.BaseVertexLocation;
-                req.instanceCount = 1;
-                req.boundsCenterX = center.x;
-                req.boundsCenterY = center.y;
-                req.boundsCenterZ = center.z;
-                req.boundsExtentsX = extents.x;
-                req.boundsExtentsY = extents.y;
-                req.boundsExtentsZ = extents.z;
-
-                DrawGroupKey key{ rend.mesh, material->mTextureHandle.GPU.ptr };
-                groups[key].push_back(req);
-                ++totalRequests;
-            }
+            InstanceWorld inst{};
+            StoreWorldTransposed(tf.GetWorldMatrix(), inst.worldMatrix);
+            meshInstances[rend.mesh].push_back(inst);
+            ++totalObjects;
         });
 
-    if (groups.empty())
+    if (meshInstances.empty())
         return;
 
-    // --- 2) 모든 그룹 요청을 업로드 버퍼에 연속 배치 (덮어쓰기 버그 방지) ---
-    std::vector<GroupJob> jobs;
-    jobs.reserve(groups.size());
-
-    UINT reqCursor = 0;
-    UINT cmdCursor = 0;
-    UINT groupIndex = 0;
-
-    IndirectBuildConstants baseCB{};
-    ExtractFrustumPlanes(XMMatrixMultiply(viewMatrix, projMatrix), baseCB.frustumPlanes);
-    baseCB.enableFrustumCull = 0; // 안정화: 컬링은 데이터 검증 후 켜기
-
-    const UINT buildCbAlign = BuildCBAlignedSize();
-
-    for (auto& gpair : groups)
-    {
-        if (groupIndex >= kMaxIndirectGroups)
-            break;
-        if (reqCursor >= kMaxIndirectDraws)
-            break;
-
-        auto& reqs = gpair.second;
-        if (reqs.empty() || !gpair.first.mesh)
-            continue;
-
-        const UINT n = static_cast<UINT>((std::min)(
-            reqs.size(),
-            static_cast<size_t>(kMaxIndirectDraws - reqCursor)));
-
-        memcpy(
-            frame.requestMapped + reqCursor * sizeof(IndirectDrawRequest),
-            reqs.data(),
-            sizeof(IndirectDrawRequest) * n);
-
-        GroupJob job{};
-        job.mesh = gpair.first.mesh;
-        job.materialGpu = gpair.first.materialGpu;
-        job.requestOffset = reqCursor;
-        job.requestCount = n;
-        job.commandOffset = cmdCursor;
-        job.groupIndex = groupIndex;
-        jobs.push_back(job);
-
-        IndirectBuildConstants cb = baseCB;
-        cb.numRequests = n;
-        cb.commandWriteBase = cmdCursor;
-        memcpy(
-            frame.buildCBMapped + groupIndex * buildCbAlign,
-            &cb,
-            sizeof(IndirectBuildConstants));
-
-        reqCursor += n;
-        cmdCursor += n; // 최악 시 n개 출력 (컬링 없으면 n)
-        ++groupIndex;
-    }
-
-    if (jobs.empty())
-        return;
-
-    // 카운터 슬롯 전부 0
-    if (frame.countState != D3D12_RESOURCE_STATE_COPY_DEST)
-    {
-        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            frame.countBuffer.Get(), frame.countState, D3D12_RESOURCE_STATE_COPY_DEST));
-        frame.countState = D3D12_RESOURCE_STATE_COPY_DEST;
-    }
-    cmdList->CopyBufferRegion(
-        frame.countBuffer.Get(), 0,
-        mCountZeroUpload.Get(), 0,
-        sizeof(UINT) * kMaxIndirectGroups);
-
-    // command + count → UAV
-    {
-        D3D12_RESOURCE_BARRIER barriers[2];
-        UINT nb = 0;
-        if (frame.commandState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-        {
-            barriers[nb++] = CD3DX12_RESOURCE_BARRIER::Transition(
-                frame.commandBuffer.Get(), frame.commandState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            frame.commandState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        }
-        if (frame.countState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-        {
-            barriers[nb++] = CD3DX12_RESOURCE_BARRIER::Transition(
-                frame.countBuffer.Get(), frame.countState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            frame.countState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        }
-        if (nb)
-            cmdList->ResourceBarrier(nb, barriers);
-    }
-
-    ID3D12RootSignature* buildRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::IndirectBuild);
     ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
-    ID3D12CommandSignature* cmdSig = RootSignatureManager::Get().GetSceneCommandSignature();
-
     PSOKey gfxKey{};
-    gfxKey.shaderName = "object_cb";
+    gfxKey.shaderName = "object_instanced";
     gfxKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     gfxKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     gfxKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     ID3D12PipelineState* gfxPSO = PipelineStateManager::Get().GetOrCreatePSO(gfxKey, sceneRS);
-
-    // --- 3) 그룹별 Compute (각기 다른 request 오프셋 / 카운터 슬롯) ---
-    cmdList->SetPipelineState(mIndirectBuildPSO.Get());
-    cmdList->SetComputeRootSignature(buildRS);
-    cmdList->SetComputeRootUnorderedAccessView(2, frame.commandBuffer->GetGPUVirtualAddress());
-
-    for (const GroupJob& job : jobs)
+    if (!sceneRS || !gfxPSO)
     {
-        const D3D12_GPU_VIRTUAL_ADDRESS reqVA =
-            frame.requestUpload->GetGPUVirtualAddress()
-            + static_cast<UINT64>(job.requestOffset) * sizeof(IndirectDrawRequest);
-
-        const D3D12_GPU_VIRTUAL_ADDRESS buildCbVA =
-            frame.buildCBUpload->GetGPUVirtualAddress()
-            + static_cast<UINT64>(job.groupIndex) * buildCbAlign;
-
-        const D3D12_GPU_VIRTUAL_ADDRESS countVA =
-            frame.countBuffer->GetGPUVirtualAddress()
-            + static_cast<UINT64>(job.groupIndex) * sizeof(UINT);
-
-        cmdList->SetComputeRootConstantBufferView(0, buildCbVA);
-        cmdList->SetComputeRootShaderResourceView(1, reqVA);
-        cmdList->SetComputeRootUnorderedAccessView(3, countVA);
-
-        const UINT gx = (job.requestCount + 63u) / 64u;
-        cmdList->Dispatch(gx, 1, 1);
+        // 인스턴스 PSO 실패 시 기존 Direct로
+        renderDirect(world, cmdList, currentFrameResource, descriptorAllocator, viewMatrix, projMatrix);
+        return;
     }
 
-    // UAV → INDIRECT_ARGUMENT
-    {
-        D3D12_RESOURCE_BARRIER barriers[2];
-        barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
-            frame.commandBuffer.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-        barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(
-            frame.countBuffer.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-        cmdList->ResourceBarrier(2, barriers);
-        frame.commandState = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-        frame.countState = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-    }
-
-    // --- 4) 그룹별 ExecuteIndirect ---
-    if (sceneRS)
-        cmdList->SetGraphicsRootSignature(sceneRS);
-    if (gfxPSO)
-        cmdList->SetPipelineState(gfxPSO);
-
+    cmdList->SetGraphicsRootSignature(sceneRS);
+    cmdList->SetPipelineState(gfxPSO);
     if (currentFrameResource && currentFrameResource->PassCB)
     {
         cmdList->SetGraphicsRootConstantBufferView(
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
 
-    for (const GroupJob& job : jobs)
+    // requestUpload 앞부분을 인스턴스 월드 업로드로 재사용 (64B * N)
+    BYTE* upload = frame.requestMapped;
+    UINT uploadCursor = 0;
+
+    for (auto& mpair : meshInstances)
     {
-        auto vbv = job.mesh->VertexBufferView();
-        auto ibv = job.mesh->IndexBufferView();
+        Mesh* mesh = mpair.first;
+        auto& instances = mpair.second;
+        if (!mesh || instances.empty())
+            continue;
+
+        const UINT n = static_cast<UINT>((std::min)(
+            instances.size(),
+            static_cast<size_t>(kMaxInstancesPerDraw - uploadCursor)));
+        if (n == 0)
+            break;
+
+        const UINT64 byteOffset = (UINT64)uploadCursor * sizeof(InstanceWorld);
+        std::memcpy(upload + byteOffset, instances.data(), sizeof(InstanceWorld) * n);
+
+        const D3D12_GPU_VIRTUAL_ADDRESS instVA =
+            frame.requestUpload->GetGPUVirtualAddress() + byteOffset;
+
+        cmdList->SetGraphicsRootShaderResourceView(3, instVA);
+
+        auto vbv = mesh->VertexBufferView();
+        auto ibv = mesh->IndexBufferView();
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        D3D12_GPU_DESCRIPTOR_HANDLE matGpu{};
-        matGpu.ptr = job.materialGpu;
-        cmdList->SetGraphicsRootDescriptorTable(2, matGpu);
+        // 같은 인스턴스 버퍼로 모든 서브메시 드로우 (Blender 복제와 같은 구조)
+        for (auto& pair : mesh->DrawArgs)
+        {
+            const auto& sub = pair.second;
+            if (sub.IndexCount == 0)
+                continue;
 
-        const UINT64 cmdByteOffset =
-            static_cast<UINT64>(job.commandOffset) * sizeof(IndirectCommand);
-        const UINT64 countByteOffset =
-            static_cast<UINT64>(job.groupIndex) * sizeof(UINT);
+            Material* material = sub.initMaterial;
+            if (!material || !material->HasValidTexture())
+            {
+                if (!sub.initMaterialName.empty())
+                {
+                    if (auto m = MaterialManager::Get().GetMaterial(sub.initMaterialName))
+                        material = m->HasValidTexture() ? m.get() : nullptr;
+                }
+                if (!material)
+                    material = MaterialManager::Get().GetMissingTextureMaterial();
+            }
+            if (!material || !material->HasValidTexture())
+                continue;
 
-        cmdList->ExecuteIndirect(
-            cmdSig,
-            job.requestCount,
-            frame.commandBuffer.Get(),
-            cmdByteOffset,
-            frame.countBuffer.Get(),
-            countByteOffset);
+            cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
+            cmdList->DrawIndexedInstanced(
+                sub.IndexCount,
+                n,
+                sub.StartIndexLocation,
+                sub.BaseVertexLocation,
+                0);
+        }
+
+        uploadCursor += n;
     }
 }

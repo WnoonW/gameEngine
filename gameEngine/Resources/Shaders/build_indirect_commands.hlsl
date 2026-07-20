@@ -1,34 +1,26 @@
-// GPU: DrawRequest -> IndirectCommand (선택적 프러스텀 컬링 + 압축)
+// Pass1 CS: 컬링 + 인스턴스 압축
+// Pass2 CSFinalize: 카운터로 DRAW_INDEXED 인자 1개 기록
 
 struct DrawRequest
 {
-    uint objectCbvLow;
-    uint objectCbvHigh;
-    uint indexCount;
-    uint startIndexLocation;
-    int  baseVertexLocation;
-    uint instanceCount;
-    uint pad0;
-    uint pad1;
-    float boundsCenterX;
-    float boundsCenterY;
-    float boundsCenterZ;
-    float boundsPad0;
-    float boundsExtentsX;
-    float boundsExtentsY;
-    float boundsExtentsZ;
-    float boundsPad1;
+    float4x4 world;
+    float boundsCenterX, boundsCenterY, boundsCenterZ, boundsPad0;
+    float boundsExtentsX, boundsExtentsY, boundsExtentsZ, boundsPad1;
+};
+
+struct InstanceWorld
+{
+    float4x4 world;
 };
 
 struct IndirectCommand
 {
-    uint2 objectCbv;
     uint IndexCountPerInstance;
     uint InstanceCount;
     uint StartIndexLocation;
     int  BaseVertexLocation;
     uint StartInstanceLocation;
-    uint pad;
+    uint pad0, pad1, pad2;
 };
 
 cbuffer cbBuild : register(b0)
@@ -36,17 +28,21 @@ cbuffer cbBuild : register(b0)
     float4 gFrustumPlanes[6];
     uint   gNumRequests;
     uint   gEnableFrustumCull;
-    uint   gCommandWriteBase;
+    uint   gIndexCount;
+    uint   gStartIndexLocation;
+    int    gBaseVertexLocation;
+    uint   gMaxInstances;
     uint   gPad1;
+    uint   gPad2;
 };
 
-StructuredBuffer<DrawRequest>       gRequests : register(t0);
-RWStructuredBuffer<IndirectCommand> gCommands : register(u0);
-RWStructuredBuffer<uint>            gCounter  : register(u1);
+StructuredBuffer<DrawRequest>         gRequests  : register(t0);
+RWStructuredBuffer<InstanceWorld>     gInstances : register(u0);
+RWStructuredBuffer<uint>              gCounter   : register(u1);
+RWStructuredBuffer<IndirectCommand>   gDrawCmd   : register(u2);
 
 bool IsAabbInsideOrIntersectFrustum(float3 center, float3 extents)
 {
-    // extents == 0 → 컬링 정보 없음: 통과
     if (extents.x <= 0.0f && extents.y <= 0.0f && extents.z <= 0.0f)
         return true;
 
@@ -71,8 +67,6 @@ void CS(uint3 dtid : SV_DispatchThreadID)
         return;
 
     DrawRequest req = gRequests[i];
-    if (req.indexCount == 0 || req.instanceCount == 0)
-        return;
 
     if (gEnableFrustumCull != 0)
     {
@@ -84,20 +78,27 @@ void CS(uint3 dtid : SV_DispatchThreadID)
 
     uint outIndex;
     InterlockedAdd(gCounter[0], 1, outIndex);
-
-    // 그룹 내 상대 인덱스 + 그룹 베이스
-    uint writeIndex = gCommandWriteBase + outIndex;
-    if (writeIndex >= 8192)
+    if (outIndex >= gMaxInstances)
         return;
 
-    IndirectCommand cmd;
-    cmd.objectCbv = uint2(req.objectCbvLow, req.objectCbvHigh);
-    cmd.IndexCountPerInstance = req.indexCount;
-    cmd.InstanceCount = req.instanceCount;
-    cmd.StartIndexLocation = req.startIndexLocation;
-    cmd.BaseVertexLocation = req.baseVertexLocation;
-    cmd.StartInstanceLocation = 0;
-    cmd.pad = 0;
+    InstanceWorld inst;
+    inst.world = req.world;
+    gInstances[outIndex] = inst;
+}
 
-    gCommands[writeIndex] = cmd;
+[numthreads(1, 1, 1)]
+void CSFinalize(uint3 dtid : SV_DispatchThreadID)
+{
+    uint n = gCounter[0];
+    if (n > gMaxInstances)
+        n = gMaxInstances;
+
+    IndirectCommand cmd;
+    cmd.IndexCountPerInstance = gIndexCount;
+    cmd.InstanceCount = n;
+    cmd.StartIndexLocation = gStartIndexLocation;
+    cmd.BaseVertexLocation = gBaseVertexLocation;
+    cmd.StartInstanceLocation = 0;
+    cmd.pad0 = cmd.pad1 = cmd.pad2 = 0;
+    gDrawCmd[0] = cmd;
 }

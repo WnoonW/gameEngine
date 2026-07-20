@@ -9,6 +9,7 @@
 #include "DescriptorAllocator.h"
 #include "AppStruct.h"
 #include "../Structs/IndirectDrawStructs.h"
+#include "../Structs/RenderLimits.h"
 
 using namespace ECS;
 using Microsoft::WRL::ComPtr;
@@ -40,23 +41,32 @@ private:
     struct FrameIndirectResources
     {
         ComPtr<ID3D12Resource> requestUpload;
-        ComPtr<ID3D12Resource> commandBuffer;
-        ComPtr<ID3D12Resource> countBuffer;   // UINT * kMaxIndirectGroups
-        ComPtr<ID3D12Resource> buildCBUpload; // aligned slot * kMaxIndirectGroups
+        ComPtr<ID3D12Resource> instanceBuffer;
+        ComPtr<ID3D12Resource> countBuffer;
+        ComPtr<ID3D12Resource> drawCmdBuffer;
+        ComPtr<ID3D12Resource> buildCBUpload;
         BYTE* requestMapped = nullptr;
         BYTE* buildCBMapped = nullptr;
-        D3D12_RESOURCE_STATES commandState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES instanceState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES countState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES drawCmdState = D3D12_RESOURCE_STATE_COMMON;
     };
 
-    struct GroupJob
+    // 한 메시 타입 = 인스턴스 압축 1회, 서브메시마다 드로우
+    struct MeshBatch
     {
         Mesh* mesh = nullptr;
-        UINT64 materialGpu = 0;
-        UINT requestOffset = 0;  // element index into request buffer
+        UINT requestOffset = 0;
         UINT requestCount = 0;
-        UINT commandOffset = 0;  // element index into command buffer
-        UINT groupIndex = 0;     // count buffer / build CB slot
+        UINT batchIndex = 0; // build CB slot
+    };
+
+    struct SubmeshDraw
+    {
+        UINT64 materialGpu = 0;
+        UINT indexCount = 0;
+        UINT startIndex = 0;
+        INT baseVertex = 0;
     };
 
     void renderDirect(World& world,
@@ -77,13 +87,14 @@ private:
     void EnsureIndirectResources(ID3D12Device* device);
     void DestroyIndirectResources();
     void ExtractFrustumPlanes(const DirectX::XMMATRIX& viewProj, float outPlanes[6][4]);
-
     static UINT BuildCBAlignedSize();
 
     RenderPath mRenderPath = RenderPath::Indirect;
     ID3D12Device* mDevice = nullptr;
     ComPtr<ID3D12PipelineState> mIndirectBuildPSO;
+    ComPtr<ID3D12PipelineState> mIndirectFinalizePSO;
     ComPtr<ID3D12Resource> mCountZeroUpload;
+    ComPtr<ID3D12Resource> mDummyInstanceBuffer;
 
     FrameIndirectResources mFrames[kIndirectFrameCount]{};
     bool mIndirectReady = false;

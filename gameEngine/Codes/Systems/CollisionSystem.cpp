@@ -51,6 +51,9 @@ namespace
 
     void ApplyAxisMove(ColliderEntry& entry, int axis, float move)
     {
+        if (move == 0.0f)
+            return;
+
         if (axis == 0)
         {
             entry.transform->position.x += move;
@@ -72,6 +75,7 @@ namespace
             if (entry.gravity && !entry.collision->isStatic)
                 entry.gravity->velocity.z = 0.0f;
         }
+        entry.transform->MarkDirty();
     }
 
     float GetAxisCenter(const ColliderEntry& entry, int axis)
@@ -123,6 +127,7 @@ namespace
         const float pushUp = -minPt.y;
         entry.transform->position.y += pushUp;
         entry.bounds->worldBounds.Center.y += pushUp;
+        entry.transform->MarkDirty();
 
         if (entry.gravity && entry.gravity->velocity.y < 0.0f)
             entry.gravity->velocity.y = 0.0f;

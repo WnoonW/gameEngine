@@ -15,6 +15,13 @@ void BoundsSystem::Update(World& world)
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend, BoundsComponent& bounds)
         {
             if (!rend.mesh || !rend.visible) return;
+            // 정적 + 이미 유효한 경계만 스킵. extents==0 이면 최소 1회 계산 필요.
+            const bool boundsEmpty =
+                bounds.worldBounds.Extents.x <= 0.f
+                && bounds.worldBounds.Extents.y <= 0.f
+                && bounds.worldBounds.Extents.z <= 0.f;
+            if (tf.dirtyFrames <= 0 && !boundsEmpty)
+                return;
 
             XMMATRIX worldMat = tf.GetWorldMatrix();
 

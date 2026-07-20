@@ -17,5 +17,6 @@ void GravitySystem::Update(World& world, float deltaTime)
             tf.position.x += gravity.velocity.x * deltaTime;
             tf.position.y += gravity.velocity.y * deltaTime;
             tf.position.z += gravity.velocity.z * deltaTime;
+            tf.MarkDirty();
         });
 }

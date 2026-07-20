@@ -4,6 +4,7 @@
 
 #include <WindowsX.h>
 #include "d3dApp.h"
+#include "RenderLimits.h"
 #include <dxgidebug.h>
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
@@ -541,7 +542,7 @@ void D3DApp::CreateCommandObjects()
 	mFrameResources.resize(gNumFrameResources);
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
-		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), 1024);
+		mFrameResources[i] = std::make_unique<FrameResource>(md3dDevice.Get(), kMaxSceneObjects);
 	}
 
 	mCurrFrameResourceIndex = 0;

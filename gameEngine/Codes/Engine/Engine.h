@@ -115,4 +115,5 @@ private:
     DescriptorAllocator* mDescriptorAllocator = nullptr;
 
     uint32_t mNextObjectCBIndex = 0;
+    uint32_t mMaxObjectCBSlots = 8192;
 };

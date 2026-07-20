@@ -12,6 +12,11 @@ struct TransformComponent {
     XMFLOAT3 rotation{ 0.0f, 0.0f, 0.0f };
     XMFLOAT3 scale{ 1.0f, 1.0f, 1.0f };
 
+    // ObjectCB / 인스턴스 버퍼에 다시 올려야 하는 프레임 수 (보통 gNumFrameResources)
+    int dirtyFrames = 0;
+
+    void MarkDirty(int frames = 3) { dirtyFrames = frames; }
+
     XMMATRIX GetWorldMatrix() const {
         XMMATRIX T = XMMatrixTranslation(position.x, position.y, position.z);
         XMMATRIX R = XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, rotation.z);

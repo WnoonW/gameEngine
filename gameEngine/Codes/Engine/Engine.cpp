@@ -6,6 +6,8 @@
 #include "ShaderManager.h"
 #include "ComponentStruct.h"
 #include "Entity.h"
+#include "RenderLimits.h"
+#include "MathHelper.h"
 
 using namespace DirectX;
 
@@ -26,7 +28,9 @@ bool Engine::Initialize(ID3D12Device* device,
     mDescriptorAllocator = &descriptorAllocator;
 
     mResourceManager = &ResourceManager::Get();
-    mResourceManager->Initialize(); 
+    mResourceManager->Initialize();
+
+    mMaxObjectCBSlots = kMaxSceneObjects;
 
     ShaderManager::Get().Initialize();
     RootSignatureManager::Get().Initialize(device);
@@ -160,6 +164,7 @@ void Engine::RotateSelected(float dYaw, float dPitch)
         tf->rotation.y += dYaw;
         tf->rotation.x += dPitch;
         tf->rotation.x = MathHelper::Clamp(tf->rotation.x, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+        tf->MarkDirty();
     }
 }
 
@@ -201,6 +206,7 @@ void Engine::MoveSelectedViewRelative(float forward, float right, float up, floa
     tf->position.x += d.x;
     tf->position.y += d.y;
     tf->position.z += d.z;
+    tf->MarkDirty();
 }
 
 void Engine::MoveSelectedPlanar(float forward, float right, float up, float speed,
@@ -217,6 +223,7 @@ void Engine::MoveSelectedPlanar(float forward, float right, float up, float spee
     tf->position.x += horizForward.x * forward * speed + horizRight.x * right * speed;
     tf->position.y += up * speed;
     tf->position.z += horizForward.z * forward * speed + horizRight.z * right * speed;
+    tf->MarkDirty();
 }
 
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
@@ -267,9 +274,18 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         return INVALID_ENTITY;
     }
 
+    if (mNextObjectCBIndex >= mMaxObjectCBSlots)
+    {
+        OutputDebugStringA("[Engine] CreateRenderableEntity failed: object CB slots full\n");
+        return INVALID_ENTITY;
+    }
+
     Entity entity = mWorld.CreateEntity();
 
-    mWorld.AddComponent(entity, TransformComponent{ .position = position });
+    TransformComponent tf{};
+    tf.position = position;
+    tf.MarkDirty();
+    mWorld.AddComponent(entity, std::move(tf));
     mWorld.AddComponent(entity, RenderableComponent{
         .mesh = mesh,
         .objectCBIndex = mNextObjectCBIndex++
