@@ -2,9 +2,11 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
+#include <vector>
 #include <wrl.h>                    
 #include "d3dUtil.h"
 #include "ResourceLoader.h"
+#include "GeometryGenerator.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -64,6 +66,14 @@ public:
     bool CreateMesh(const std::string& name, const std::wstring& filepath,
         ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
 
+    // GeometryGenerator 프로시저럴 메시 → GPU 버퍼 생성 → 캐싱
+    // materialName: 서브메시 init 머티리얼 이름 (비어 있으면 Default로 resolve)
+    bool CreateMeshFromGeometry(const std::string& name,
+        const GeometryGenerator::MeshData& meshData,
+        ID3D12Device* device,
+        ID3D12GraphicsCommandList* cmdList,
+        const std::string& materialName = "");
+
     void ResolveMeshMaterials(Mesh* mesh);
 
     Mesh* GetMesh(const std::string& name) const;
@@ -73,5 +83,9 @@ public:
     void Shutdown();
 
 private:
+    // cpuModel.submeshes 가 채워진 Mesh를 GPU에 올리고 캐시에 등록
+    bool UploadAndRegisterMesh(const std::string& name, Mesh& mesh,
+        ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
+
     std::unordered_map<std::string, std::shared_ptr<Mesh>> mMeshes;
 };

@@ -10,6 +10,9 @@
 #include "Engine.h"
 #include "Entity.h"
 #include "ComponentStruct.h"
+#include "MeshManager.h"
+#include "MaterialManager.h"
+#include "GeometryGenerator.h"
 
 using namespace DirectX;
 
@@ -305,8 +308,11 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	mImGuiManager.SetupDockspace(); 
 	mImGuiManager.DrawScenePanel();
 	mImGuiManager.DrawHierarchyPanel(&mEngine);
-	mImGuiManager.DrawInspectorPanel();
+	mImGuiManager.DrawInspectorPanel(&mEngine);
 	mImGuiManager.DrawProjectPanel();
+
+	// Inspector 체크박스 → 앱의 3인칭 조작 모드 동기화
+	mManipulateSelected = mImGuiManager.IsManipulateSelected();
 
 	// Scene 패널 Image를 좌클릭하면 마우스 룩 요청을 켠다.
 	// 이유: 전역 기본 고정 대신, 사용자가 Scene을 조작하겠다고 명시할 때만 커서를 가둔다.
@@ -567,7 +573,8 @@ void InitDirect3DApp::EndFrame()
 	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
 	// swap the back and front buffers
-	ThrowIfFailed(mSwapChain->Present(1, 0));
+	// SyncInterval 0 = VSync OFF (프레임 상한을 모니터 주사율에 묶지 않음)
+	ThrowIfFailed(mSwapChain->Present(0, 0));
 	mCurrBackBuffer = (mCurrBackBuffer + 1) % SwapChainBufferCount;
 
 	mCurrFrameResource->FenceValue = ++mCurrentFence;
@@ -625,13 +632,34 @@ void InitDirect3DApp::LoadAssets()
 	MaterialManager::Get().CreateMaterial("髮+", L"Resources/Textures/spa_h.png", md3dDevice.Get(), mCommandList.Get(), mCommandQueue.Get(), mGlobalDescriptorAllocator);
 
 
-	// Mesh 로딩
+	// Mesh 로딩 (OBJ 모델 + GeometryGenerator 프리미티브)
 	bool meshResult = MeshManager::Get().CreateMesh("bibian", L"Resources/Assets/bibian.obj",
 		md3dDevice.Get(), mCommandList.Get());
 	bool meshResult1 = MeshManager::Get().CreateMesh("box", L"Resources/Assets/square.obj",
 		md3dDevice.Get(), mCommandList.Get());
 
-	if (!meshResult || !meshResult1)
+	GeometryGenerator geo;
+	bool primOk = true;
+	primOk &= MeshManager::Get().CreateMeshFromGeometry(
+		"cube", geo.CreateBox(1.0f, 1.0f, 1.0f, 0),
+		md3dDevice.Get(), mCommandList.Get());
+	primOk &= MeshManager::Get().CreateMeshFromGeometry(
+		"sphere", geo.CreateSphere(1.0f, 20, 20),
+		md3dDevice.Get(), mCommandList.Get());
+	primOk &= MeshManager::Get().CreateMeshFromGeometry(
+		"geosphere", geo.CreateGeosphere(1.0f, 2),
+		md3dDevice.Get(), mCommandList.Get());
+	primOk &= MeshManager::Get().CreateMeshFromGeometry(
+		"cylinder", geo.CreateCylinder(0.5f, 0.5f, 2.0f, 20, 4),
+		md3dDevice.Get(), mCommandList.Get());
+	primOk &= MeshManager::Get().CreateMeshFromGeometry(
+		"cone", geo.CreateCylinder(0.5f, 0.0f, 2.0f, 20, 4),
+		md3dDevice.Get(), mCommandList.Get());
+	primOk &= MeshManager::Get().CreateMeshFromGeometry(
+		"grid", geo.CreateGrid(10.0f, 10.0f, 10, 10),
+		md3dDevice.Get(), mCommandList.Get());
+
+	if (!meshResult || !meshResult1 || !primOk)
 	{
 		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
 	}
@@ -927,7 +955,11 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 	}
 	else if (action == ButtonAction::ToggleManipulateSelected)
 	{
-		//mManipulateSelected = mImGuiManager.IsManipulateSelected();
+		mManipulateSelected = mImGuiManager.IsManipulateSelected();
+		if (mManipulateSelected && mEngine.GetSelectedEntity() != INVALID_ENTITY)
+			InitializeOrbitFromSelection();
+		else
+			mOrbitTarget = INVALID_ENTITY;
 	}
 	else if (action == ButtonAction::SpawnSelectedMesh)
 	{
@@ -935,13 +967,18 @@ void InitDirect3DApp::buttonClicked(ButtonAction action)
 		std::string mat = mImGuiManager.GetSelectedMaterial();
 		if (mesh.empty()) mesh = "bibian";
 
-		// spawn in front of camera
-		XMFLOAT3 camPos{ mCamX, mCamY, mCamZ };
-		float yaw = mTheta;
-		XMFLOAT3 spawnPos = camPos;
-		spawnPos.x += sinf(yaw) * 8.0f;
-		spawnPos.z += cosf(yaw) * 8.0f;
-		spawnPos.y += 2.0f;
+		// Scene 중앙 십자선 = 현재 뷰 시선 방향. 카메라 앞 고정 거리에 스폰.
+		constexpr float kSpawnDistance = 8.0f;
+		XMMATRIX view = mCurrentView;
+		XMVECTOR det;
+		XMMATRIX invView = XMMatrixInverse(&det, view);
+		XMVECTOR camPos = XMVector3TransformCoord(XMVectorZero(), invView);
+		XMVECTOR lookDir = XMVector3Normalize(
+			XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), invView));
+		XMVECTOR spawnVec = XMVectorAdd(camPos, XMVectorScale(lookDir, kSpawnDistance));
+
+		XMFLOAT3 spawnPos{};
+		XMStoreFloat3(&spawnPos, spawnVec);
 		mEngine.CreateRenderableEntity(mesh, mat, spawnPos);
 	}
 }

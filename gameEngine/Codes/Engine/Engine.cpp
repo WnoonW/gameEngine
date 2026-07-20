@@ -8,6 +8,8 @@
 #include "Entity.h"
 #include "RenderLimits.h"
 #include "MathHelper.h"
+#include <algorithm>
+#include <vector>
 
 using namespace DirectX;
 
@@ -257,6 +259,18 @@ size_t Engine::GetRenderableObjectCount()
     return count;
 }
 
+std::vector<Entity> Engine::GetRenderableEntities()
+{
+    std::vector<Entity> entities;
+    mWorld.ForEach<RenderableComponent>(
+        [&](Entity e, RenderableComponent&)
+        {
+            entities.push_back(e);
+        });
+    std::sort(entities.begin(), entities.end());
+    return entities;
+}
+
 Entity Engine::CreateRenderableEntity(const std::string& meshName,
     const std::string& materialName,
     XMFLOAT3 position)
@@ -291,6 +305,10 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         .objectCBIndex = mNextObjectCBIndex++
         });
     mWorld.AddComponent(entity, BoundsComponent{});
+
+    // 스폰 시 선택한 Main Material 적용 (비어 있으면 메시 init / Default 사용)
+    if (!materialName.empty())
+        SetEntityMainMaterial(entity, materialName);
 
     return entity;
 }

@@ -3,29 +3,38 @@
 #include "ResourceLoader.h"
 #include "MaterialManager.h"
 
-bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepath, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
+namespace
 {
-	//메시 생성
-	Mesh mMesh;
-	mMesh.name = name;
-	//============================================================================
-
-
-	//모델 로드
-	MeshLoad(std::filesystem::path(filepath), mMesh.cpuModel);
-	//============================================================================
-
-
-	//서브메시 합체
-	std::vector<Vertex> allVertices;
-	std::vector<uint32_t> allIndices;
-
 	struct SubmeshOffset
 	{
 		UINT indexCount;
 		UINT startIndexLocation;
 		UINT baseVertexLocation;
 	};
+}
+
+bool MeshManager::UploadAndRegisterMesh(const std::string& name, Mesh& mMesh,
+	ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
+{
+	if (name.empty() || !device || !cmdList)
+		return false;
+
+	if (mMeshes.find(name) != mMeshes.end())
+	{
+		OutputDebugStringA(("[MeshManager] Mesh already exists: " + name + "\n").c_str());
+		return false;
+	}
+
+	if (mMesh.cpuModel.submeshes.empty())
+	{
+		OutputDebugStringA(("[MeshManager] No submeshes for: " + name + "\n").c_str());
+		return false;
+	}
+
+	mMesh.name = name;
+
+	std::vector<Vertex> allVertices;
+	std::vector<uint32_t> allIndices;
 	std::vector<SubmeshOffset> offsets;
 
 	for (const auto& sub : mMesh.cpuModel.submeshes)
@@ -33,33 +42,28 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		UINT baseVertex = (UINT)allVertices.size();
 		UINT startIndex = (UINT)allIndices.size();
 
-		// 정점 추가
 		allVertices.insert(allVertices.end(), sub.vertices.begin(), sub.vertices.end());
 
-		// 인덱스 추가 (baseVertex를 더해줘야 함)
 		for (auto index : sub.indices)
-		{
 			allIndices.push_back(index + baseVertex);
-		}
 
-		// 오프셋 기록
 		offsets.push_back({ (UINT)sub.indices.size(), startIndex, baseVertex });
 	}
-	//============================================================================
 
+	if (allVertices.empty() || allIndices.empty())
+	{
+		OutputDebugStringA(("[MeshManager] Empty geometry for: " + name + "\n").c_str());
+		return false;
+	}
 
 	mMesh.vertexCount = (UINT)allVertices.size();
 	mMesh.indexCount = (UINT)allIndices.size();
 
-
-	//버퍼 생성
 	const UINT vbByteSize = mMesh.vertexCount * sizeof(Vertex);
 	const UINT ibByteSize = mMesh.indexCount * sizeof(uint32_t);
 
 	mMesh.vertexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, allVertices.data(), vbByteSize, mMesh.vertexUploadHeap);
 	mMesh.indexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, allIndices.data(), ibByteSize, mMesh.indexUploadHeap);
-	//============================================================================
-
 
 #ifdef _DEBUG
 	OutputDebugStringW(L"\n========================================\n");
@@ -80,15 +84,12 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 	OutputDebugStringW(L"\n========================================\n\n");
 #endif
 
-
-	//각 서브메시 등록 (submesh_0, submesh_1 ...)
 	for (size_t i = 0; i < offsets.size(); ++i)
 	{
 		if (offsets[i].indexCount == 0) continue;
 
 		const auto& cpuSub = mMesh.cpuModel.submeshes[i];
 
-		// Compute local AABB for this submesh
 		DirectX::BoundingBox localBounds{};
 		if (!cpuSub.vertices.empty()) {
 			DirectX::XMVECTOR vMin = DirectX::XMVectorSet(FLT_MAX, FLT_MAX, FLT_MAX, 0);
@@ -117,22 +118,61 @@ bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepa
 		SubmeshGeometry submesh;
 		submesh.IndexCount = offsets[i].indexCount;
 		submesh.StartIndexLocation = offsets[i].startIndexLocation;
-		submesh.BaseVertexLocation = 0;                    // ← 여기 중요! 0으로 고정
+		// 인덱스가 이미 baseVertex를 반영하므로 BaseVertexLocation은 0 고정
+		submesh.BaseVertexLocation = 0;
 		submesh.initMaterialName = cpuSub.materialName;
-		submesh.Bounds = localBounds;  // store local AABB per submesh
+		submesh.Bounds = localBounds;
 		std::string key = "submesh_" + std::to_string(i);
 		mMesh.DrawArgs[key] = submesh;
 	}
-	//============================================================================
 
 	ResolveMeshMaterials(&mMesh);
-
-	//해시 테이블에 메시 저장
 	mMeshes.emplace(name, std::make_shared<Mesh>(std::move(mMesh)));
-	//============================================================================
 	return true;
 }
 
+bool MeshManager::CreateMesh(const std::string& name, const std::wstring& filepath,
+	ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
+{
+	Mesh mMesh;
+	MeshLoad(std::filesystem::path(filepath), mMesh.cpuModel);
+	return UploadAndRegisterMesh(name, mMesh, device, cmdList);
+}
+
+bool MeshManager::CreateMeshFromGeometry(const std::string& name,
+	const GeometryGenerator::MeshData& meshData,
+	ID3D12Device* device,
+	ID3D12GraphicsCommandList* cmdList,
+	const std::string& materialName)
+{
+	if (meshData.Vertices.empty() || meshData.Indices32.empty())
+	{
+		OutputDebugStringA(("[MeshManager] CreateMeshFromGeometry empty data: " + name + "\n").c_str());
+		return false;
+	}
+
+	Mesh mMesh;
+
+	SubMesh sub;
+	sub.materialName = materialName;
+	sub.vertices.reserve(meshData.Vertices.size());
+	sub.indices.reserve(meshData.Indices32.size());
+
+	for (const auto& v : meshData.Vertices)
+	{
+		Vertex out{};
+		out.position = v.Position;
+		out.normal = v.Normal;
+		out.texcoord = v.TexC;
+		sub.vertices.push_back(out);
+	}
+
+	for (uint32_t idx : meshData.Indices32)
+		sub.indices.push_back(idx);
+
+	mMesh.cpuModel.submeshes.push_back(std::move(sub));
+	return UploadAndRegisterMesh(name, mMesh, device, cmdList);
+}
 
 void MeshManager::ResolveMeshMaterials(Mesh* mesh)
 {
@@ -174,12 +214,12 @@ Mesh* MeshManager::GetMesh(const std::string& name) const
 
 std::vector<std::string> MeshManager::GetLoadedMeshNames() const
 {
-    std::vector<std::string> names;
-    names.reserve(mMeshes.size());
-    for (const auto& p : mMeshes) {
-        names.push_back(p.first);
-    }
-    return names;
+	std::vector<std::string> names;
+	names.reserve(mMeshes.size());
+	for (const auto& p : mMeshes) {
+		names.push_back(p.first);
+	}
+	return names;
 }
 
 void MeshManager::Shutdown()

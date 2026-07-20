@@ -3,7 +3,9 @@
 #include "Managers/MaterialManager.h"
 #include "Engine.h"
 #include "Entity.h"
+#include "ComponentStruct.h"
 #include <algorithm>
+#include <cstdio>
 #include <vector>
 
 namespace
@@ -384,6 +386,32 @@ void ImGuiManager::DrawScenePanel()
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
 
+        // Scene 뷰 중앙 십자선 (스폰 위치 가이드)
+        {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImVec2 center((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+            constexpr float arm = 12.0f;
+            constexpr float gap = 4.0f;
+            constexpr float thickness = 1.5f;
+            const ImU32 outline = IM_COL32(0, 0, 0, 200);
+            const ImU32 cross = IM_COL32(255, 255, 255, 230);
+
+            auto drawArm = [&](ImVec2 a, ImVec2 b)
+            {
+                drawList->AddLine(a, b, outline, thickness + 1.5f);
+                drawList->AddLine(a, b, cross, thickness);
+            };
+
+            // 가로
+            drawArm(ImVec2(center.x - arm, center.y), ImVec2(center.x - gap, center.y));
+            drawArm(ImVec2(center.x + gap, center.y), ImVec2(center.x + arm, center.y));
+            // 세로
+            drawArm(ImVec2(center.x, center.y - arm), ImVec2(center.x, center.y - gap));
+            drawArm(ImVec2(center.x, center.y + gap), ImVec2(center.x, center.y + arm));
+            // 중앙 점
+            drawList->AddCircleFilled(center, 1.5f, cross);
+        }
+
         // 스크린 절대좌표가 아니라 클라이언트 상대좌표로 저장한다.
         // 이유: 창을 옮기면 스크린 좌표는 바로 무효가 되고, 이동 중 Update가 멈춰도
         //       ClientToScreen만 다시 하면 clip/센터를 맞출 수 있음.
@@ -475,28 +503,305 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 {
     ImGui::Begin("Hierarchy");
 
-    if (engine)
+    if (!engine)
     {
-        const size_t objectCount = engine->GetRenderableObjectCount();
-        ImGui::Text("Objects: %zu", objectCount);
-        ImGui::Separator();
+        ImGui::TextDisabled("Engine not available");
+        ImGui::End();
+        return;
     }
 
-    ImGui::TextDisabled("Entity List will be here");
+    const size_t objectCount = engine->GetRenderableObjectCount();
+    ImGui::Text("Objects: %zu", objectCount);
+
+    Entity selected = engine->GetSelectedEntity();
+    if (selected != INVALID_ENTITY)
+        ImGui::Text("Selected: %u", selected);
+    else
+        ImGui::TextDisabled("Selected: (none)");
+
+    if (ImGui::Button("Clear Selection"))
+        engine->ClearSelection();
+
+    ImGui::Separator();
+
+    auto entities = engine->GetRenderableEntities();
+    if (entities.empty())
+    {
+        ImGui::TextDisabled("No renderable entities");
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::BeginListBox("##EntityList", ImVec2(-1, -1)))
+    {
+        for (Entity e : entities)
+        {
+            RenderableComponent* rend = engine->GetRenderable(e);
+            const char* meshName = (rend && rend->mesh) ? rend->mesh->name.c_str() : "(no mesh)";
+
+            char label[128];
+            snprintf(label, sizeof(label), "Entity %u  [%s]", e, meshName);
+
+            const bool isSelected = engine->IsEntitySelected(e);
+            if (ImGui::Selectable(label, isSelected))
+                engine->SetSelectedEntity(e);
+
+            if (isSelected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndListBox();
+    }
+
     ImGui::End();
 }
 
-void ImGuiManager::DrawInspectorPanel()
+void ImGuiManager::DrawInspectorPanel(Engine* engine)
 {
     ImGui::Begin("Inspector");
-    ImGui::Text("Selected Object Properties");
+
+    if (!engine)
+    {
+        ImGui::TextDisabled("Engine not available");
+        ImGui::End();
+        return;
+    }
+
+    // --- 선택 오브젝트 조작 (3인칭 팔로우) ---
+    if (ImGui::Checkbox("Manipulate Selected Object", &mManipulateSelected))
+    {
+        if (m_Callback)
+            m_Callback->buttonClicked(ButtonAction::ToggleManipulateSelected);
+    }
+    if (mManipulateSelected)
+    {
+        ImGui::TextWrapped(
+            "3rd-person follow: Mouse orbit | WASD move | Space/Shift up/down | Wheel zoom");
+    }
+
+    ImGui::Separator();
+
+    Entity selected = engine->GetSelectedEntity();
+    if (selected == INVALID_ENTITY)
+    {
+        ImGui::TextDisabled("No entity selected");
+        ImGui::TextDisabled("Pick in Scene, or select from Hierarchy.");
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("Entity: %u", selected);
+
+    // --- Transform ---
+    if (TransformComponent* tf = engine->GetTransform(selected))
+    {
+        ImGui::SeparatorText("Transform");
+        if (ImGui::DragFloat3("Position", &tf->position.x, 0.05f))
+            tf->MarkDirty();
+        if (ImGui::DragFloat3("Rotation", &tf->rotation.x, 0.01f))
+            tf->MarkDirty();
+        if (ImGui::DragFloat3("Scale", &tf->scale.x, 0.01f, 0.001f, 100.0f))
+            tf->MarkDirty();
+    }
+
+    // --- Gravity ---
+    ImGui::SeparatorText("Gravity");
+    {
+        bool hasGravity = engine->HasGravityComponent(selected);
+        if (ImGui::Checkbox("Gravity Component", &hasGravity))
+            engine->SetEntityGravityEnabled(selected, hasGravity);
+
+        if (GravityComponent* gravity = engine->GetGravityComponent(selected))
+        {
+            ImGui::Indent();
+            ImGui::Checkbox("Enabled##Gravity", &gravity->enabled);
+            ImGui::DragFloat("Strength", &gravity->strength, 0.1f, 0.0f, 50.0f);
+            ImGui::DragFloat3("Velocity", &gravity->velocity.x, 0.1f);
+            ImGui::Unindent();
+        }
+    }
+
+    // --- Collision ---
+    ImGui::SeparatorText("Collision");
+    {
+        bool hasCollision = engine->HasCollisionComponent(selected);
+        if (ImGui::Checkbox("Collision Component", &hasCollision))
+            engine->SetEntityCollisionEnabled(selected, hasCollision);
+
+        if (CollisionComponent* collision = engine->GetCollisionComponent(selected))
+        {
+            ImGui::Indent();
+            ImGui::Checkbox("Enabled##Collision", &collision->enabled);
+            ImGui::Checkbox("Static", &collision->isStatic);
+            ImGui::DragFloat("Restitution", &collision->restitution, 0.01f, 0.0f, 1.0f);
+            ImGui::Unindent();
+        }
+    }
+
+    // --- Material ---
+    RenderableComponent* rend = engine->GetRenderable(selected);
+    if (rend && rend->mesh)
+    {
+        ImGui::SeparatorText("Material (Sub > Main > Init)");
+        ImGui::Text("Mesh: %s", rend->mesh->name.c_str());
+
+        auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+        std::sort(matNames.begin(), matNames.end());
+
+        const std::string mainMaterialName = engine->GetEntityMainMaterial(selected);
+        int mainIdx = 0;
+        if (!mainMaterialName.empty())
+        {
+            auto it = std::find(matNames.begin(), matNames.end(), mainMaterialName);
+            if (it != matNames.end())
+                mainIdx = 1 + (int)std::distance(matNames.begin(), it);
+        }
+
+        if (ImGui::Combo("Main Material", &mainIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+        {
+            std::string newMain = (mainIdx == 0) ? "" : matNames[mainIdx - 1];
+            engine->SetEntityMainMaterial(selected, newMain);
+        }
+
+        ImGui::Text("Submesh Overrides");
+        std::vector<std::string> submeshKeys;
+        submeshKeys.reserve(rend->mesh->DrawArgs.size());
+        for (const auto& pair : rend->mesh->DrawArgs)
+            submeshKeys.push_back(pair.first);
+        std::sort(submeshKeys.begin(), submeshKeys.end());
+
+        for (const auto& key : submeshKeys)
+        {
+            const auto& sub = rend->mesh->DrawArgs.at(key);
+            ImGui::PushID(key.c_str());
+            ImGui::Text("%s (Init: %s)", key.c_str(),
+                sub.initMaterialName.empty() ? "Default" : sub.initMaterialName.c_str());
+
+            const std::string currentSub = engine->GetEntitySubMaterial(selected, key);
+
+            int subIdx = 0;
+            if (!currentSub.empty())
+            {
+                auto it = std::find(matNames.begin(), matNames.end(), currentSub);
+                if (it != matNames.end())
+                    subIdx = 1 + (int)std::distance(matNames.begin(), it);
+            }
+
+            if (ImGui::Combo("Sub Material", &subIdx, SubMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+            {
+                std::string newSub = (subIdx == 0) ? "" : matNames[subIdx - 1];
+                engine->SetEntitySubMaterial(selected, key, newSub);
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::Checkbox("Visible", &rend->visible);
+    }
+    else if (!engine->HasGravityComponent(selected) && !engine->HasCollisionComponent(selected))
+    {
+        ImGui::Separator();
+        ImGui::TextDisabled("Selected entity has no RenderableComponent");
+    }
+
     ImGui::End();
 }
 
 void ImGuiManager::DrawProjectPanel()
 {
     ImGui::Begin("Project");
-    ImGui::Text("Assets / Meshes / Materials");
+    ImGui::Text("Spawn Object");
+    ImGui::Separator();
+
+    auto meshNames = MeshManager::Get().GetLoadedMeshNames();
+    std::sort(meshNames.begin(), meshNames.end());
+
+    if (meshNames.empty())
+    {
+        ImGui::TextDisabled("No meshes loaded");
+    }
+    else
+    {
+        if (mSelectedMesh.empty() ||
+            std::find(meshNames.begin(), meshNames.end(), mSelectedMesh) == meshNames.end())
+        {
+            mSelectedMesh = meshNames[0];
+        }
+
+        int meshIdx = 0;
+        for (size_t i = 0; i < meshNames.size(); ++i)
+        {
+            if (meshNames[i] == mSelectedMesh)
+            {
+                meshIdx = (int)i;
+                break;
+            }
+        }
+
+        auto meshGetter = [](void* data, int idx) -> const char*
+        {
+            auto* vec = static_cast<std::vector<std::string>*>(data);
+            if (idx < 0 || idx >= (int)vec->size()) return nullptr;
+            return (*vec)[idx].c_str();
+        };
+
+        if (ImGui::Combo("Mesh", &meshIdx, meshGetter, &meshNames, (int)meshNames.size()))
+            mSelectedMesh = meshNames[meshIdx];
+    }
+
+    auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+    std::sort(matNames.begin(), matNames.end());
+    if (!matNames.empty())
+    {
+        int matIdx = 0;
+        if (!mSelectedMaterial.empty())
+        {
+            auto it = std::find(matNames.begin(), matNames.end(), mSelectedMaterial);
+            if (it != matNames.end())
+                matIdx = 1 + (int)std::distance(matNames.begin(), it);
+        }
+
+        if (ImGui::Combo("Main Material", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+            mSelectedMaterial = (matIdx == 0) ? "" : matNames[matIdx - 1];
+    }
+    else
+    {
+        mSelectedMaterial.clear();
+    }
+
+    const bool canSpawn = !mSelectedMesh.empty() && m_Callback != nullptr;
+    if (!canSpawn)
+        ImGui::BeginDisabled();
+
+    if (ImGui::Button("Spawn Selected Mesh", ImVec2(-1, 0)))
+    {
+        if (m_Callback && !mSelectedMesh.empty())
+            m_Callback->buttonClicked(ButtonAction::SpawnSelectedMesh);
+    }
+
+    if (!canSpawn)
+        ImGui::EndDisabled();
+
+    if (!mSelectedMesh.empty())
+    {
+        const char* spawnMat = mSelectedMaterial.empty() ? "None (Init/Default)" : mSelectedMaterial.c_str();
+        ImGui::Text("Ready: %s / %s", mSelectedMesh.c_str(), spawnMat);
+        ImGui::TextDisabled("Spawns at the Scene crosshair (view center).");
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Loaded meshes: %zu", meshNames.size());
+    if (ImGui::BeginListBox("##MeshList", ImVec2(-1, 120.0f)))
+    {
+        for (const auto& name : meshNames)
+        {
+            const bool selected = (name == mSelectedMesh);
+            if (ImGui::Selectable(name.c_str(), selected))
+                mSelectedMesh = name;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndListBox();
+    }
+
     ImGui::End();
 }
 #pragma endregion 

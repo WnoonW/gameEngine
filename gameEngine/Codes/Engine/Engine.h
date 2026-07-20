@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 #include <DirectXMath.h>
 #include <optional>
 #include <DirectXCollision.h>
@@ -99,6 +100,9 @@ public:
 
     // 씬에 렌더 가능한 오브젝트 수 (Renderable 컴포넌트 보유 엔티티)
     size_t GetRenderableObjectCount();
+
+    // Hierarchy UI용: 렌더 가능 엔티티 ID 목록 (오름차순)
+    std::vector<Entity> GetRenderableEntities();
 
     void Shutdown();
 private:

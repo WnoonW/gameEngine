@@ -68,7 +68,7 @@ public:
     void SetupDockspace();          
     void DrawScenePanel();
     void DrawHierarchyPanel(Engine* engine = nullptr);
-    void DrawInspectorPanel();
+    void DrawInspectorPanel(Engine* engine = nullptr);
     void DrawProjectPanel();
 
     // Ensure offscreen Scene RT matches last panel size.
@@ -88,8 +88,8 @@ public:
     bool TryGetSceneScreenRect(RECT& outRect) const;
     bool TryGetSceneClientRect(RECT& outRect) const;
 
-    //void SetManipulateSelected(bool on) { mManipulateSelected = on; }
-    //bool IsManipulateSelected() const { return mManipulateSelected; }
+    void SetManipulateSelected(bool on) { mManipulateSelected = on; }
+    bool IsManipulateSelected() const { return mManipulateSelected; }
 
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
