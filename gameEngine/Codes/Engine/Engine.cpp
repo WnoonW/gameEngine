@@ -239,6 +239,17 @@ RenderPath Engine::GetRenderPath() const
     return mRenderSystem.GetRenderPath();
 }
 
+size_t Engine::GetRenderableObjectCount()
+{
+    size_t count = 0;
+    mWorld.ForEach<RenderableComponent>(
+        [&](Entity, RenderableComponent&)
+        {
+            ++count;
+        });
+    return count;
+}
+
 Entity Engine::CreateRenderableEntity(const std::string& meshName,
     const std::string& materialName,
     XMFLOAT3 position)

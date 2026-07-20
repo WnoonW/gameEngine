@@ -67,7 +67,7 @@ public:
 	// ImGui Dockspace 설정
     void SetupDockspace();          
     void DrawScenePanel();
-    void DrawHierarchyPanel();
+    void DrawHierarchyPanel(Engine* engine = nullptr);
     void DrawInspectorPanel();
     void DrawProjectPanel();
 

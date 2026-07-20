@@ -97,6 +97,9 @@ public:
     CollisionComponent* GetCollisionComponent(Entity entity);
     void SetEntityCollisionEnabled(Entity entity, bool enabled);
 
+    // 씬에 렌더 가능한 오브젝트 수 (Renderable 컴포넌트 보유 엔티티)
+    size_t GetRenderableObjectCount();
+
     void Shutdown();
 private:
     ECS::World mWorld;

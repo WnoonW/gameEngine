@@ -471,11 +471,18 @@ void ImGuiManager::EnsureSceneViewport(const std::function<void()>& flushGpu)
     mSceneViewport.Resize(width, height);
 }
 
-void ImGuiManager::DrawHierarchyPanel()
+void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 {
     ImGui::Begin("Hierarchy");
-    ImGui::Text("Entity List will be here");
-    // 나중에 ForEach로 엔티티 목록 띄울 예정
+
+    if (engine)
+    {
+        const size_t objectCount = engine->GetRenderableObjectCount();
+        ImGui::Text("Objects: %zu", objectCount);
+        ImGui::Separator();
+    }
+
+    ImGui::TextDisabled("Entity List will be here");
     ImGui::End();
 }
 

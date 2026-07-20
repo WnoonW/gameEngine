@@ -304,7 +304,7 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	mImGuiManager.NewFrame();
 	mImGuiManager.SetupDockspace(); 
 	mImGuiManager.DrawScenePanel();
-	mImGuiManager.DrawHierarchyPanel();
+	mImGuiManager.DrawHierarchyPanel(&mEngine);
 	mImGuiManager.DrawInspectorPanel();
 	mImGuiManager.DrawProjectPanel();
 
