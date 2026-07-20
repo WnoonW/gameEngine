@@ -170,6 +170,9 @@
     <ClInclude Include="Codes\Common\UploadBuffer.h">
       <Filter>Common</Filter>
     </ClInclude>
+    <ClInclude Include="Codes\Structs\IndirectDrawStructs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Codes\Structs\constantStruct.h">
       <Filter>Struct</Filter>
     </ClInclude>

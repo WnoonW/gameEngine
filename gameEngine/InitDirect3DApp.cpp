@@ -199,6 +199,8 @@ bool InitDirect3DApp::Initialize()
 	LoadAssets();
 	CreateInitialScene();
 
+	//mEngine.SetRenderPath(RenderPath::Direct);
+
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);

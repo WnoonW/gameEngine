@@ -31,6 +31,7 @@ bool Engine::Initialize(ID3D12Device* device,
     ShaderManager::Get().Initialize();
     RootSignatureManager::Get().Initialize(device);
     PipelineStateManager::Get().Initialize(device);
+    mRenderSystem.Initialize(device);
 
     return true;
 }
@@ -228,6 +229,16 @@ void Engine::Render(ID3D12GraphicsCommandList* cmdList,
         mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix);
 }
 
+void Engine::SetRenderPath(RenderPath path)
+{
+    mRenderSystem.SetRenderPath(path);
+}
+
+RenderPath Engine::GetRenderPath() const
+{
+    return mRenderSystem.GetRenderPath();
+}
+
 Entity Engine::CreateRenderableEntity(const std::string& meshName,
     const std::string& materialName,
     XMFLOAT3 position)
@@ -298,8 +309,12 @@ std::string Engine::GetEntitySubMaterial(Entity entity, const std::string& subme
 
 void Engine::Shutdown()
 {
-    mResourceManager->Shutdown();
-    // 필요하면 mRenderSystem, mWorld 관련 정리도 여기에 추가
+    mRenderSystem.Shutdown();
+    PipelineStateManager::Get().Shutdown();
+    RootSignatureManager::Get().Shutdown();
+    ShaderManager::Get().Shutdown();
+    if (mResourceManager)
+        mResourceManager->Shutdown();
 }
 
 bool Engine::GetMainCameraViewProj(XMMATRIX& outView, XMMATRIX& outProj, float aspectRatio)

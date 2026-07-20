@@ -40,6 +40,9 @@ public:
         const XMMATRIX& viewMatrix,
         const XMMATRIX& projMatrix);
 
+    void SetRenderPath(RenderPath path);
+    RenderPath GetRenderPath() const;
+
     // 엔티티 생성 (이름 기반)
     Entity CreateRenderableEntity(const std::string& meshName,
         const std::string& materialName,
