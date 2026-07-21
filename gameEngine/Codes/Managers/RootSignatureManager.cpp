@@ -98,16 +98,20 @@ void RootSignatureManager::CreateSceneRootSignature()
 
 void RootSignatureManager::CreateIndirectBuildRootSignature()
 {
-    // b0 | t0 requests | u0 instances | u1 counter | u2 drawCmd
-    CD3DX12_ROOT_PARAMETER params[5];
+    // Path3 GPU-driven:
+    // b0 frame | t0 source | t1 batches | t2 submeshes
+    // u0 compact | u1 batchCounters | u2 drawCmds
+    CD3DX12_ROOT_PARAMETER params[7];
     params[0].InitAsConstantBufferView(0);
     params[1].InitAsShaderResourceView(0);
-    params[2].InitAsUnorderedAccessView(0);
-    params[3].InitAsUnorderedAccessView(1);
-    params[4].InitAsUnorderedAccessView(2);
+    params[2].InitAsShaderResourceView(1);
+    params[3].InitAsShaderResourceView(2);
+    params[4].InitAsUnorderedAccessView(0);
+    params[5].InitAsUnorderedAccessView(1);
+    params[6].InitAsUnorderedAccessView(2);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(
-        5, params,
+        7, params,
         0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 

@@ -46,8 +46,9 @@ void Engine::Update(float deltaTime)
 {
     mGravitySystem.Update(mWorld, deltaTime);
     UpdateBounds();
-    mCollisionSystem.Update(mWorld);
-    UpdateBounds();
+    // 충돌이 실제로 움직인 경우에만 bounds 2차 갱신 (정적 대량 씬에서 이중 순회 제거)
+    if (mCollisionSystem.Update(mWorld))
+        UpdateBounds();
 }
 
 void Engine::UpdateBounds()
@@ -67,10 +68,33 @@ Entity Engine::GetSelectedEntity()
     return selected;
 }
 
+std::vector<Entity> Engine::GetSelectedEntities()
+{
+    std::vector<Entity> out;
+    mWorld.ForEach<SelectedComponent>(
+        [&](Entity e, SelectedComponent&)
+        {
+            out.push_back(e);
+        });
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+size_t Engine::GetSelectedCount()
+{
+    size_t n = 0;
+    mWorld.ForEach<SelectedComponent>(
+        [&](Entity, SelectedComponent&)
+        {
+            ++n;
+        });
+    return n;
+}
+
 void Engine::ClearSelection()
 {
     std::vector<Entity> selectedEntities;
-    selectedEntities.reserve(4);
+    selectedEntities.reserve(8);
 
     mWorld.ForEach<SelectedComponent>(
         [&](Entity e, SelectedComponent&)
@@ -92,7 +116,32 @@ void Engine::SetSelectedEntity(Entity entity)
     if (!mWorld.GetComponent<TransformComponent>(entity))
         return;
 
+    if (!mWorld.GetComponent<SelectedComponent>(entity))
+        mWorld.AddComponent(entity, SelectedComponent{});
+}
+
+void Engine::AddSelectedEntity(Entity entity)
+{
+    if (entity == INVALID_ENTITY)
+        return;
+    if (!mWorld.GetComponent<TransformComponent>(entity))
+        return;
+    if (mWorld.GetComponent<SelectedComponent>(entity))
+        return;
     mWorld.AddComponent(entity, SelectedComponent{});
+}
+
+void Engine::ToggleSelectedEntity(Entity entity)
+{
+    if (entity == INVALID_ENTITY)
+        return;
+    if (!mWorld.GetComponent<TransformComponent>(entity))
+        return;
+
+    if (mWorld.GetComponent<SelectedComponent>(entity))
+        mWorld.RemoveComponent<SelectedComponent>(entity);
+    else
+        mWorld.AddComponent(entity, SelectedComponent{});
 }
 
 bool Engine::IsEntitySelected(Entity entity)
@@ -101,7 +150,8 @@ bool Engine::IsEntitySelected(Entity entity)
 }
 
 Entity Engine::PickObject(int mouseX, int mouseY, float clientWidth, float clientHeight,
-                          const XMMATRIX& view, const XMMATRIX& proj)
+                          const XMMATRIX& view, const XMMATRIX& proj,
+                          bool setSelection, bool additive)
 {
     // ensure bounds fresh
     mBoundsSystem.Update(mWorld);
@@ -131,6 +181,7 @@ Entity Engine::PickObject(int mouseX, int mouseY, float clientWidth, float clien
     mWorld.ForEach<TransformComponent, RenderableComponent, BoundsComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend, BoundsComponent& bnds)
         {
+            (void)tf;
             if (!rend.visible || !rend.mesh) return;
 
             const auto& wb = bnds.worldBounds;
@@ -152,9 +203,104 @@ Entity Engine::PickObject(int mouseX, int mouseY, float clientWidth, float clien
             }
         });
 
-    if (closest != INVALID_ENTITY)
-        SetSelectedEntity(closest);
+    if (setSelection)
+    {
+        if (closest == INVALID_ENTITY)
+        {
+            if (!additive)
+                ClearSelection();
+        }
+        else if (additive)
+            ToggleSelectedEntity(closest);
+        else
+            SetSelectedEntity(closest);
+    }
     return closest;
+}
+
+size_t Engine::SelectObjectsInRect(
+    float rectMinX, float rectMinY, float rectMaxX, float rectMaxY,
+    float sceneWidth, float sceneHeight,
+    const XMMATRIX& view, const XMMATRIX& proj,
+    bool additive)
+{
+    if (sceneWidth < 1.f || sceneHeight < 1.f)
+        return 0;
+
+    // normalize rect
+    if (rectMinX > rectMaxX) std::swap(rectMinX, rectMaxX);
+    if (rectMinY > rectMaxY) std::swap(rectMinY, rectMaxY);
+
+    mBoundsSystem.Update(mWorld);
+
+    const XMMATRIX viewProj = view * proj;
+
+    if (!additive)
+        ClearSelection();
+
+    size_t count = 0;
+    mWorld.ForEach<TransformComponent, RenderableComponent, BoundsComponent>(
+        [&](Entity e, TransformComponent&, RenderableComponent& rend, BoundsComponent& bnds)
+        {
+            if (!rend.visible || !rend.mesh) return;
+
+            const auto& wb = bnds.worldBounds;
+            if (wb.Extents.x <= 0.0f && wb.Extents.y <= 0.0f && wb.Extents.z <= 0.0f)
+                return;
+
+            // Project AABB 8 corners → scene pixel AABB
+            float minSX = 1e30f, minSY = 1e30f;
+            float maxSX = -1e30f, maxSY = -1e30f;
+            int valid = 0;
+
+            for (int i = 0; i < 8; ++i)
+            {
+                const float sx = (i & 1) ? wb.Extents.x : -wb.Extents.x;
+                const float sy = (i & 2) ? wb.Extents.y : -wb.Extents.y;
+                const float sz = (i & 4) ? wb.Extents.z : -wb.Extents.z;
+                XMVECTOR corner = XMVectorSet(
+                    wb.Center.x + sx,
+                    wb.Center.y + sy,
+                    wb.Center.z + sz,
+                    1.0f);
+
+                XMVECTOR clip = XMVector4Transform(corner, viewProj);
+                float w = XMVectorGetW(clip);
+                if (w <= 1e-5f)
+                    continue;
+
+                float ndcX = XMVectorGetX(clip) / w;
+                float ndcY = XMVectorGetY(clip) / w;
+                // clip space roughly in front
+                float ndcZ = XMVectorGetZ(clip) / w;
+                if (ndcZ < 0.0f || ndcZ > 1.0f)
+                    continue;
+
+                float px = (ndcX * 0.5f + 0.5f) * sceneWidth;
+                float py = (1.0f - (ndcY * 0.5f + 0.5f)) * sceneHeight;
+
+                minSX = (std::min)(minSX, px);
+                minSY = (std::min)(minSY, py);
+                maxSX = (std::max)(maxSX, px);
+                maxSY = (std::max)(maxSY, py);
+                ++valid;
+            }
+
+            if (valid == 0)
+                return;
+
+            // 2D AABB intersection (inclusive)
+            const bool overlap =
+                !(maxSX < rectMinX || minSX > rectMaxX || maxSY < rectMinY || minSY > rectMaxY);
+            if (!overlap)
+                return;
+
+            if (!IsEntitySelected(e))
+                AddSelectedEntity(e);
+            ++count;
+        });
+
+    return count;
 }
 
 void Engine::RotateSelected(float dYaw, float dPitch)
@@ -248,27 +394,52 @@ RenderPath Engine::GetRenderPath() const
     return mRenderSystem.GetRenderPath();
 }
 
-size_t Engine::GetRenderableObjectCount()
+bool Engine::IsComputeIndirectReady() const
 {
-    size_t count = 0;
-    mWorld.ForEach<RenderableComponent>(
-        [&](Entity, RenderableComponent&)
-        {
-            ++count;
-        });
-    return count;
+    return mRenderSystem.IsComputeIndirectReady();
 }
 
-std::vector<Entity> Engine::GetRenderableEntities()
+void Engine::SetGpuFrustumCullEnabled(bool enabled)
 {
-    std::vector<Entity> entities;
+    mRenderSystem.SetGpuFrustumCullEnabled(enabled);
+}
+
+bool Engine::IsGpuFrustumCullEnabled() const
+{
+    return mRenderSystem.IsGpuFrustumCullEnabled();
+}
+
+void Engine::NotifyRenderableListChanged()
+{
+    mRenderableListDirty = true;
+    mRenderSystem.InvalidateDrawCache();
+}
+
+void Engine::RebuildRenderableListCacheIfNeeded()
+{
+    if (!mRenderableListDirty)
+        return;
+
+    mRenderableListCache.clear();
     mWorld.ForEach<RenderableComponent>(
         [&](Entity e, RenderableComponent&)
         {
-            entities.push_back(e);
+            mRenderableListCache.push_back(e);
         });
-    std::sort(entities.begin(), entities.end());
-    return entities;
+    std::sort(mRenderableListCache.begin(), mRenderableListCache.end());
+    mRenderableListDirty = false;
+}
+
+size_t Engine::GetRenderableObjectCount()
+{
+    RebuildRenderableListCacheIfNeeded();
+    return mRenderableListCache.size();
+}
+
+const std::vector<Entity>& Engine::GetRenderableEntities()
+{
+    RebuildRenderableListCacheIfNeeded();
+    return mRenderableListCache;
 }
 
 Entity Engine::CreateRenderableEntity(const std::string& meshName,
@@ -310,6 +481,7 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
     if (!materialName.empty())
         SetEntityMainMaterial(entity, materialName);
 
+    NotifyRenderableListChanged();
     return entity;
 }
 
@@ -324,6 +496,7 @@ void Engine::SetEntityMainMaterial(Entity entity, const std::string& materialNam
         return;
 
     MaterialManager::Get().SetEntityMainMaterial(entity, materialName);
+    mRenderSystem.InvalidateDrawCache();
 }
 
 void Engine::SetEntitySubMaterial(Entity entity, const std::string& submeshKey, const std::string& materialName)
@@ -332,6 +505,7 @@ void Engine::SetEntitySubMaterial(Entity entity, const std::string& submeshKey, 
         return;
 
     MaterialManager::Get().SetEntitySubMaterial(entity, submeshKey, materialName);
+    mRenderSystem.InvalidateDrawCache();
 }
 
 std::string Engine::GetEntityMainMaterial(Entity entity) const

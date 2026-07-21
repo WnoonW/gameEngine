@@ -43,6 +43,9 @@ public:
 
     void SetRenderPath(RenderPath path);
     RenderPath GetRenderPath() const;
+    bool IsComputeIndirectReady() const;
+    void SetGpuFrustumCullEnabled(bool enabled);
+    bool IsGpuFrustumCullEnabled() const;
 
     // 엔티티 생성 (이름 기반)
     Entity CreateRenderableEntity(const std::string& meshName,
@@ -70,11 +73,25 @@ public:
     // ECS 카메라의 Transform 업데이트 (orbit 컨트롤 연동용)
     void SetCameraTransform(Entity camEntity, const DirectX::XMFLOAT3& position, const DirectX::XMFLOAT3& rotation);
 
+    // 클릭 피킹. setSelection=true면 선택 갱신 (additive면 기존 유지+추가)
     Entity PickObject(int mouseX, int mouseY, float clientWidth, float clientHeight,
-                      const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& proj);
+                      const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& proj,
+                      bool setSelection = true, bool additive = false);
+
+    // Scene 픽셀 좌표 직사각형으로 AABB 투영 교차 다중 선택
+    // rect: min/max in scene image space (same as pick coords)
+    size_t SelectObjectsInRect(
+        float rectMinX, float rectMinY, float rectMaxX, float rectMaxY,
+        float sceneWidth, float sceneHeight,
+        const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& proj,
+        bool additive = false);
 
     Entity GetSelectedEntity();
+    std::vector<Entity> GetSelectedEntities();
+    size_t GetSelectedCount();
     void SetSelectedEntity(Entity e);
+    void AddSelectedEntity(Entity e);
+    void ToggleSelectedEntity(Entity e);
     void ClearSelection();
     bool IsEntitySelected(Entity entity);
 
@@ -101,11 +118,16 @@ public:
     // 씬에 렌더 가능한 오브젝트 수 (Renderable 컴포넌트 보유 엔티티)
     size_t GetRenderableObjectCount();
 
-    // Hierarchy UI용: 렌더 가능 엔티티 ID 목록 (오름차순)
-    std::vector<Entity> GetRenderableEntities();
+    // Hierarchy UI용: 렌더 가능 엔티티 ID 목록 (오름차순, 캐시됨)
+    const std::vector<Entity>& GetRenderableEntities();
+
+    // 생성/삭제 등으로 목록·인스턴스 캐시 무효화
+    void NotifyRenderableListChanged();
 
     void Shutdown();
 private:
+    void RebuildRenderableListCacheIfNeeded();
+
     ECS::World mWorld;
     RenderSystem mRenderSystem;
     BoundsSystem mBoundsSystem;
@@ -120,4 +142,7 @@ private:
 
     uint32_t mNextObjectCBIndex = 0;
     uint32_t mMaxObjectCBSlots = 8192;
+
+    std::vector<Entity> mRenderableListCache;
+    bool mRenderableListDirty = true;
 };

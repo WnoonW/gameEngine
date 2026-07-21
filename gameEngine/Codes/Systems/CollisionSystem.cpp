@@ -117,12 +117,12 @@ namespace
         ApplyAxisMove(b, axis, moveB);
     }
 
-    void ResolveGroundPlane(ColliderEntry& entry)
+    bool ResolveGroundPlane(ColliderEntry& entry)
     {
         XMFLOAT3 minPt, maxPt;
         GetAABBMinMax(entry.bounds->worldBounds, minPt, maxPt);
         if (minPt.y >= 0.0f)
-            return;
+            return false;
 
         const float pushUp = -minPt.y;
         entry.transform->position.y += pushUp;
@@ -131,6 +131,7 @@ namespace
 
         if (entry.gravity && entry.gravity->velocity.y < 0.0f)
             entry.gravity->velocity.y = 0.0f;
+        return true;
     }
 
     bool SolveCollisions(std::vector<ColliderEntry>& colliders)
@@ -140,7 +141,10 @@ namespace
         for (size_t i = 0; i < colliders.size(); ++i)
         {
             if (!colliders[i].collision->isStatic)
-                ResolveGroundPlane(colliders[i]);
+            {
+                if (ResolveGroundPlane(colliders[i]))
+                    anyResolved = true;
+            }
         }
 
         for (size_t i = 0; i < colliders.size(); ++i)
@@ -170,7 +174,7 @@ namespace
     }
 }
 
-void CollisionSystem::Update(World& world)
+bool CollisionSystem::Update(World& world)
 {
     std::vector<ColliderEntry> colliders;
     colliders.reserve(64);
@@ -190,12 +194,15 @@ void CollisionSystem::Update(World& world)
             });
         });
 
-    if (colliders.size() <= 1)
-        return;
+    if (colliders.empty())
+        return false;
 
+    bool any = false;
     for (int iter = 0; iter < kMaxSolverIterations; ++iter)
     {
         if (!SolveCollisions(colliders))
             break;
+        any = true;
     }
+    return any;
 }

@@ -88,6 +88,10 @@ public:
     bool TryGetSceneScreenRect(RECT& outRect) const;
     bool TryGetSceneClientRect(RECT& outRect) const;
 
+    // Scene 드래그 박스 선택 결과 (Scene 이미지 로컬 픽셀). 한 번 읽으면 소비.
+    // additive: Shift 누른 채 드래그
+    bool ConsumeBoxSelection(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY, bool& outAdditive);
+
     void SetManipulateSelected(bool on) { mManipulateSelected = on; }
     bool IsManipulateSelected() const { return mManipulateSelected; }
 
@@ -116,4 +120,14 @@ private:
     float mSceneClientMinY = 0.0f;
     float mSceneClientMaxX = 0.0f;
     float mSceneClientMaxY = 0.0f;
+
+    // LMB 드래그 박스 선택 (Scene 이미지 로컬 좌표)
+    bool mBoxDragging = false;
+    bool mBoxSelectPending = false;
+    bool mBoxSelectAdditive = false;
+    ImVec2 mBoxStartScreen{ 0, 0 };
+    ImVec2 mBoxEndScreen{ 0, 0 };
+    float mBoxResultMinX = 0, mBoxResultMinY = 0;
+    float mBoxResultMaxX = 0, mBoxResultMaxY = 0;
+    static constexpr float kBoxDragThresholdPx = 4.0f;
 };

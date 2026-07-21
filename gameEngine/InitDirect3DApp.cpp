@@ -202,7 +202,13 @@ bool InitDirect3DApp::Initialize()
 	LoadAssets();
 	CreateInitialScene();
 
-	//mEngine.SetRenderPath(RenderPath::Direct);
+	// 렌더 경로 (기본 ComputeIndirect = GPU-driven)
+	// mEngine.SetRenderPath(RenderPath::Basic);            // 1: 원본 per-object
+	// mEngine.SetRenderPath(RenderPath::Instanced);        // 2: CPU 인스턴싱 폴백
+	// mEngine.SetRenderPath(RenderPath::ComputeIndirect);  // 3: GPU-driven (기본)
+	// mEngine.SetGpuFrustumCullEnabled(false);             // 경로3 컬링 (기본 true)
+	mEngine.SetRenderPath(RenderPath::ComputeIndirect);
+	mEngine.SetGpuFrustumCullEnabled(true);
 
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
@@ -314,12 +320,42 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	// Inspector 체크박스 → 앱의 3인칭 조작 모드 동기화
 	mManipulateSelected = mImGuiManager.IsManipulateSelected();
 
-	// Scene 패널 Image를 좌클릭하면 마우스 룩 요청을 켠다.
-	// 이유: 전역 기본 고정 대신, 사용자가 Scene을 조작하겠다고 명시할 때만 커서를 가둔다.
+	// Scene 드래그 박스 다중 선택 (Shift = 추가 선택)
+	{
+		float bx0, by0, bx1, by1;
+		bool additive = false;
+		if (mImGuiManager.ConsumeBoxSelection(bx0, by0, bx1, by1, additive))
+		{
+			const SceneViewport& sceneVP = mImGuiManager.GetSceneViewport();
+			const float pickW = sceneVP.IsValid()
+				? static_cast<float>(sceneVP.GetWidth())
+				: static_cast<float>(mImGuiManager.GetDesiredSceneWidth());
+			const float pickH = sceneVP.IsValid()
+				? static_cast<float>(sceneVP.GetHeight())
+				: static_cast<float>(mImGuiManager.GetDesiredSceneHeight());
+
+			// UI 박스 좌표는 패널 픽셀 기준 → RT 해상도로 스케일
+			const float uiW = static_cast<float>((std::max)(1u, mImGuiManager.GetDesiredSceneWidth()));
+			const float uiH = static_cast<float>((std::max)(1u, mImGuiManager.GetDesiredSceneHeight()));
+			const float sx = pickW / uiW;
+			const float sy = pickH / uiH;
+
+			const size_t n = mEngine.SelectObjectsInRect(
+				bx0 * sx, by0 * sy, bx1 * sx, by1 * sy,
+				pickW, pickH,
+				mCurrentView, mCurrentProj,
+				additive);
+
+			char buf[96];
+			sprintf_s(buf, "[Select] box select count=%zu additive=%d\n", n, additive ? 1 : 0);
+			OutputDebugStringA(buf);
+		}
+	}
+
+	// Scene 짧은 좌클릭 → 마우스 룩 (드래그 선택은 위 박스 처리)
 	if (mImGuiManager.ConsumeSceneCaptureClick())
 	{
 		mMouseLookRequested = true;
-		// 클릭 직후 바로 캡처를 걸어 첫 프레임부터 시야 조작이 되게 함.
 		SyncMouseLookState();
 	}
 
@@ -830,7 +866,12 @@ void InitDirect3DApp::OnMouseDown(WPARAM btnState, int x, int y)
 			}
 		}
 
-		Entity picked = mEngine.PickObject(pickX, pickY, (float)pickW, (float)pickH, mCurrentView, mCurrentProj);
+		// Shift+RMB = 토글 추가 선택
+		const bool additive = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+		Entity picked = mEngine.PickObject(
+			pickX, pickY, (float)pickW, (float)pickH,
+			mCurrentView, mCurrentProj,
+			true, additive);
 		if (picked != INVALID_ENTITY)
 		{
 			OutputDebugStringA("Object picked!\n");

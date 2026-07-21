@@ -15,14 +15,36 @@ struct TransformComponent {
     // ObjectCB / 인스턴스 버퍼에 다시 올려야 하는 프레임 수 (보통 gNumFrameResources)
     int dirtyFrames = 0;
 
-    void MarkDirty(int frames = 3) { dirtyFrames = frames; }
-
-    XMMATRIX GetWorldMatrix() const {
-        XMMATRIX T = XMMatrixTranslation(position.x, position.y, position.z);
-        XMMATRIX R = XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, rotation.z);
-        XMMATRIX S = XMMatrixScaling(scale.x, scale.y, scale.z);
-        return S * R * T;
+    void MarkDirty(int frames = 3)
+    {
+        dirtyFrames = frames;
+        mWorldValid = false;
     }
+
+    // position/rotation/scale 변경 후 MarkDirty 호출 전제. 유효하면 재계산 없이 캐시 반환.
+    XMMATRIX GetWorldMatrix() const
+    {
+        if (!mWorldValid)
+        {
+            const XMMATRIX T = XMMatrixTranslation(position.x, position.y, position.z);
+            const XMMATRIX R = XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, rotation.z);
+            const XMMATRIX S = XMMatrixScaling(scale.x, scale.y, scale.z);
+            const XMMATRIX W = S * R * T;
+            XMStoreFloat4x4(&mWorldCache, W);
+            mWorldValid = true;
+            return W;
+        }
+        return XMLoadFloat4x4(&mWorldCache);
+    }
+
+    // designated initializer / aggregate 유지용 (외부에서 직접 쓰지 말 것)
+    mutable bool mWorldValid = false;
+    mutable XMFLOAT4X4 mWorldCache{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
 };
 
 

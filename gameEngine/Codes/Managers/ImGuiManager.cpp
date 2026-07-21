@@ -422,14 +422,83 @@ void ImGuiManager::DrawScenePanel()
         mSceneClientMaxY = max.y - vpPos.y;
         mSceneClientRectValid = (mSceneClientMaxX > mSceneClientMinX && mSceneClientMaxY > mSceneClientMinY);
 
-        // 왼쪽 클릭으로 캡처 요청 플래그를 세운다 (앱 Update에서 Consume).
-        // 이유: Win32 좌표만으로는 도킹된 Scene 패널 위인지 알기 어렵고, ImGui 아이템 hit-test가 정확함.
+        // --- LMB: 짧은 클릭 = 마우스 룩 / 드래그 = 박스 다중 선택 ---
+        ImGuiIO& io = ImGui::GetIO();
+        const bool shift = io.KeyShift;
+
         if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            mSceneCaptureClick = true;
+        {
+            mBoxDragging = true;
+            mBoxStartScreen = io.MousePos;
+            mBoxEndScreen = io.MousePos;
+            mBoxSelectAdditive = shift;
+        }
+
+        if (mBoxDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            mBoxEndScreen = io.MousePos;
+            // 드래그 중 선택 박스 표시
+            const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
+            const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
+            if ((dx * dx + dy * dy) >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+            {
+                ImDrawList* dl = ImGui::GetForegroundDrawList();
+                ImVec2 a = mBoxStartScreen;
+                ImVec2 b = mBoxEndScreen;
+                if (a.x > b.x) std::swap(a.x, b.x);
+                if (a.y > b.y) std::swap(a.y, b.y);
+                // Scene 이미지 안으로 클램프
+                a.x = (std::max)(min.x, (std::min)(a.x, max.x));
+                a.y = (std::max)(min.y, (std::min)(a.y, max.y));
+                b.x = (std::max)(min.x, (std::min)(b.x, max.x));
+                b.y = (std::max)(min.y, (std::min)(b.y, max.y));
+                dl->AddRectFilled(a, b, IM_COL32(80, 160, 255, 40));
+                dl->AddRect(a, b, IM_COL32(80, 160, 255, 220), 0.0f, 0, 1.5f);
+            }
+        }
+
+        if (mBoxDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+            mBoxEndScreen = io.MousePos;
+            const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
+            const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
+            const float dist2 = dx * dx + dy * dy;
+            mBoxDragging = false;
+
+            if (dist2 >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+            {
+                // Scene 이미지 로컬 픽셀로 변환
+                float x0 = mBoxStartScreen.x - min.x;
+                float y0 = mBoxStartScreen.y - min.y;
+                float x1 = mBoxEndScreen.x - min.x;
+                float y1 = mBoxEndScreen.y - min.y;
+                if (x0 > x1) std::swap(x0, x1);
+                if (y0 > y1) std::swap(y0, y1);
+                const float sw = max.x - min.x;
+                const float sh = max.y - min.y;
+                x0 = (std::max)(0.0f, (std::min)(x0, sw));
+                y0 = (std::max)(0.0f, (std::min)(y0, sh));
+                x1 = (std::max)(0.0f, (std::min)(x1, sw));
+                y1 = (std::max)(0.0f, (std::min)(y1, sh));
+
+                mBoxResultMinX = x0;
+                mBoxResultMinY = y0;
+                mBoxResultMaxX = x1;
+                mBoxResultMaxY = y1;
+                mBoxSelectPending = true;
+                // 드래그 선택이면 마우스 룩 진입 안 함
+            }
+            else if (mSceneHovered)
+            {
+                // 짧은 클릭 → 기존처럼 마우스 룩 요청
+                mSceneCaptureClick = true;
+            }
+        }
     }
     else
     {
         ImGui::TextDisabled("Scene render target not ready (%u x %u)", width, height);
+        mBoxDragging = false;
     }
 
     ImGui::End();
@@ -441,6 +510,19 @@ bool ImGuiManager::ConsumeSceneCaptureClick()
     const bool clicked = mSceneCaptureClick;
     mSceneCaptureClick = false;
     return clicked;
+}
+
+bool ImGuiManager::ConsumeBoxSelection(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY, bool& outAdditive)
+{
+    if (!mBoxSelectPending)
+        return false;
+    mBoxSelectPending = false;
+    outMinX = mBoxResultMinX;
+    outMinY = mBoxResultMinY;
+    outMaxX = mBoxResultMaxX;
+    outMaxY = mBoxResultMaxY;
+    outAdditive = mBoxSelectAdditive;
+    return true;
 }
 
 bool ImGuiManager::TryGetSceneClientRect(RECT& outRect) const
@@ -513,11 +595,16 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
     const size_t objectCount = engine->GetRenderableObjectCount();
     ImGui::Text("Objects: %zu", objectCount);
 
-    Entity selected = engine->GetSelectedEntity();
-    if (selected != INVALID_ENTITY)
-        ImGui::Text("Selected: %u", selected);
-    else
+    const size_t selCount = engine->GetSelectedCount();
+    if (selCount == 0)
         ImGui::TextDisabled("Selected: (none)");
+    else if (selCount == 1)
+        ImGui::Text("Selected: %u", engine->GetSelectedEntity());
+    else
+        ImGui::Text("Selected: %zu entities", selCount);
+
+    ImGui::TextDisabled("Scene: drag LMB box select | Shift+drag add");
+    ImGui::TextDisabled("List: click | Ctrl+click toggle");
 
     if (ImGui::Button("Clear Selection"))
         engine->ClearSelection();
@@ -534,20 +621,29 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 
     if (ImGui::BeginListBox("##EntityList", ImVec2(-1, -1)))
     {
-        for (Entity e : entities)
+        // 대량 오브젝트에서도 보이는 행만 생성 (ImGui CPU 병목 제거)
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(entities.size()));
+        while (clipper.Step())
         {
-            RenderableComponent* rend = engine->GetRenderable(e);
-            const char* meshName = (rend && rend->mesh) ? rend->mesh->name.c_str() : "(no mesh)";
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+            {
+                const Entity e = entities[static_cast<size_t>(i)];
+                RenderableComponent* rend = engine->GetRenderable(e);
+                const char* meshName = (rend && rend->mesh) ? rend->mesh->name.c_str() : "(no mesh)";
 
-            char label[128];
-            snprintf(label, sizeof(label), "Entity %u  [%s]", e, meshName);
+                char label[128];
+                snprintf(label, sizeof(label), "Entity %u  [%s]", e, meshName);
 
-            const bool isSelected = engine->IsEntitySelected(e);
-            if (ImGui::Selectable(label, isSelected))
-                engine->SetSelectedEntity(e);
-
-            if (isSelected)
-                ImGui::SetItemDefaultFocus();
+                const bool isSelected = engine->IsEntitySelected(e);
+                if (ImGui::Selectable(label, isSelected))
+                {
+                    if (ImGui::GetIO().KeyCtrl)
+                        engine->ToggleSelectedEntity(e);
+                    else
+                        engine->SetSelectedEntity(e);
+                }
+            }
         }
         ImGui::EndListBox();
     }
@@ -580,42 +676,131 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
 
     ImGui::Separator();
 
-    Entity selected = engine->GetSelectedEntity();
-    if (selected == INVALID_ENTITY)
+    const std::vector<Entity> selectedList = engine->GetSelectedEntities();
+    if (selectedList.empty())
     {
         ImGui::TextDisabled("No entity selected");
-        ImGui::TextDisabled("Pick in Scene, or select from Hierarchy.");
+        ImGui::TextDisabled("Scene drag-box, RMB pick, or Hierarchy.");
         ImGui::End();
         return;
     }
 
-    ImGui::Text("Entity: %u", selected);
+    // UI 표시용 primary = 목록 첫 엔티티 (조작 값은 여기서 읽고, 변경 시 전체에 적용)
+    const Entity primary = selectedList.front();
 
-    // --- Transform ---
-    if (TransformComponent* tf = engine->GetTransform(selected))
+    if (selectedList.size() == 1)
+        ImGui::Text("Entity: %u", primary);
+    else
+        ImGui::Text("Multi-select: %zu (edits apply to all)", selectedList.size());
+
+    auto forEachSelected = [&](auto&& fn)
+    {
+        for (Entity e : selectedList)
+            fn(e);
+    };
+
+    // --- Transform (드래그 델타를 전체에 적용) ---
+    if (TransformComponent* tf = engine->GetTransform(primary))
     {
         ImGui::SeparatorText("Transform");
-        if (ImGui::DragFloat3("Position", &tf->position.x, 0.05f))
-            tf->MarkDirty();
-        if (ImGui::DragFloat3("Rotation", &tf->rotation.x, 0.01f))
-            tf->MarkDirty();
-        if (ImGui::DragFloat3("Scale", &tf->scale.x, 0.01f, 0.001f, 100.0f))
-            tf->MarkDirty();
+
+        XMFLOAT3 pos = tf->position;
+        if (ImGui::DragFloat3("Position", &pos.x, 0.05f))
+        {
+            const XMFLOAT3 delta{
+                pos.x - tf->position.x,
+                pos.y - tf->position.y,
+                pos.z - tf->position.z
+            };
+            forEachSelected([&](Entity e)
+            {
+                if (TransformComponent* t = engine->GetTransform(e))
+                {
+                    t->position.x += delta.x;
+                    t->position.y += delta.y;
+                    t->position.z += delta.z;
+                    t->MarkDirty();
+                }
+            });
+        }
+
+        XMFLOAT3 rot = tf->rotation;
+        if (ImGui::DragFloat3("Rotation", &rot.x, 0.01f))
+        {
+            const XMFLOAT3 delta{
+                rot.x - tf->rotation.x,
+                rot.y - tf->rotation.y,
+                rot.z - tf->rotation.z
+            };
+            forEachSelected([&](Entity e)
+            {
+                if (TransformComponent* t = engine->GetTransform(e))
+                {
+                    t->rotation.x += delta.x;
+                    t->rotation.y += delta.y;
+                    t->rotation.z += delta.z;
+                    t->MarkDirty();
+                }
+            });
+        }
+
+        XMFLOAT3 scl = tf->scale;
+        if (ImGui::DragFloat3("Scale", &scl.x, 0.01f, 0.001f, 100.0f))
+        {
+            // 스케일은 절대값으로 맞춤 (상대 곱보다 직관적)
+            forEachSelected([&](Entity e)
+            {
+                if (TransformComponent* t = engine->GetTransform(e))
+                {
+                    t->scale = scl;
+                    t->MarkDirty();
+                }
+            });
+        }
     }
 
     // --- Gravity ---
     ImGui::SeparatorText("Gravity");
     {
-        bool hasGravity = engine->HasGravityComponent(selected);
+        bool hasGravity = engine->HasGravityComponent(primary);
         if (ImGui::Checkbox("Gravity Component", &hasGravity))
-            engine->SetEntityGravityEnabled(selected, hasGravity);
+        {
+            forEachSelected([&](Entity e)
+            {
+                engine->SetEntityGravityEnabled(e, hasGravity);
+            });
+        }
 
-        if (GravityComponent* gravity = engine->GetGravityComponent(selected))
+        if (GravityComponent* gravity = engine->GetGravityComponent(primary))
         {
             ImGui::Indent();
-            ImGui::Checkbox("Enabled##Gravity", &gravity->enabled);
-            ImGui::DragFloat("Strength", &gravity->strength, 0.1f, 0.0f, 50.0f);
-            ImGui::DragFloat3("Velocity", &gravity->velocity.x, 0.1f);
+            bool gEnabled = gravity->enabled;
+            if (ImGui::Checkbox("Enabled##Gravity", &gEnabled))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (GravityComponent* g = engine->GetGravityComponent(e))
+                        g->enabled = gEnabled;
+                });
+            }
+            float strength = gravity->strength;
+            if (ImGui::DragFloat("Strength", &strength, 0.1f, 0.0f, 50.0f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (GravityComponent* g = engine->GetGravityComponent(e))
+                        g->strength = strength;
+                });
+            }
+            XMFLOAT3 vel = gravity->velocity;
+            if (ImGui::DragFloat3("Velocity", &vel.x, 0.1f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (GravityComponent* g = engine->GetGravityComponent(e))
+                        g->velocity = vel;
+                });
+            }
             ImGui::Unindent();
         }
     }
@@ -623,31 +808,62 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
     // --- Collision ---
     ImGui::SeparatorText("Collision");
     {
-        bool hasCollision = engine->HasCollisionComponent(selected);
+        bool hasCollision = engine->HasCollisionComponent(primary);
         if (ImGui::Checkbox("Collision Component", &hasCollision))
-            engine->SetEntityCollisionEnabled(selected, hasCollision);
+        {
+            forEachSelected([&](Entity e)
+            {
+                engine->SetEntityCollisionEnabled(e, hasCollision);
+            });
+        }
 
-        if (CollisionComponent* collision = engine->GetCollisionComponent(selected))
+        if (CollisionComponent* collision = engine->GetCollisionComponent(primary))
         {
             ImGui::Indent();
-            ImGui::Checkbox("Enabled##Collision", &collision->enabled);
-            ImGui::Checkbox("Static", &collision->isStatic);
-            ImGui::DragFloat("Restitution", &collision->restitution, 0.01f, 0.0f, 1.0f);
+            bool cEnabled = collision->enabled;
+            if (ImGui::Checkbox("Enabled##Collision", &cEnabled))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (CollisionComponent* c = engine->GetCollisionComponent(e))
+                        c->enabled = cEnabled;
+                });
+            }
+            bool isStatic = collision->isStatic;
+            if (ImGui::Checkbox("Static", &isStatic))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (CollisionComponent* c = engine->GetCollisionComponent(e))
+                        c->isStatic = isStatic;
+                });
+            }
+            float restitution = collision->restitution;
+            if (ImGui::DragFloat("Restitution", &restitution, 0.01f, 0.0f, 1.0f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (CollisionComponent* c = engine->GetCollisionComponent(e))
+                        c->restitution = restitution;
+                });
+            }
             ImGui::Unindent();
         }
     }
 
-    // --- Material ---
-    RenderableComponent* rend = engine->GetRenderable(selected);
+    // --- Material / Visible ---
+    RenderableComponent* rend = engine->GetRenderable(primary);
     if (rend && rend->mesh)
     {
         ImGui::SeparatorText("Material (Sub > Main > Init)");
         ImGui::Text("Mesh: %s", rend->mesh->name.c_str());
+        if (selectedList.size() > 1)
+            ImGui::TextDisabled("Material changes apply to all selected");
 
         auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
         std::sort(matNames.begin(), matNames.end());
 
-        const std::string mainMaterialName = engine->GetEntityMainMaterial(selected);
+        const std::string mainMaterialName = engine->GetEntityMainMaterial(primary);
         int mainIdx = 0;
         if (!mainMaterialName.empty())
         {
@@ -659,7 +875,10 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
         if (ImGui::Combo("Main Material", &mainIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
         {
             std::string newMain = (mainIdx == 0) ? "" : matNames[mainIdx - 1];
-            engine->SetEntityMainMaterial(selected, newMain);
+            forEachSelected([&](Entity e)
+            {
+                engine->SetEntityMainMaterial(e, newMain);
+            });
         }
 
         ImGui::Text("Submesh Overrides");
@@ -676,7 +895,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
             ImGui::Text("%s (Init: %s)", key.c_str(),
                 sub.initMaterialName.empty() ? "Default" : sub.initMaterialName.c_str());
 
-            const std::string currentSub = engine->GetEntitySubMaterial(selected, key);
+            const std::string currentSub = engine->GetEntitySubMaterial(primary, key);
 
             int subIdx = 0;
             if (!currentSub.empty())
@@ -689,17 +908,33 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
             if (ImGui::Combo("Sub Material", &subIdx, SubMaterialComboGetter, &matNames, (int)matNames.size() + 1))
             {
                 std::string newSub = (subIdx == 0) ? "" : matNames[subIdx - 1];
-                engine->SetEntitySubMaterial(selected, key, newSub);
+                forEachSelected([&](Entity e)
+                {
+                    // 같은 서브메시 키가 있는 메시만 적용
+                    if (RenderableComponent* r = engine->GetRenderable(e))
+                    {
+                        if (r->mesh && r->mesh->DrawArgs.count(key))
+                            engine->SetEntitySubMaterial(e, key, newSub);
+                    }
+                });
             }
             ImGui::PopID();
         }
 
-        ImGui::Checkbox("Visible", &rend->visible);
+        bool visible = rend->visible;
+        if (ImGui::Checkbox("Visible", &visible))
+        {
+            forEachSelected([&](Entity e)
+            {
+                if (RenderableComponent* r = engine->GetRenderable(e))
+                    r->visible = visible;
+            });
+        }
     }
-    else if (!engine->HasGravityComponent(selected) && !engine->HasCollisionComponent(selected))
+    else if (!engine->HasGravityComponent(primary) && !engine->HasCollisionComponent(primary))
     {
         ImGui::Separator();
-        ImGui::TextDisabled("Selected entity has no RenderableComponent");
+        ImGui::TextDisabled("Primary entity has no RenderableComponent");
     }
 
     ImGui::End();
