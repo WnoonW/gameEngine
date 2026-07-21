@@ -624,6 +624,11 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                 st.usedDefaultHeapCopy ? "Y" : "N",
                 st.uploadMs);
             ImGui::Text("Compose: %s  %.3f ms", st.didComposeWorld ? "Y" : "N", st.composeMs);
+            ImGui::Text("GPU Motion: %s  run=%s  active=%u  %.3f ms",
+                st.gpuMotionEnabled ? "ON" : "OFF",
+                st.didGpuMotion ? "Y" : "N",
+                st.motionActive,
+                st.motionMs);
             ImGui::Text("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
 
             if (ImGui::Button(st.autoPath ? "Auto Path: ON" : "Auto Path: OFF"))
@@ -640,6 +645,9 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
             ImGui::SameLine();
             if (ImGui::Button(st.occlusionEnabled ? "Disable Occlusion" : "Enable Occlusion"))
                 engine->SetGpuOcclusionEnabled(!st.occlusionEnabled);
+            ImGui::SameLine();
+            if (ImGui::Button(st.gpuMotionEnabled ? "Disable GPU Motion" : "Enable GPU Motion"))
+                engine->SetGpuMotionEnabled(!st.gpuMotionEnabled);
         }
     }
 

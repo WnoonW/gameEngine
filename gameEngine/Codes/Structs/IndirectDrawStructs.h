@@ -65,6 +65,21 @@ struct GpuTransform
 };
 static_assert(sizeof(GpuTransform) == 96, "GpuTransform");
 
+// Step F2: per-instance motion (parallel to GpuTransform slots)
+// GPU integrates: v.y -= gravity*dt; p += v*dt; r += w*dt
+struct GpuMotion
+{
+    float linearVelocity[3]{};
+    float pad0 = 0;
+    float angularVelocity[3]{}; // pitch/yaw/roll rates (rad/s)
+    float pad1 = 0;
+    float gravity = 0.f;        // m/s^2 down (-Y), 0 = off
+    uint32_t flags = 0;         // bit0 = enabled
+    uint32_t pad2 = 0;
+    uint32_t pad3 = 0;
+};
+static_assert(sizeof(GpuMotion) == 48, "GpuMotion");
+
 struct GpuBatchDesc
 {
     uint32_t firstInstance = 0;

@@ -244,7 +244,22 @@ namespace
         return true;
     }
 
-    // Step F1: TRS mirror (future GPU motion). Drawing uses FillSourceFromEntity.
+    void FillMotionFromEntity(GpuMotion& out, GravityComponent* gravity)
+    {
+        out = {};
+        if (!gravity || !gravity->enabled)
+            return;
+        out.linearVelocity[0] = gravity->velocity.x;
+        out.linearVelocity[1] = gravity->velocity.y;
+        out.linearVelocity[2] = gravity->velocity.z;
+        out.angularVelocity[0] = out.angularVelocity[1] = out.angularVelocity[2] = 0.f;
+        out.gravity = gravity->strength;
+        out.flags = 1u;
+        out.pad0 = out.pad1 = 0.f;
+        out.pad2 = out.pad3 = 0;
+    }
+
+    // Step F1: TRS mirror. F2 motion integrates into GPU buffer after upload.
     void FillTransformFromEntity(
         GpuTransform& out,
         TransformComponent& tf,
@@ -415,6 +430,8 @@ void RenderSystem::Initialize(ID3D12Device* device)
         L"Resources\\Shaders\\build_indirect_commands.hlsl", "CS_BuildCommands", "cs_5_1");
     auto composeBlob = ShaderManager::Get().GetShader(
         L"Resources\\Shaders\\compose_world.hlsl", "CS_ComposeWorld", "cs_5_1");
+    auto motionBlob = ShaderManager::Get().GetShader(
+        L"Resources\\Shaders\\update_motion.hlsl", "CS_UpdateMotion", "cs_5_1");
 
     if (cullBlob && buildBlob && buildRS)
     {
@@ -440,6 +457,17 @@ void RenderSystem::Initialize(ID3D12Device* device)
             ValidateComposeWorldMatchesCpu();
     }
 
+    ID3D12RootSignature* motionRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::UpdateMotion);
+    if (motionBlob && motionRS)
+    {
+        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+        psoDesc.pRootSignature = motionRS;
+        psoDesc.CS = { motionBlob->GetBufferPointer(), motionBlob->GetBufferSize() };
+        if (FAILED(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mUpdateMotionPSO))))
+            mUpdateMotionPSO.Reset();
+    }
+
     ID3D12RootSignature* hizRS =
         RootSignatureManager::Get().GetRootSignature(RootSignatureType::HiZBuild);
     auto hizCopy = ShaderManager::Get().GetShader(
@@ -460,8 +488,10 @@ void RenderSystem::Initialize(ID3D12Device* device)
 
     if (!mComputeIndirectReady)
         OutputDebugStringA("[RenderSystem] Path3 GPU-driven unavailable (CS/PSO). Path1/2 OK.\n");
+    else if (mComposeWorldPSO && mUpdateMotionPSO)
+        OutputDebugStringA("[RenderSystem] Path3 ready (Motion + ComposeWorld + Cull + EI + HiZ).\n");
     else if (mComposeWorldPSO)
-        OutputDebugStringA("[RenderSystem] Path3 ready (ComposeWorld + Cull + EI + HiZ).\n");
+        OutputDebugStringA("[RenderSystem] Path3 ready (ComposeWorld + Cull + EI + HiZ; no Motion PSO).\n");
     else
         OutputDebugStringA("[RenderSystem] Path3 ready (no ComposeWorld PSO; fallback needed).\n");
 
@@ -500,6 +530,11 @@ void RenderSystem::DestroyGpuResources()
             f.transformUpload->Unmap(0, nullptr);
             f.transformMapped = nullptr;
         }
+        if (f.motionUpload && f.motionMapped)
+        {
+            f.motionUpload->Unmap(0, nullptr);
+            f.motionMapped = nullptr;
+        }
         if (f.batchUpload && f.batchMapped)
         {
             f.batchUpload->Unmap(0, nullptr);
@@ -517,10 +552,12 @@ void RenderSystem::DestroyGpuResources()
         }
         f.requestUpload.Reset();
         f.transformUpload.Reset();
+        f.motionUpload.Reset();
         f.batchUpload.Reset();
         f.submeshUpload.Reset();
         f.frameCBUpload.Reset();
         f.transformDefault.Reset();
+        f.motionDefault.Reset();
         f.sourceDefault.Reset();
         f.batchDefault.Reset();
         f.submeshDefault.Reset();
@@ -531,10 +568,12 @@ void RenderSystem::DestroyGpuResources()
         f.countState = D3D12_RESOURCE_STATE_COMMON;
         f.drawCmdState = D3D12_RESOURCE_STATE_COMMON;
         f.transformDefaultState = D3D12_RESOURCE_STATE_COMMON;
+        f.motionDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.uploadedTransformVersion = 0;
+        f.uploadedMotionVersion = 0;
         f.composedTransformVersion = 0;
         f.uploadedMetaVersion = 0;
     }
@@ -549,6 +588,7 @@ void RenderSystem::Shutdown()
     mCullCompactPSO.Reset();
     mBuildCommandsPSO.Reset();
     mComposeWorldPSO.Reset();
+    mUpdateMotionPSO.Reset();
     mHiZCopyPSO.Reset();
     mHiZDownsamplePSO.Reset();
     mComputeIndirectReady = false;
@@ -556,6 +596,7 @@ void RenderSystem::Shutdown()
     mCachedInstancedBatches.clear();
     mCachedOverrideEntities.clear();
     mTransformCpu.clear();
+    mMotionCpu.clear();
     mSourceCpu.clear();
     mBatchDescsCpu.clear();
     mSubmeshDescsCpu.clear();
@@ -578,6 +619,7 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
         sizeof(GpuInstanceSource) * kMaxInstancesPerDraw,
         sizeof(InstanceWorld) * kMaxInstancesPerDraw);
     const UINT64 xformBufSize = sizeof(GpuTransform) * kMaxInstancesPerDraw;
+    const UINT64 motionBufSize = sizeof(GpuMotion) * kMaxInstancesPerDraw;
     const UINT64 sourceBufSize = sizeof(GpuInstanceSource) * kMaxInstancesPerDraw;
     const UINT64 instBufSize = sizeof(InstanceWorld) * kMaxInstancesPerDraw;
     const UINT64 batchBufSize = sizeof(GpuBatchDesc) * kMaxGpuBatches;
@@ -636,6 +678,16 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
             IID_PPV_ARGS(&f.transformUpload)));
         ThrowIfFailed(f.transformUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.transformMapped)));
 
+        // Step F2: motion seed upload
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(motionBufSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&f.motionUpload)));
+        ThrowIfFailed(f.motionUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.motionMapped)));
+
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
             D3D12_HEAP_FLAG_NONE,
@@ -663,15 +715,25 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
             IID_PPV_ARGS(&f.frameCBUpload)));
         ThrowIfFailed(f.frameCBUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.frameCBMapped)));
 
-        // Step F1: TRS DEFAULT (Compose input)
+        // Step F1/F2: TRS DEFAULT (UAV for motion, SRV for compose)
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
             D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(xformBufSize),
+            &CD3DX12_RESOURCE_DESC::Buffer(xformBufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
             D3D12_RESOURCE_STATE_COMMON,
             nullptr,
             IID_PPV_ARGS(&f.transformDefault)));
         f.transformDefaultState = D3D12_RESOURCE_STATE_COMMON;
+
+        // Step F2: motion DEFAULT (persistent velocity on GPU)
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(motionBufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&f.motionDefault)));
+        f.motionDefaultState = D3D12_RESOURCE_STATE_COMMON;
 
         // Compose output / Cull input (UAV+SRV)
         ThrowIfFailed(device->CreateCommittedResource(
@@ -792,14 +854,17 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         });
 
     mTransformCpu.clear();
+    mMotionCpu.clear();
     mSourceCpu.clear();
     mBatchDescsCpu.clear();
     mSubmeshDescsCpu.clear();
     mGpuCpuBatches.clear();
     mEntityToGpuSlot.clear();
+    mMotionActiveCount = 0;
 
     const size_t cap = (std::min)(entries.size(), static_cast<size_t>(kMaxInstancesPerDraw));
     mTransformCpu.reserve(cap);
+    mMotionCpu.reserve(cap);
     mSourceCpu.reserve(cap);
 
     UINT slot = 0;
@@ -856,12 +921,17 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         {
             const Entry& en = entries[groupBegin + k];
             GpuTransform xf{};
+            GpuMotion mot{};
             GpuInstanceSource src{};
             FillTransformFromEntity(xf, *en.tf, *en.rend, en.bounds, batchId);
+            FillMotionFromEntity(mot, world.GetComponent<GravityComponent>(en.entity));
             FillSourceFromEntity(src, *en.tf, *en.rend, en.bounds, batchId);
             mEntityToGpuSlot[en.entity] = slot;
             mTransformCpu.push_back(xf);
+            mMotionCpu.push_back(mot);
             mSourceCpu.push_back(src);
+            if (mot.flags & 1u)
+                ++mMotionActiveCount;
             ++slot;
         }
 
@@ -890,12 +960,14 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
     }
 
     ++mTransformContentVersion;
+    ++mMotionContentVersion;
     ++mMetaVersion;
     mGpuStructureDirty = false;
 }
 
 bool RenderSystem::PatchOneGpuEntity(
-    World& world, FrameResource* frameResource, Entity e, bool& anyPatched)
+    World& world, FrameResource* frameResource, Entity e,
+    bool& anyPatched, bool& motionPatched)
 {
     auto* tf = world.GetComponent<TransformComponent>(e);
     auto* rend = world.GetComponent<RenderableComponent>(e);
@@ -907,7 +979,7 @@ bool RenderSystem::PatchOneGpuEntity(
         return false;
 
     const UINT slot = it->second;
-    if (slot >= mTransformCpu.size() || slot >= mSourceCpu.size())
+    if (slot >= mTransformCpu.size() || slot >= mSourceCpu.size() || slot >= mMotionCpu.size())
         return false;
 
     if (tf->dirtyFrames <= 0)
@@ -926,6 +998,31 @@ bool RenderSystem::PatchOneGpuEntity(
     const UINT batchId = mTransformCpu[slot].batchId;
     FillTransformFromEntity(mTransformCpu[slot], *tf, *rend, bounds, batchId);
     FillSourceFromEntity(mSourceCpu[slot], *tf, *rend, bounds, batchId);
+
+    // F2: GPU owns velocity after seed. Re-seed motion only when:
+    // - GPU motion off (CPU gravity path), or
+    // - enable flag toggled (add/remove gravity)
+    GravityComponent* gravity = world.GetComponent<GravityComponent>(e);
+    const bool gpuOwnsMotion = mGpuMotionEnabled && mUpdateMotionPSO;
+    if (!gpuOwnsMotion)
+    {
+        FillMotionFromEntity(mMotionCpu[slot], gravity);
+        motionPatched = true;
+    }
+    else
+    {
+        const uint32_t want = (gravity && gravity->enabled) ? 1u : 0u;
+        const uint32_t prev = mMotionCpu[slot].flags & 1u;
+        if (want != prev)
+        {
+            FillMotionFromEntity(mMotionCpu[slot], gravity);
+            if (want)
+                ++mMotionActiveCount;
+            else if (mMotionActiveCount > 0)
+                --mMotionActiveCount;
+            motionPatched = true;
+        }
+    }
 
     if (frameResource && frameResource->ObjectCB
         && rend->objectCBIndex < kMaxSceneObjects)
@@ -990,6 +1087,7 @@ void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameRe
     }
 
     bool anyPatched = false;
+    bool motionPatched = false;
     std::vector<Entity> stillPending;
     stillPending.reserve(mPendingTransformDirty.size());
     uint32_t patched = 0;
@@ -997,12 +1095,15 @@ void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameRe
     for (Entity e : mPendingTransformDirty)
     {
         bool touched = false;
-        const bool keep = PatchOneGpuEntity(world, frameResource, e, touched);
+        bool motTouched = false;
+        const bool keep = PatchOneGpuEntity(world, frameResource, e, touched, motTouched);
         if (touched)
         {
             anyPatched = true;
             ++patched;
         }
+        if (motTouched)
+            motionPatched = true;
         if (keep)
             stillPending.push_back(e);
     }
@@ -1014,6 +1115,8 @@ void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameRe
 
     if (anyPatched)
         ++mTransformContentVersion;
+    if (motionPatched)
+        ++mMotionContentVersion;
 
     mLastStats.patchMs = ElapsedMs(t0);
 }
@@ -1035,7 +1138,7 @@ void RenderSystem::UploadGpuDrivenFrameData(
         }
     };
 
-    // Step F1: TRS staging → DEFAULT (compose input)
+    // Step F1: TRS staging → DEFAULT (compose / motion input)
     if (frame.uploadedTransformVersion != mTransformContentVersion && frame.transformMapped)
     {
         const UINT64 bytes = sizeof(GpuTransform) * mTransformCpu.size();
@@ -1058,6 +1161,30 @@ void RenderSystem::UploadGpuDrivenFrameData(
     {
         transition(frame.transformDefault.Get(), frame.transformDefaultState,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+    // Step F2: motion seed → DEFAULT (only on version change; GPU owns velocity after)
+    if (frame.uploadedMotionVersion != mMotionContentVersion && frame.motionMapped && frame.motionDefault)
+    {
+        const UINT64 bytes = sizeof(GpuMotion) * mMotionCpu.size();
+        if (!mMotionCpu.empty() && bytes > 0)
+        {
+            std::memcpy(frame.motionMapped, mMotionCpu.data(), static_cast<size_t>(bytes));
+            transition(frame.motionDefault.Get(), frame.motionDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
+            cmdList->CopyBufferRegion(
+                frame.motionDefault.Get(), 0,
+                frame.motionUpload.Get(), 0,
+                bytes);
+            transition(frame.motionDefault.Get(), frame.motionDefaultState,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            mLastStats.usedDefaultHeapCopy = true;
+        }
+        frame.uploadedMotionVersion = mMotionContentVersion;
+    }
+    else if (frame.motionDefault)
+    {
+        transition(frame.motionDefault.Get(), frame.motionDefaultState,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
     if (frame.uploadedMetaVersion != mMetaVersion)
@@ -1100,6 +1227,156 @@ void RenderSystem::UploadGpuDrivenFrameData(
     }
 
     mLastStats.uploadMs = ElapsedMs(t0);
+}
+
+bool RenderSystem::ShouldSkipCpuGravity() const
+{
+    return mGpuMotionEnabled
+        && mUpdateMotionPSO
+        && mRenderPath == RenderPath::ComputeIndirect
+        && mComputeIndirectReady;
+}
+
+void RenderSystem::SetGpuMotionEnabled(bool enabled)
+{
+    if (mGpuMotionEnabled == enabled)
+        return;
+    mGpuMotionEnabled = enabled;
+    // Force motion buffer re-upload on next Path3 frame (seed from current ECS)
+    ++mMotionContentVersion;
+}
+
+void RenderSystem::NotifyEntityMotionChanged(World& world, Entity e)
+{
+    auto it = mEntityToGpuSlot.find(e);
+    if (it == mEntityToGpuSlot.end())
+        return;
+    const UINT slot = it->second;
+    if (slot >= mMotionCpu.size())
+        return;
+
+    const uint32_t prev = mMotionCpu[slot].flags & 1u;
+    FillMotionFromEntity(mMotionCpu[slot], world.GetComponent<GravityComponent>(e));
+    const uint32_t now = mMotionCpu[slot].flags & 1u;
+    if (prev != now)
+    {
+        if (now)
+            ++mMotionActiveCount;
+        else if (mMotionActiveCount > 0)
+            --mMotionActiveCount;
+    }
+    ++mMotionContentVersion;
+}
+
+void RenderSystem::SyncGpuMotionFromWorld(World& world)
+{
+    if (mMotionCpu.empty() || mEntityToGpuSlot.empty())
+    {
+        mMotionActiveCount = 0;
+        return;
+    }
+
+    bool anyChange = false;
+    uint32_t active = 0;
+
+    for (const auto& kv : mEntityToGpuSlot)
+    {
+        const UINT slot = kv.second;
+        if (slot >= mMotionCpu.size())
+            continue;
+
+        GpuMotion want{};
+        FillMotionFromEntity(want, world.GetComponent<GravityComponent>(kv.first));
+        GpuMotion& cur = mMotionCpu[slot];
+
+        const bool wantOn = (want.flags & 1u) != 0;
+        const bool curOn = (cur.flags & 1u) != 0;
+
+        // Enable / disable / strength change → reseed from ECS (resets v to component)
+        // Stay-on: do NOT overwrite velocity (GPU owns it after seed)
+        if (wantOn != curOn || (wantOn && want.gravity != cur.gravity))
+        {
+            cur = want;
+            anyChange = true;
+        }
+
+        if (cur.flags & 1u)
+            ++active;
+    }
+
+    mMotionActiveCount = active;
+    if (anyChange)
+        ++mMotionContentVersion;
+}
+
+bool RenderSystem::DispatchUpdateMotion(
+    ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances)
+{
+    mLastStats.didGpuMotion = false;
+    mLastStats.motionMs = 0.f;
+    mLastStats.motionActive = mMotionActiveCount;
+    mLastStats.gpuMotionEnabled = mGpuMotionEnabled;
+
+    if (!mGpuMotionEnabled || !mUpdateMotionPSO || !frame.transformDefault || !frame.motionDefault)
+        return false;
+    if (numInstances == 0 || mMotionActiveCount == 0)
+        return false;
+    if (numInstances > mTransformCpu.size())
+        numInstances = static_cast<UINT>(mTransformCpu.size());
+
+    ID3D12RootSignature* motionRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::UpdateMotion);
+    if (!motionRS)
+        return false;
+
+    const auto t0 = std::chrono::high_resolution_clock::now();
+
+    auto transition = [&](ID3D12Resource* res, D3D12_RESOURCE_STATES& st, D3D12_RESOURCE_STATES target)
+    {
+        if (st != target)
+        {
+            cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(res, st, target));
+            st = target;
+        }
+    };
+
+    transition(frame.transformDefault.Get(), frame.transformDefaultState,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    transition(frame.motionDefault.Get(), frame.motionDefaultState,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    cmdList->SetComputeRootSignature(motionRS);
+    cmdList->SetPipelineState(mUpdateMotionPSO.Get());
+
+    const float dt = (mFrameDeltaTime > 0.f && mFrameDeltaTime < 0.25f)
+        ? mFrameDeltaTime
+        : (1.f / 60.f);
+    // Root constants: uint, uint, float, uint — pack float as bits
+    UINT constants[4];
+    constants[0] = numInstances;
+    constants[1] = kMaxInstancesPerDraw;
+    std::memcpy(&constants[2], &dt, sizeof(float));
+    constants[3] = 0;
+    cmdList->SetComputeRoot32BitConstants(0, 4, constants, 0);
+    cmdList->SetComputeRootUnorderedAccessView(1, frame.transformDefault->GetGPUVirtualAddress());
+    cmdList->SetComputeRootUnorderedAccessView(2, frame.motionDefault->GetGPUVirtualAddress());
+
+    cmdList->Dispatch((numInstances + 63u) / 64u, 1, 1);
+
+    {
+        D3D12_RESOURCE_BARRIER b[2];
+        b[0] = CD3DX12_RESOURCE_BARRIER::UAV(frame.transformDefault.Get());
+        b[1] = CD3DX12_RESOURCE_BARRIER::UAV(frame.motionDefault.Get());
+        cmdList->ResourceBarrier(2, b);
+    }
+
+    // Compose reads transforms as SRV
+    transition(frame.transformDefault.Get(), frame.transformDefaultState,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    mLastStats.didGpuMotion = true;
+    mLastStats.motionMs = ElapsedMs(t0);
+    return true;
 }
 
 void RenderSystem::DispatchComposeWorld(
@@ -1636,6 +1913,8 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         mLastProcessedDirtyGen = TransformDirtyTracker::Generation();
     }
     PatchGpuDrivenTransforms(world, currentFrameResource);
+    // Gravity toggle / Enabled checkbox — reseed motion without scene rebuild
+    SyncGpuMotionFromWorld(world);
 
     mLastStats.sourceCount = static_cast<uint32_t>(mSourceCpu.size());
     mLastStats.batchCount = static_cast<uint32_t>(mBatchDescsCpu.size());
@@ -1675,10 +1954,15 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 
     UploadGpuDrivenFrameData(cmdList, frame);
 
-    // Step F1: TRS (GPU) → world in sourceDefault; CPU fallback if no Compose PSO
+    // Step F2 motion → F1 compose → cull
     const UINT numXforms = static_cast<UINT>((std::min)(
         (std::min)(mTransformCpu.size(), mSourceCpu.size()),
         static_cast<size_t>(kMaxInstancesPerDraw)));
+    if (DispatchUpdateMotion(cmdList, frame, numXforms))
+    {
+        // GPU changed TRS — force compose this frame slot
+        frame.composedTransformVersion = 0;
+    }
     DispatchComposeWorld(cmdList, frame, numXforms);
 
     // 2) Frame CB (카메라/컬링/오클루전 — 매 프레임)

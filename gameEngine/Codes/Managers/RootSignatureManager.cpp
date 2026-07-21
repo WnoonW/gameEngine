@@ -20,6 +20,7 @@ void RootSignatureManager::Initialize(ID3D12Device* device)
     CreateIndirectBuildRootSignature();
     CreateHiZBuildRootSignature();
     CreateComposeWorldRootSignature();
+    CreateUpdateMotionRootSignature();
     CreateSceneCommandSignature();
 }
 
@@ -215,6 +216,38 @@ void RootSignatureManager::CreateComposeWorldRootSignature()
         IID_PPV_ARGS(&rootSig)));
 
     mRootSignatures[RootSignatureType::ComposeWorld] = rootSig;
+}
+
+void RootSignatureManager::CreateUpdateMotionRootSignature()
+{
+    // b0 num/max/dt | u0 transforms | u1 motion
+    CD3DX12_ROOT_PARAMETER params[3];
+    params[0].InitAsConstants(4, 0);
+    params[1].InitAsUnorderedAccessView(0);
+    params[2].InitAsUnorderedAccessView(1);
+
+    CD3DX12_ROOT_SIGNATURE_DESC desc(
+        3, params,
+        0, nullptr,
+        D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+    ComPtr<ID3DBlob> serialized;
+    ComPtr<ID3DBlob> error;
+    HRESULT hr = D3D12SerializeRootSignature(
+        &desc, D3D_ROOT_SIGNATURE_VERSION_1,
+        serialized.GetAddressOf(), error.GetAddressOf());
+    if (error)
+        OutputDebugStringA((char*)error->GetBufferPointer());
+    ThrowIfFailed(hr);
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    ThrowIfFailed(mDevice->CreateRootSignature(
+        0,
+        serialized->GetBufferPointer(),
+        serialized->GetBufferSize(),
+        IID_PPV_ARGS(&rootSig)));
+
+    mRootSignatures[RootSignatureType::UpdateMotion] = rootSig;
 }
 
 void RootSignatureManager::CreateSceneCommandSignature()

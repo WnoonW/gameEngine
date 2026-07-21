@@ -50,6 +50,8 @@ public:
     bool IsGpuFrustumCullEnabled() const;
     void SetGpuOcclusionEnabled(bool enabled);
     bool IsGpuOcclusionEnabled() const;
+    void SetGpuMotionEnabled(bool enabled);
+    bool IsGpuMotionEnabled() const;
     const GpuDrivenFrameStats& GetLastFrameStats() const;
 
     // Scene RT 리사이즈 후 GPU idle 상태에서 Hi-Z 재할당

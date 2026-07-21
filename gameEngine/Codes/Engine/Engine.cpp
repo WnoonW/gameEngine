@@ -44,7 +44,9 @@ bool Engine::Initialize(ID3D12Device* device,
 
 void Engine::Update(float deltaTime)
 {
-    mGravitySystem.Update(mWorld, deltaTime);
+    mRenderSystem.SetFrameDeltaTime(deltaTime);
+    // F2: Path3 GPU motion integrates gravity objects — skip CPU double-apply
+    mGravitySystem.Update(mWorld, deltaTime, mRenderSystem.ShouldSkipCpuGravity());
     UpdateBounds();
     // 충돌이 실제로 움직인 경우에만 bounds 2차 갱신 (정적 대량 씬에서 이중 순회 제거)
     if (mCollisionSystem.Update(mWorld))
@@ -434,6 +436,17 @@ bool Engine::IsGpuOcclusionEnabled() const
     return mRenderSystem.IsGpuOcclusionEnabled();
 }
 
+void Engine::SetGpuMotionEnabled(bool enabled)
+{
+    mRenderSystem.SetGpuMotionEnabled(enabled);
+    // Path3 may be mid-frame; motion seed version bumped inside SetGpuMotionEnabled
+}
+
+bool Engine::IsGpuMotionEnabled() const
+{
+    return mRenderSystem.IsGpuMotionEnabled();
+}
+
 void Engine::PrepareHiZForSceneSize(UINT width, UINT height)
 {
     if (!mDescriptorAllocator)
@@ -739,6 +752,9 @@ void Engine::SetEntityGravityEnabled(Entity entity, bool enabled)
     {
         mWorld.RemoveComponent<GravityComponent>(entity);
     }
+
+    // F2: Path3 motion buffer must reseed without waiting for scene rebuild
+    mRenderSystem.NotifyEntityMotionChanged(mWorld, entity);
 }
 
 bool Engine::HasCollisionComponent(Entity entity)

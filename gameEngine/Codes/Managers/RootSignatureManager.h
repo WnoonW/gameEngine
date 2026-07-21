@@ -14,6 +14,7 @@ enum class RootSignatureType
     IndirectBuild,  // Path3: cull/compact/build commands
     HiZBuild,       // Path3: hierarchical-Z pyramid
     ComposeWorld,   // Step F1: TRS → world matrix
+    UpdateMotion,   // Step F2: velocity → TRS
 };
 
 class RootSignatureManager
@@ -35,6 +36,7 @@ private:
     void CreateIndirectBuildRootSignature();
     void CreateHiZBuildRootSignature();
     void CreateComposeWorldRootSignature();
+    void CreateUpdateMotionRootSignature();
     void CreateSceneCommandSignature();
 
     ID3D12Device* mDevice = nullptr;

@@ -4,8 +4,11 @@
 using namespace ECS;
 using namespace DirectX;
 
-void GravitySystem::Update(World& world, float deltaTime)
+void GravitySystem::Update(World& world, float deltaTime, bool skipCpuIntegrate)
 {
+    if (skipCpuIntegrate)
+        return;
+
     // GravityComponent 없는 아키타입은 ForEach가 바로 끝남 (정적 대량 씬 무부담)
     world.ForEach<TransformComponent, GravityComponent>(
         [&](Entity e, TransformComponent& tf, GravityComponent& gravity)

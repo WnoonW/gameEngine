@@ -48,6 +48,8 @@ struct GpuDrivenFrameStats
     bool usedDefaultHeapCopy = false;
     bool didBuildHiZ = false;
     bool didComposeWorld = false; // Step F1
+    bool didGpuMotion = false;    // Step F2
+    bool gpuMotionEnabled = false;
     uint32_t sourceCount = 0;
     uint32_t batchCount = 0;
     uint32_t submeshDraws = 0;
@@ -57,10 +59,12 @@ struct GpuDrivenFrameStats
     uint32_t hizMips = 0;
     uint32_t eiCalls = 0;       // ExecuteIndirect 호출 수
     uint32_t multiEiRuns = 0;   // MaxCommandCount > 1 인 연속 머티리얼 런
+    uint32_t motionActive = 0;  // slots with motion flags
     float rebuildMs = 0.f;
     float patchMs = 0.f;
     float uploadMs = 0.f;
     float composeMs = 0.f;
+    float motionMs = 0.f;
     float hizMs = 0.f;
 };
 
@@ -83,6 +87,16 @@ public:
 
     void SetGpuOcclusionEnabled(bool enabled) { mGpuOcclusion = enabled; }
     bool IsGpuOcclusionEnabled() const { return mGpuOcclusion; }
+
+    // Step F2: GPU integrates velocity/gravity into TRS (Path3)
+    void SetGpuMotionEnabled(bool enabled);
+    bool IsGpuMotionEnabled() const { return mGpuMotionEnabled; }
+    // True when Path3 will run GPU motion this frame (CPU gravity should skip)
+    bool ShouldSkipCpuGravity() const;
+    // Gravity add/remove/enable toggle — reseed motion slot without full rebuild
+    void NotifyEntityMotionChanged(World& world, Entity e);
+
+    void SetFrameDeltaTime(float dt) { mFrameDeltaTime = dt; }
 
     void InvalidateDrawCache();
 
@@ -113,12 +127,14 @@ private:
         // Staging (UPLOAD) — Path2 instances / Path3 transform TRS
         ComPtr<ID3D12Resource> requestUpload;
         ComPtr<ID3D12Resource> transformUpload; // Step F1 GpuTransform[]
+        ComPtr<ID3D12Resource> motionUpload;    // Step F2 GpuMotion[]
         ComPtr<ID3D12Resource> batchUpload;
         ComPtr<ID3D12Resource> submeshUpload;
         ComPtr<ID3D12Resource> frameCBUpload;
 
         // Step C/F: GPU-resident DEFAULT
-        ComPtr<ID3D12Resource> transformDefault; // TRS input to ComposeWorld
+        ComPtr<ID3D12Resource> transformDefault; // TRS (UAV for F2, SRV for Compose)
+        ComPtr<ID3D12Resource> motionDefault;    // Step F2 motion UAV
         ComPtr<ID3D12Resource> sourceDefault;    // ComposeWorld output / Cull input
         ComPtr<ID3D12Resource> batchDefault;
         ComPtr<ID3D12Resource> submeshDefault;
@@ -129,6 +145,7 @@ private:
 
         BYTE* requestMapped = nullptr;
         BYTE* transformMapped = nullptr;
+        BYTE* motionMapped = nullptr;
         BYTE* batchMapped = nullptr;
         BYTE* submeshMapped = nullptr;
         BYTE* frameCBMapped = nullptr;
@@ -137,11 +154,13 @@ private:
         D3D12_RESOURCE_STATES countState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES drawCmdState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES transformDefaultState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES motionDefaultState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
 
         uint32_t uploadedTransformVersion = 0;
+        uint32_t uploadedMotionVersion = 0;
         uint32_t composedTransformVersion = 0;
         uint32_t uploadedMetaVersion = 0;
     };
@@ -188,7 +207,11 @@ private:
 
     void RebuildGpuDrivenScene(World& world);
     void PatchGpuDrivenTransforms(World& world, FrameResource* frameResource);
+    // Compare ECS Gravity vs mMotionCpu; reseed + bump version on change
+    void SyncGpuMotionFromWorld(World& world);
     void UploadGpuDrivenFrameData(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame);
+    // Returns true if any instance was integrated (forces recompose)
+    bool DispatchUpdateMotion(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances);
     void DispatchComposeWorld(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances);
 
     void DrawInstancedBatches(
@@ -199,7 +222,8 @@ private:
         const std::vector<Entity>& overrideEntities,
         World& world);
 
-    bool PatchOneGpuEntity(World& world, FrameResource* frameResource, Entity e, bool& anyPatched);
+    bool PatchOneGpuEntity(World& world, FrameResource* frameResource, Entity e,
+        bool& anyPatched, bool& motionPatched);
 
     struct CachedInstancedBatch
     {
@@ -221,12 +245,16 @@ private:
     bool mAutoRenderPath = true; // Step G 기본 ON
     bool mGpuFrustumCull = true;
     bool mGpuOcclusion = true;
+    bool mGpuMotionEnabled = true; // Step F2 default ON for Path3
+    float mFrameDeltaTime = 1.f / 60.f;
+    uint32_t mMotionActiveCount = 0;
     ID3D12Device* mDevice = nullptr;
     DescriptorAllocator* mSrvAlloc = nullptr;
 
     ComPtr<ID3D12PipelineState> mCullCompactPSO;
     ComPtr<ID3D12PipelineState> mBuildCommandsPSO;
     ComPtr<ID3D12PipelineState> mComposeWorldPSO;
+    ComPtr<ID3D12PipelineState> mUpdateMotionPSO;
     ComPtr<ID3D12PipelineState> mHiZCopyPSO;
     ComPtr<ID3D12PipelineState> mHiZDownsamplePSO;
     ComPtr<ID3D12Resource> mCounterZeroUpload;
@@ -266,9 +294,11 @@ private:
 
     bool mGpuStructureDirty = true;
     uint32_t mTransformContentVersion = 1; // TRS + world source content
+    uint32_t mMotionContentVersion = 1;    // Step F2 motion seed
     uint32_t mMetaVersion = 1;
-    std::vector<GpuTransform> mTransformCpu;      // Step F1 TRS mirror (F2 motion)
-    std::vector<GpuInstanceSource> mSourceCpu;    // cull input: entity-exact world
+    std::vector<GpuTransform> mTransformCpu;      // Step F1 TRS mirror
+    std::vector<GpuMotion> mMotionCpu;            // Step F2 motion seed
+    std::vector<GpuInstanceSource> mSourceCpu;    // CPU fallback / seed world
     std::vector<GpuBatchDesc> mBatchDescsCpu;
     std::vector<GpuSubmeshDesc> mSubmeshDescsCpu;
     std::vector<GpuCpuBatch> mGpuCpuBatches;
