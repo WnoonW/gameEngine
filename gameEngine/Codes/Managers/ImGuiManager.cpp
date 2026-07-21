@@ -605,7 +605,7 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 
         if (ImGui::CollapsingHeader("Render Stats", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::Text("Path: %s", pathName);
+            ImGui::Text("Path: %s %s", pathName, st.autoPath ? "(Auto)" : "(Manual)");
             ImGui::Text("Frustum Cull: %s", st.cullEnabled ? "ON" : "OFF");
             ImGui::Text("Occlusion(HiZ): %s  valid=%s  mips=%u",
                 st.occlusionEnabled ? "ON" : "OFF",
@@ -613,6 +613,7 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                 st.hizMips);
             ImGui::Text("Sources: %u  Batches: %u  SubDraws: %u",
                 st.sourceCount, st.batchCount, st.submeshDraws);
+            ImGui::Text("EI calls: %u  multi-runs: %u", st.eiCalls, st.multiEiRuns);
             ImGui::Text("Rebuild: %s (%.3f ms)", st.didRebuild ? "Y" : "N", st.rebuildMs);
             ImGui::Text("Patch: %s  dirtyIn=%u patched=%u pend=%u  %.3f ms",
                 st.skippedPatch ? "SKIP" : (st.usedDirtyList ? "LIST" : "SCAN"),
@@ -623,6 +624,16 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                 st.usedDefaultHeapCopy ? "Y" : "N",
                 st.uploadMs);
             ImGui::Text("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
+
+            if (ImGui::Button(st.autoPath ? "Auto Path: ON" : "Auto Path: OFF"))
+                engine->SetAutoRenderPathEnabled(!engine->IsAutoRenderPathEnabled());
+            ImGui::SameLine();
+            if (ImGui::Button("Force Instanced"))
+                engine->SetRenderPath(RenderPath::Instanced);
+            ImGui::SameLine();
+            if (ImGui::Button("Force GPU-driven"))
+                engine->SetRenderPath(RenderPath::ComputeIndirect);
+
             if (ImGui::Button(st.cullEnabled ? "Disable Frustum Cull" : "Enable Frustum Cull"))
                 engine->SetGpuFrustumCullEnabled(!st.cullEnabled);
             ImGui::SameLine();

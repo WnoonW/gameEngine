@@ -36,6 +36,7 @@ enum class RenderPath
 struct GpuDrivenFrameStats
 {
     RenderPath path = RenderPath::Instanced;
+    bool autoPath = false;
     bool cullEnabled = false;
     bool occlusionEnabled = false;
     bool hizValid = false;
@@ -53,6 +54,8 @@ struct GpuDrivenFrameStats
     uint32_t dirtyListIn = 0;
     uint32_t pendingDirty = 0;
     uint32_t hizMips = 0;
+    uint32_t eiCalls = 0;       // ExecuteIndirect 호출 수
+    uint32_t multiEiRuns = 0;   // MaxCommandCount > 1 인 연속 머티리얼 런
     float rebuildMs = 0.f;
     float patchMs = 0.f;
     float uploadMs = 0.f;
@@ -68,6 +71,10 @@ public:
     void SetRenderPath(RenderPath path);
     RenderPath GetRenderPath() const { return mRenderPath; }
     bool IsComputeIndirectReady() const { return mComputeIndirectReady; }
+
+    // Step G: 오브젝트 수에 따라 Basic/Instanced/ComputeIndirect 자동 선택
+    void SetAutoRenderPathEnabled(bool enabled);
+    bool IsAutoRenderPathEnabled() const { return mAutoRenderPath; }
 
     void SetGpuFrustumCullEnabled(bool enabled) { mGpuFrustumCull = enabled; }
     bool IsGpuFrustumCullEnabled() const { return mGpuFrustumCull; }
@@ -201,10 +208,12 @@ private:
     void DestroyHiZResources(DescriptorAllocator* alloc);
     bool IsHiZSampleReady() const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetHiZSampleSrvGpu() const;
+    void UpdateAutoRenderPath(World& world);
 
     RenderPath mRenderPath = RenderPath::ComputeIndirect;
+    bool mAutoRenderPath = true; // Step G 기본 ON
     bool mGpuFrustumCull = true;
-    bool mGpuOcclusion = true; // ring-buffer 적용 후 시작 ON 가능
+    bool mGpuOcclusion = true;
     ID3D12Device* mDevice = nullptr;
     DescriptorAllocator* mSrvAlloc = nullptr;
 

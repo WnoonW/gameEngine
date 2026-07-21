@@ -202,13 +202,10 @@ bool InitDirect3DApp::Initialize()
 	LoadAssets();
 	CreateInitialScene();
 
-	// 렌더 경로
-	// mEngine.SetRenderPath(RenderPath::Basic);
-	// mEngine.SetRenderPath(RenderPath::Instanced);
-	// mEngine.SetRenderPath(RenderPath::ComputeIndirect);
-	mEngine.SetRenderPath(RenderPath::ComputeIndirect);
+	// Step G: Auto path (N>=32 → ComputeIndirect, else Instanced)
+	// 수동 고정: SetAutoRenderPathEnabled(false) 후 SetRenderPath(...)
+	mEngine.SetAutoRenderPathEnabled(true);
 	mEngine.SetGpuFrustumCullEnabled(true);
-	// Occlusion: 시작 true 가능 (Hi-Z ring + resize 시 GPU-idle recreate)
 	mEngine.SetGpuOcclusionEnabled(true);
 
 	ThrowIfFailed(mCommandList->Close());

@@ -209,6 +209,9 @@ void RenderSystem::SetRenderPath(RenderPath path)
         return;
     }
 
+    // 수동 지정 시 Auto 해제
+    mAutoRenderPath = false;
+
     const char* name = "Unknown";
     switch (path)
     {
@@ -217,12 +220,53 @@ void RenderSystem::SetRenderPath(RenderPath path)
     case RenderPath::ComputeIndirect: name = "ComputeIndirect(GPU-driven)"; break;
     }
     char buf[160];
-    sprintf_s(buf, "[RenderSystem] SetRenderPath -> %s\n", name);
+    sprintf_s(buf, "[RenderSystem] SetRenderPath -> %s (auto off)\n", name);
     OutputDebugStringA(buf);
 
     mRenderPath = path;
     if (path == RenderPath::ComputeIndirect)
         mGpuStructureDirty = true;
+}
+
+void RenderSystem::SetAutoRenderPathEnabled(bool enabled)
+{
+    mAutoRenderPath = enabled;
+    char buf[96];
+    sprintf_s(buf, "[RenderSystem] AutoRenderPath -> %s\n", enabled ? "ON" : "OFF");
+    OutputDebugStringA(buf);
+}
+
+void RenderSystem::UpdateAutoRenderPath(World& world)
+{
+    if (!mAutoRenderPath)
+        return;
+
+    size_t n = 0;
+    world.ForEach<RenderableComponent>(
+        [&](Entity, RenderableComponent&)
+        {
+            ++n;
+        });
+
+    // Step G thresholds (기능 유지 + 대량 씬에서 Path3)
+    //  < 32  : Instanced (오버헤드 적음, 안정)
+    //  >= 32 : ComputeIndirect (가능하면)
+    RenderPath chosen = RenderPath::Instanced;
+    if (n >= 32 && mComputeIndirectReady)
+        chosen = RenderPath::ComputeIndirect;
+    else if (n > 0 && n < 4)
+        chosen = RenderPath::Instanced; // Basic은 디버그용으로만 수동 사용
+
+    if (chosen != mRenderPath)
+    {
+        if (chosen == RenderPath::ComputeIndirect)
+            mGpuStructureDirty = true;
+        mRenderPath = chosen;
+        char buf[128];
+        sprintf_s(buf, "[RenderSystem] Auto path -> %s (objects=%zu)\n",
+            chosen == RenderPath::ComputeIndirect ? "ComputeIndirect" : "Instanced", n);
+        OutputDebugStringA(buf);
+    }
 }
 
 void RenderSystem::Initialize(ID3D12Device* device)
@@ -882,6 +926,9 @@ void RenderSystem::render(ECS::World& world,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
+    // Step G: 매 프레임 자동 경로 (수동 SetRenderPath 시 auto off)
+    UpdateAutoRenderPath(world);
+
     switch (mRenderPath)
     {
     case RenderPath::ComputeIndirect:
@@ -1168,6 +1215,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
         {
             mLastStats = {};
             mLastStats.path = RenderPath::Instanced;
+            mLastStats.autoPath = mAutoRenderPath;
             mLastStats.skippedPatch = true;
             mLastStats.sourceCount = 0;
             for (const auto& b : mCachedInstancedBatches)
@@ -1234,6 +1282,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
 
     mLastStats = {};
     mLastStats.path = RenderPath::Instanced;
+    mLastStats.autoPath = mAutoRenderPath;
     mLastStats.pendingDirty = static_cast<uint32_t>(mPendingTransformDirty.size());
     mLastStats.batchCount = static_cast<uint32_t>(mCachedInstancedBatches.size());
     for (const auto& b : mCachedInstancedBatches)
@@ -1266,10 +1315,13 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     mSrvAlloc = descriptorAllocator;
     mLastStats = {};
     mLastStats.path = RenderPath::ComputeIndirect;
+    mLastStats.autoPath = mAutoRenderPath;
     mLastStats.cullEnabled = mGpuFrustumCull;
     mLastStats.occlusionEnabled = mGpuOcclusion;
     mLastStats.hizValid = IsHiZSampleReady();
     mLastStats.hizMips = mHiZMipCount;
+    mLastStats.eiCalls = 0;
+    mLastStats.multiEiRuns = 0;
 
     // 1) CPU: 구조 변경 시 배치 재빌드 + dirty 슬롯 패치
     if (mGpuStructureDirty)
@@ -1509,22 +1561,38 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        for (UINT si = 0; si < batch.submeshCount; ++si)
+        // 같은 머티리얼 연속 구간 → ExecuteIndirect MaxCommandCount > 1
+        UINT si = 0;
+        while (si < batch.submeshCount)
         {
-            const UINT cmdIndex = batch.firstSubmesh + si;
-            if (cmdIndex >= mSubmeshDescsCpu.size())
-                break;
-            if (si >= batch.materialIndices.size())
+            if (batch.firstSubmesh + si >= mSubmeshDescsCpu.size()
+                || si >= batch.materialIndices.size())
                 break;
 
-            BindMaterialByIndex(cmdList, descriptorAllocator,
-                batch.materialIndices[si], lastMat);
+            const UINT mat = batch.materialIndices[si];
+            const UINT runStart = si;
+            while (si < batch.submeshCount
+                && si < batch.materialIndices.size()
+                && batch.materialIndices[si] == mat)
+            {
+                ++si;
+            }
+            const UINT runLen = si - runStart;
+            if (runLen == 0)
+                break;
 
+            BindMaterialByIndex(cmdList, descriptorAllocator, mat, lastMat);
+
+            const UINT cmdIndex = batch.firstSubmesh + runStart;
             const UINT64 argOffset = (UINT64)cmdIndex * sizeof(IndirectCommand);
             cmdList->ExecuteIndirect(
-                cmdSig, 1,
+                cmdSig, runLen,
                 frame.drawCmdBuffer.Get(), argOffset,
                 nullptr, 0);
+
+            ++mLastStats.eiCalls;
+            if (runLen > 1)
+                ++mLastStats.multiEiRuns;
         }
     }
 }

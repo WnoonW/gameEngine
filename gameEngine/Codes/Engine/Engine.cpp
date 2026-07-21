@@ -399,6 +399,16 @@ bool Engine::IsComputeIndirectReady() const
     return mRenderSystem.IsComputeIndirectReady();
 }
 
+void Engine::SetAutoRenderPathEnabled(bool enabled)
+{
+    mRenderSystem.SetAutoRenderPathEnabled(enabled);
+}
+
+bool Engine::IsAutoRenderPathEnabled() const
+{
+    return mRenderSystem.IsAutoRenderPathEnabled();
+}
+
 void Engine::SetGpuFrustumCullEnabled(bool enabled)
 {
     mRenderSystem.SetGpuFrustumCullEnabled(enabled);

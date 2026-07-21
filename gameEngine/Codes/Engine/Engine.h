@@ -44,6 +44,8 @@ public:
     void SetRenderPath(RenderPath path);
     RenderPath GetRenderPath() const;
     bool IsComputeIndirectReady() const;
+    void SetAutoRenderPathEnabled(bool enabled);
+    bool IsAutoRenderPathEnabled() const;
     void SetGpuFrustumCullEnabled(bool enabled);
     bool IsGpuFrustumCullEnabled() const;
     void SetGpuOcclusionEnabled(bool enabled);
