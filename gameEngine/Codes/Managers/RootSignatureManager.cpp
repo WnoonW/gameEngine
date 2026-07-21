@@ -18,6 +18,7 @@ void RootSignatureManager::Initialize(ID3D12Device* device)
 
     CreateSceneRootSignature();
     CreateIndirectBuildRootSignature();
+    CreateHiZBuildRootSignature();
     CreateSceneCommandSignature();
 }
 
@@ -98,21 +99,31 @@ void RootSignatureManager::CreateSceneRootSignature()
 
 void RootSignatureManager::CreateIndirectBuildRootSignature()
 {
-    // Path3 GPU-driven:
     // b0 frame | t0 source | t1 batches | t2 submeshes
-    // u0 compact | u1 batchCounters | u2 drawCmds
-    CD3DX12_ROOT_PARAMETER params[7];
+    // t3 HiZ (table) | s0 point | u0 compact | u1 counters | u2 drawCmds
+    CD3DX12_DESCRIPTOR_RANGE hizRange;
+    hizRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3); // t3
+
+    CD3DX12_ROOT_PARAMETER params[8];
     params[0].InitAsConstantBufferView(0);
     params[1].InitAsShaderResourceView(0);
     params[2].InitAsShaderResourceView(1);
     params[3].InitAsShaderResourceView(2);
-    params[4].InitAsUnorderedAccessView(0);
-    params[5].InitAsUnorderedAccessView(1);
-    params[6].InitAsUnorderedAccessView(2);
+    params[4].InitAsDescriptorTable(1, &hizRange, D3D12_SHADER_VISIBILITY_ALL);
+    params[5].InitAsUnorderedAccessView(0);
+    params[6].InitAsUnorderedAccessView(1);
+    params[7].InitAsUnorderedAccessView(2);
+
+    CD3DX12_STATIC_SAMPLER_DESC samp(
+        0,
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(
-        7, params,
-        0, nullptr,
+        8, params,
+        1, &samp,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
     ComPtr<ID3DBlob> serialized;
@@ -132,6 +143,43 @@ void RootSignatureManager::CreateIndirectBuildRootSignature()
         IID_PPV_ARGS(&rootSig)));
 
     mRootSignatures[RootSignatureType::IndirectBuild] = rootSig;
+}
+
+void RootSignatureManager::CreateHiZBuildRootSignature()
+{
+    // b0 sizes | t0 src tex | u0 dst mip
+    CD3DX12_DESCRIPTOR_RANGE srvRange;
+    srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    CD3DX12_DESCRIPTOR_RANGE uavRange;
+    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+
+    CD3DX12_ROOT_PARAMETER params[3];
+    params[0].InitAsConstants(8, 0); // srcW,srcH,dstW,dstH,srcMip,pad...
+    params[1].InitAsDescriptorTable(1, &srvRange);
+    params[2].InitAsDescriptorTable(1, &uavRange);
+
+    CD3DX12_ROOT_SIGNATURE_DESC desc(
+        3, params,
+        0, nullptr,
+        D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+    ComPtr<ID3DBlob> serialized;
+    ComPtr<ID3DBlob> error;
+    HRESULT hr = D3D12SerializeRootSignature(
+        &desc, D3D_ROOT_SIGNATURE_VERSION_1,
+        serialized.GetAddressOf(), error.GetAddressOf());
+    if (error)
+        OutputDebugStringA((char*)error->GetBufferPointer());
+    ThrowIfFailed(hr);
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    ThrowIfFailed(mDevice->CreateRootSignature(
+        0,
+        serialized->GetBufferPointer(),
+        serialized->GetBufferSize(),
+        IID_PPV_ARGS(&rootSig)));
+
+    mRootSignatures[RootSignatureType::HiZBuild] = rootSig;
 }
 
 void RootSignatureManager::CreateSceneCommandSignature()

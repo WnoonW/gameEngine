@@ -14,6 +14,8 @@ void SceneViewport::Initialize(
 
     if (mSrv.Index == UINT_MAX)
         mSrv = mSrvAllocator->Allocate();
+    if (mDepthSrv.Index == UINT_MAX)
+        mDepthSrv = mSrvAllocator->Allocate();
 
     D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
     rtvDesc.NumDescriptors = 1;
@@ -32,10 +34,18 @@ void SceneViewport::Shutdown()
 {
     DestroySizeDependentResources();
 
-    if (mSrvAllocator && mSrv.Index != UINT_MAX)
+    if (mSrvAllocator)
     {
-        mSrvAllocator->Free(mSrv);
-        mSrv = {};
+        if (mSrv.Index != UINT_MAX)
+        {
+            mSrvAllocator->Free(mSrv);
+            mSrv = {};
+        }
+        if (mDepthSrv.Index != UINT_MAX)
+        {
+            mSrvAllocator->Free(mDepthSrv);
+            mDepthSrv = {};
+        }
     }
 
     mRtvHeap.Reset();
@@ -66,6 +76,7 @@ void SceneViewport::DestroySizeDependentResources()
     mWidth = 0;
     mHeight = 0;
     mColorState = D3D12_RESOURCE_STATE_COMMON;
+    mDepthState = D3D12_RESOURCE_STATE_COMMON;
 }
 
 void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
@@ -74,6 +85,7 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
     assert(mRtvHeap);
     assert(mDsvHeap);
     assert(mSrv.Index != UINT_MAX);
+    assert(mDepthSrv.Index != UINT_MAX);
 
     mWidth = width;
     mHeight = height;
@@ -92,7 +104,6 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
     colorDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     colorDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-    // Must match the clear color used in Begin() (LightSteelBlue) for optimized clears.
     D3D12_CLEAR_VALUE colorClear{};
     colorClear.Format = mColorFormat;
     colorClear.Color[0] = 0.690196097f;
@@ -124,7 +135,7 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
     srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
     mDevice->CreateShaderResourceView(mColor.Get(), &srvDesc, mSrv.CPU);
 
-    // ---- Depth ----
+    // ---- Depth (typeless: DSV + depth SRV for Hi-Z) ----
     D3D12_RESOURCE_DESC depthDesc{};
     depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     depthDesc.Alignment = 0;
@@ -139,7 +150,7 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
     depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     D3D12_CLEAR_VALUE depthClear{};
-    depthClear.Format = mDepthFormat;
+    depthClear.Format = mDepthFormat; // D24_UNORM_S8_UINT
     depthClear.DepthStencil.Depth = 1.0f;
     depthClear.DepthStencil.Stencil = 0;
 
@@ -150,6 +161,7 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
         D3D12_RESOURCE_STATE_COMMON,
         &depthClear,
         IID_PPV_ARGS(&mDepth)));
+    mDepthState = D3D12_RESOURCE_STATE_COMMON;
 
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
     dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
@@ -160,6 +172,16 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
         mDepth.Get(),
         &dsvDesc,
         mDsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC depthSrv{};
+    depthSrv.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    depthSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    depthSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    depthSrv.Texture2D.MostDetailedMip = 0;
+    depthSrv.Texture2D.MipLevels = 1;
+    depthSrv.Texture2D.PlaneSlice = 0;
+    depthSrv.Texture2D.ResourceMinLODClamp = 0.0f;
+    mDevice->CreateShaderResourceView(mDepth.Get(), &depthSrv, mDepthSrv.CPU);
 }
 
 void SceneViewport::Begin(ID3D12GraphicsCommandList* cmdList, const float clearColor[4])
@@ -176,11 +198,14 @@ void SceneViewport::Begin(ID3D12GraphicsCommandList* cmdList, const float clearC
         mColorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
     }
 
-    // Depth is only used as DSV; transition once from COMMON after create/resize.
-    cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-        mDepth.Get(),
-        D3D12_RESOURCE_STATE_COMMON,
-        D3D12_RESOURCE_STATE_DEPTH_WRITE));
+    if (mDepthState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            mDepth.Get(),
+            mDepthState,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE));
+        mDepthState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    }
 
     const D3D12_CPU_DESCRIPTOR_HANDLE rtv = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
     const D3D12_CPU_DESCRIPTOR_HANDLE dsv = mDsvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -216,9 +241,13 @@ void SceneViewport::End(ID3D12GraphicsCommandList* cmdList)
         mColorState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     }
 
-    // Return depth to COMMON so the next Begin can always transition COMMON -> DEPTH_WRITE.
-    cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-        mDepth.Get(),
-        D3D12_RESOURCE_STATE_DEPTH_WRITE,
-        D3D12_RESOURCE_STATE_COMMON));
+    // Depth → CS/PS readable for Hi-Z build (next cull uses previous Hi-Z)
+    if (mDepthState != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            mDepth.Get(),
+            mDepthState,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+        mDepthState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
 }

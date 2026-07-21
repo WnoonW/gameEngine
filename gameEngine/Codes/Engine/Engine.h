@@ -46,6 +46,17 @@ public:
     bool IsComputeIndirectReady() const;
     void SetGpuFrustumCullEnabled(bool enabled);
     bool IsGpuFrustumCullEnabled() const;
+    void SetGpuOcclusionEnabled(bool enabled);
+    bool IsGpuOcclusionEnabled() const;
+    const GpuDrivenFrameStats& GetLastFrameStats() const;
+
+    // Scene End 이후: previous-frame Hi-Z 갱신
+    void BuildHiZ(
+        ID3D12GraphicsCommandList* cmdList,
+        ID3D12Resource* sceneDepth,
+        D3D12_CPU_DESCRIPTOR_HANDLE sceneDepthSrvCpu,
+        D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthSrvGpu,
+        UINT width, UINT height);
 
     // 엔티티 생성 (이름 기반)
     Entity CreateRenderableEntity(const std::string& meshName,

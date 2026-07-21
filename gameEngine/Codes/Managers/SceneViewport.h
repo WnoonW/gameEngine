@@ -8,6 +8,7 @@
 
 // Offscreen color + depth target for the editor Scene panel.
 // Color is exposed as an SRV for ImGui::Image after End().
+// Depth is exposed as R24_UNORM SRV for Hi-Z / occlusion (after End).
 class SceneViewport
 {
 public:
@@ -19,8 +20,6 @@ public:
 
     void Shutdown();
 
-    // Recreate resources when size changes. Caller must ensure the GPU is idle
-    // (e.g. FlushCommandQueue) before calling if the previous target may still be in use.
     bool Resize(UINT width, UINT height);
 
     void Begin(ID3D12GraphicsCommandList* cmdList, const float clearColor[4]);
@@ -36,6 +35,12 @@ public:
 
     D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpu() const { return mSrv.GPU; }
 
+    // Depth (for Path3 Hi-Z). Valid after End() → NON_PIXEL_SHADER_RESOURCE.
+    ID3D12Resource* GetDepthResource() const { return mDepth.Get(); }
+    D3D12_CPU_DESCRIPTOR_HANDLE GetDepthSrvCpu() const { return mDepthSrv.CPU; }
+    D3D12_GPU_DESCRIPTOR_HANDLE GetDepthSrvGpu() const { return mDepthSrv.GPU; }
+    bool HasDepthSrv() const { return mDepthSrv.Index != UINT_MAX; }
+
 private:
     void DestroySizeDependentResources();
     void CreateSizeDependentResources(UINT width, UINT height);
@@ -50,8 +55,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mRtvHeap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mDsvHeap;
     DescriptorAllocator::DescriptorHandle mSrv{};
+    DescriptorAllocator::DescriptorHandle mDepthSrv{};
 
     UINT mWidth = 0;
     UINT mHeight = 0;
     D3D12_RESOURCE_STATES mColorState = D3D12_RESOURCE_STATE_COMMON;
+    D3D12_RESOURCE_STATES mDepthState = D3D12_RESOURCE_STATE_COMMON;
 };

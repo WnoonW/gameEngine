@@ -1,9 +1,12 @@
 #include <DirectXMath.h>
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <vector>
+#include <unordered_set>
 #include <cstring>
 #include "RenderSystem.h"
+#include "TransformDirtyTracker.h"
 #include "MaterialManager.h"
 #include "MeshManager.h"
 #include "RootSignatureManager.h"
@@ -14,6 +17,15 @@
 #include "d3dx12.h"
 
 using namespace DirectX;
+
+namespace
+{
+    float ElapsedMs(std::chrono::high_resolution_clock::time_point t0)
+    {
+        using namespace std::chrono;
+        return duration<float, std::milli>(high_resolution_clock::now() - t0).count();
+    }
+}
 
 namespace
 {
@@ -160,6 +172,7 @@ void RenderSystem::InvalidateDrawCache()
 {
     mInstancedCacheValid = false;
     mGpuStructureDirty = true;
+    mPendingTransformDirty.clear();
 }
 
 void RenderSystem::SetRenderPath(RenderPath path)
@@ -217,10 +230,28 @@ void RenderSystem::Initialize(ID3D12Device* device)
         }
     }
 
+    ID3D12RootSignature* hizRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::HiZBuild);
+    auto hizCopy = ShaderManager::Get().GetShader(
+        L"Resources\\Shaders\\hiz_build.hlsl", "CS_CopyDepth", "cs_5_1");
+    auto hizDown = ShaderManager::Get().GetShader(
+        L"Resources\\Shaders\\hiz_build.hlsl", "CS_Downsample", "cs_5_1");
+    if (hizRS && hizCopy && hizDown)
+    {
+        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+        psoDesc.pRootSignature = hizRS;
+        psoDesc.CS = { hizCopy->GetBufferPointer(), hizCopy->GetBufferSize() };
+        if (SUCCEEDED(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mHiZCopyPSO))))
+        {
+            psoDesc.CS = { hizDown->GetBufferPointer(), hizDown->GetBufferSize() };
+            mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mHiZDownsamplePSO));
+        }
+    }
+
     if (!mComputeIndirectReady)
         OutputDebugStringA("[RenderSystem] Path3 GPU-driven unavailable (CS/PSO). Path1/2 OK.\n");
     else
-        OutputDebugStringA("[RenderSystem] Path3 GPU-driven ready (CullCompact + BuildCommands).\n");
+        OutputDebugStringA("[RenderSystem] Path3 GPU-driven ready (CullCompact + BuildCommands + HiZ).\n");
 
     {
         InstanceWorld dummy{};
@@ -271,12 +302,18 @@ void RenderSystem::DestroyGpuResources()
         f.batchUpload.Reset();
         f.submeshUpload.Reset();
         f.frameCBUpload.Reset();
+        f.sourceDefault.Reset();
+        f.batchDefault.Reset();
+        f.submeshDefault.Reset();
         f.instanceBuffer.Reset();
         f.countBuffer.Reset();
         f.drawCmdBuffer.Reset();
         f.instanceState = D3D12_RESOURCE_STATE_COMMON;
         f.countState = D3D12_RESOURCE_STATE_COMMON;
         f.drawCmdState = D3D12_RESOURCE_STATE_COMMON;
+        f.sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
+        f.batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
+        f.submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.uploadedSourceVersion = 0;
         f.uploadedMetaVersion = 0;
     }
@@ -286,9 +323,12 @@ void RenderSystem::DestroyGpuResources()
 
 void RenderSystem::Shutdown()
 {
+    DestroyHiZResources(mSrvAlloc);
     DestroyGpuResources();
     mCullCompactPSO.Reset();
     mBuildCommandsPSO.Reset();
+    mHiZCopyPSO.Reset();
+    mHiZDownsamplePSO.Reset();
     mComputeIndirectReady = false;
     mInstancedCacheValid = false;
     mCachedInstancedBatches.clear();
@@ -299,6 +339,9 @@ void RenderSystem::Shutdown()
     mGpuCpuBatches.clear();
     mGpuOverrideEntities.clear();
     mEntityToGpuSlot.clear();
+    mPendingTransformDirty.clear();
+    mDummyHiZTexture.Reset();
+    mSrvAlloc = nullptr;
     mDevice = nullptr;
 }
 
@@ -384,6 +427,34 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
             nullptr,
             IID_PPV_ARGS(&f.frameCBUpload)));
         ThrowIfFailed(f.frameCBUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.frameCBMapped)));
+
+        // Step C: DEFAULT 힙 — CS SRV 읽기용 (프레임별 트리플버퍼)
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(reqBufSize),
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&f.sourceDefault)));
+        f.sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(batchBufSize),
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&f.batchDefault)));
+        f.batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(submeshBufSize),
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&f.submeshDefault)));
+        f.submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
     }
 
     // 배치 카운터 일괄 제로
@@ -572,87 +643,211 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
     mGpuStructureDirty = false;
 }
 
+bool RenderSystem::PatchOneGpuEntity(
+    World& world, FrameResource* frameResource, Entity e, bool& anyPatched)
+{
+    auto* tf = world.GetComponent<TransformComponent>(e);
+    auto* rend = world.GetComponent<RenderableComponent>(e);
+    if (!tf || !rend || !rend->mesh)
+        return false;
+
+    auto it = mEntityToGpuSlot.find(e);
+    if (it == mEntityToGpuSlot.end())
+        return false;
+
+    const UINT slot = it->second;
+    if (slot >= mSourceCpu.size())
+        return false;
+
+    if (tf->dirtyFrames <= 0)
+    {
+        const uint32_t want = rend->visible ? 1u : 0u;
+        if ((mSourceCpu[slot].flags & 1u) != want)
+        {
+            mSourceCpu[slot].flags = want;
+            anyPatched = true;
+        }
+        return false; // no longer pending
+    }
+
+    BoundsComponent* bounds = world.GetComponent<BoundsComponent>(e);
+    FillSourceFromEntity(
+        mSourceCpu[slot], *tf, *rend, bounds, mSourceCpu[slot].batchId);
+
+    if (frameResource && frameResource->ObjectCB
+        && rend->objectCBIndex < kMaxSceneObjects)
+    {
+        ObjectConstants objConst{};
+        XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf->GetWorldMatrix()));
+        frameResource->ObjectCB->CopyData(static_cast<int>(rend->objectCBIndex), objConst);
+    }
+    --tf->dirtyFrames;
+    anyPatched = true;
+    return tf->dirtyFrames > 0;
+}
+
 void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameResource)
 {
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    mLastStats.skippedPatch = false;
+    mLastStats.usedDirtyList = false;
+    mLastStats.dirtyPatched = 0;
+    mLastStats.dirtyListIn = 0;
+
+    const uint32_t gen = TransformDirtyTracker::Generation();
+    auto incoming = TransformDirtyTracker::TakeEntities();
+    mLastStats.dirtyListIn = static_cast<uint32_t>(incoming.size());
+
+    if (!incoming.empty())
+    {
+        mPendingTransformDirty.insert(
+            mPendingTransformDirty.end(), incoming.begin(), incoming.end());
+        mLastStats.usedDirtyList = true;
+    }
+
+    const bool genChanged = (gen != mLastProcessedDirtyGen);
+    const bool hasPending = !mPendingTransformDirty.empty();
+
+    if (!genChanged && !hasPending)
+    {
+        mLastStats.skippedPatch = true;
+        mLastStats.patchMs = ElapsedMs(t0);
+        mLastStats.pendingDirty = 0;
+        return;
+    }
+
+    // MarkDirty() without entity → generation only: full scan once
+    if (genChanged && mPendingTransformDirty.empty())
+    {
+        world.ForEach<TransformComponent, RenderableComponent>(
+            [&](Entity e, TransformComponent& tf, RenderableComponent&)
+            {
+                if (tf.dirtyFrames > 0)
+                    mPendingTransformDirty.push_back(e);
+            });
+        mLastStats.usedDirtyList = false;
+    }
+
+    if (mPendingTransformDirty.size() > 1)
+    {
+        std::sort(mPendingTransformDirty.begin(), mPendingTransformDirty.end());
+        mPendingTransformDirty.erase(
+            std::unique(mPendingTransformDirty.begin(), mPendingTransformDirty.end()),
+            mPendingTransformDirty.end());
+    }
+
     bool anyPatched = false;
+    std::vector<Entity> stillPending;
+    stillPending.reserve(mPendingTransformDirty.size());
+    uint32_t patched = 0;
 
-    world.ForEach<TransformComponent, RenderableComponent>(
-        [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
+    for (Entity e : mPendingTransformDirty)
+    {
+        bool touched = false;
+        const bool keep = PatchOneGpuEntity(world, frameResource, e, touched);
+        if (touched)
         {
-            if (!rend.mesh) return;
-
-            auto it = mEntityToGpuSlot.find(e);
-            if (it == mEntityToGpuSlot.end())
-                return;
-
-            const UINT slot = it->second;
-            if (slot >= mSourceCpu.size())
-                return;
-
-            // dirty transform 또는 visible 변경 반영
-            if (tf.dirtyFrames <= 0)
-            {
-                // visible 플래그만 동기화
-                const uint32_t want = rend.visible ? 1u : 0u;
-                if ((mSourceCpu[slot].flags & 1u) != want)
-                {
-                    mSourceCpu[slot].flags = want;
-                    anyPatched = true;
-                }
-                return;
-            }
-
-            BoundsComponent* bounds = world.GetComponent<BoundsComponent>(e);
-            FillSourceFromEntity(
-                mSourceCpu[slot], tf, rend, bounds, mSourceCpu[slot].batchId);
-
-            if (frameResource && frameResource->ObjectCB
-                && rend.objectCBIndex < kMaxSceneObjects)
-            {
-                ObjectConstants objConst{};
-                XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
-                frameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
-            }
-            --tf.dirtyFrames;
             anyPatched = true;
-        });
+            ++patched;
+        }
+        if (keep)
+            stillPending.push_back(e);
+    }
+
+    mPendingTransformDirty = std::move(stillPending);
+    mLastProcessedDirtyGen = gen;
+    mLastStats.dirtyPatched = patched;
+    mLastStats.pendingDirty = static_cast<uint32_t>(mPendingTransformDirty.size());
 
     if (anyPatched)
         ++mSourceContentVersion;
+
+    mLastStats.patchMs = ElapsedMs(t0);
 }
 
-void RenderSystem::UploadGpuDrivenFrameData(FrameGpuResources& frame)
+void RenderSystem::UploadGpuDrivenFrameData(
+    ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame)
 {
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    mLastStats.didSourceUpload = false;
+    mLastStats.didMetaUpload = false;
+    mLastStats.usedDefaultHeapCopy = false;
+
+    auto transition = [&](ID3D12Resource* res, D3D12_RESOURCE_STATES& st, D3D12_RESOURCE_STATES target)
+    {
+        if (st != target)
+        {
+            cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(res, st, target));
+            st = target;
+        }
+    };
+
+    // Source: staging memcpy → DEFAULT copy (프레임 버전 다를 때만)
     if (frame.uploadedSourceVersion != mSourceContentVersion && frame.requestMapped)
     {
-        if (!mSourceCpu.empty())
+        const UINT64 bytes = sizeof(GpuInstanceSource) * mSourceCpu.size();
+        if (!mSourceCpu.empty() && bytes > 0)
         {
-            std::memcpy(
-                frame.requestMapped,
-                mSourceCpu.data(),
-                sizeof(GpuInstanceSource) * mSourceCpu.size());
+            std::memcpy(frame.requestMapped, mSourceCpu.data(), static_cast<size_t>(bytes));
+            transition(frame.sourceDefault.Get(), frame.sourceDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
+            cmdList->CopyBufferRegion(
+                frame.sourceDefault.Get(), 0,
+                frame.requestUpload.Get(), 0,
+                bytes);
+            transition(frame.sourceDefault.Get(), frame.sourceDefaultState,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            mLastStats.usedDefaultHeapCopy = true;
         }
         frame.uploadedSourceVersion = mSourceContentVersion;
+        mLastStats.didSourceUpload = true;
+    }
+    else
+    {
+        // CS가 읽을 수 있게 SRV 상태 보장
+        transition(frame.sourceDefault.Get(), frame.sourceDefaultState,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
     if (frame.uploadedMetaVersion != mMetaVersion)
     {
         if (frame.batchMapped && !mBatchDescsCpu.empty())
         {
-            std::memcpy(
-                frame.batchMapped,
-                mBatchDescsCpu.data(),
-                sizeof(GpuBatchDesc) * mBatchDescsCpu.size());
+            const UINT64 bytes = sizeof(GpuBatchDesc) * mBatchDescsCpu.size();
+            std::memcpy(frame.batchMapped, mBatchDescsCpu.data(), static_cast<size_t>(bytes));
+            transition(frame.batchDefault.Get(), frame.batchDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
+            cmdList->CopyBufferRegion(
+                frame.batchDefault.Get(), 0,
+                frame.batchUpload.Get(), 0,
+                bytes);
+            transition(frame.batchDefault.Get(), frame.batchDefaultState,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            mLastStats.usedDefaultHeapCopy = true;
         }
         if (frame.submeshMapped && !mSubmeshDescsCpu.empty())
         {
-            std::memcpy(
-                frame.submeshMapped,
-                mSubmeshDescsCpu.data(),
-                sizeof(GpuSubmeshDesc) * mSubmeshDescsCpu.size());
+            const UINT64 bytes = sizeof(GpuSubmeshDesc) * mSubmeshDescsCpu.size();
+            std::memcpy(frame.submeshMapped, mSubmeshDescsCpu.data(), static_cast<size_t>(bytes));
+            transition(frame.submeshDefault.Get(), frame.submeshDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
+            cmdList->CopyBufferRegion(
+                frame.submeshDefault.Get(), 0,
+                frame.submeshUpload.Get(), 0,
+                bytes);
+            transition(frame.submeshDefault.Get(), frame.submeshDefaultState,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            mLastStats.usedDefaultHeapCopy = true;
         }
         frame.uploadedMetaVersion = mMetaVersion;
+        mLastStats.didMetaUpload = true;
     }
+    else
+    {
+        transition(frame.batchDefault.Get(), frame.batchDefaultState,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transition(frame.submeshDefault.Get(), frame.submeshDefaultState,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+    mLastStats.uploadMs = ElapsedMs(t0);
 }
 
 void RenderSystem::render(ECS::World& world,
@@ -924,30 +1119,42 @@ void RenderSystem::renderInstanced(ECS::World& world,
         return;
     }
 
-    if (mInstancedCacheValid)
+    // Step B: dirty generation + pending 없으면 캐시 재사용 (ForEach 스킵)
     {
-        bool anyDirty = false;
-        world.ForEach<TransformComponent, RenderableComponent>(
-            [&](Entity, TransformComponent& tf, RenderableComponent& rend)
-            {
-                if (!rend.visible || !rend.mesh) return;
-                if (tf.dirtyFrames > 0)
-                    anyDirty = true;
-            });
+        auto incoming = TransformDirtyTracker::TakeEntities();
+        if (!incoming.empty())
+            mPendingTransformDirty.insert(
+                mPendingTransformDirty.end(), incoming.begin(), incoming.end());
 
-        if (!anyDirty)
+        const uint32_t gen = TransformDirtyTracker::Generation();
+        const bool staticScene =
+            mInstancedCacheValid
+            && mPendingTransformDirty.empty()
+            && gen == mPath2CachedDirtyGen;
+
+        if (staticScene)
         {
+            mLastStats = {};
+            mLastStats.path = RenderPath::Instanced;
+            mLastStats.skippedPatch = true;
+            mLastStats.sourceCount = 0;
+            for (const auto& b : mCachedInstancedBatches)
+                mLastStats.sourceCount += static_cast<uint32_t>(b.instances.size());
+            mLastStats.batchCount = static_cast<uint32_t>(mCachedInstancedBatches.size());
             DrawInstancedBatches(cmdList, currentFrameResource, frame,
                 mCachedOverrideEntities, world);
             return;
         }
-        mInstancedCacheValid = false;
+
+        if (mInstancedCacheValid)
+            mInstancedCacheValid = false;
     }
 
     std::map<std::pair<Mesh*, Material*>, std::vector<InstanceWorld>> batchMap;
     std::vector<Entity> overrideEntities;
     UINT totalObjects = 0;
 
+    mPendingTransformDirty.clear();
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
@@ -966,6 +1173,9 @@ void RenderSystem::renderInstanced(ECS::World& world,
                 XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
                 currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
                 --tf.dirtyFrames;
+                // multi-frame ObjectCB: 남은 dirty는 다음 프레임에도 캐시 무효
+                if (tf.dirtyFrames > 0)
+                    mPendingTransformDirty.push_back(e);
             }
 
             Material* mainMat = GetEntityMainMaterialOverride(e);
@@ -987,6 +1197,15 @@ void RenderSystem::renderInstanced(ECS::World& world,
     }
     mCachedOverrideEntities = std::move(overrideEntities);
     mInstancedCacheValid = true;
+    mPath2CachedDirtyGen = TransformDirtyTracker::Generation();
+    TransformDirtyTracker::ClearEntities();
+
+    mLastStats = {};
+    mLastStats.path = RenderPath::Instanced;
+    mLastStats.pendingDirty = static_cast<uint32_t>(mPendingTransformDirty.size());
+    mLastStats.batchCount = static_cast<uint32_t>(mCachedInstancedBatches.size());
+    for (const auto& b : mCachedInstancedBatches)
+        mLastStats.sourceCount += static_cast<uint32_t>(b.instances.size());
 
     DrawInstancedBatches(cmdList, currentFrameResource, frame,
         mCachedOverrideEntities, world);
@@ -1012,10 +1231,39 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-    // 1) CPU: 구조 변경 시 배치 재빌드 + dirty 슬롯 패치(ObjectCB 포함)
+    mSrvAlloc = descriptorAllocator;
+    mLastStats = {};
+    mLastStats.path = RenderPath::ComputeIndirect;
+    mLastStats.cullEnabled = mGpuFrustumCull;
+    mLastStats.occlusionEnabled = mGpuOcclusion;
+    mLastStats.hizValid = IsHiZSampleReady();
+    mLastStats.hizMips = mHiZMipCount;
+
+    // 1) CPU: 구조 변경 시 배치 재빌드 + dirty 슬롯 패치
     if (mGpuStructureDirty)
+    {
+        const auto t0 = std::chrono::high_resolution_clock::now();
         RebuildGpuDrivenScene(world);
+        mLastStats.didRebuild = true;
+        mLastStats.rebuildMs = ElapsedMs(t0);
+        // 소스 미러는 최신. multi-frame ObjectCB용 dirtyFrames만 pending 유지.
+        TransformDirtyTracker::ClearEntities();
+        mPendingTransformDirty.clear();
+        for (const auto& kv : mEntityToGpuSlot)
+        {
+            if (auto* tf = world.GetComponent<TransformComponent>(kv.first))
+            {
+                if (tf->dirtyFrames > 0)
+                    mPendingTransformDirty.push_back(kv.first);
+            }
+        }
+        mLastProcessedDirtyGen = TransformDirtyTracker::Generation();
+    }
     PatchGpuDrivenTransforms(world, currentFrameResource);
+
+    mLastStats.sourceCount = static_cast<uint32_t>(mSourceCpu.size());
+    mLastStats.batchCount = static_cast<uint32_t>(mBatchDescsCpu.size());
+    mLastStats.submeshDraws = static_cast<uint32_t>(mSubmeshDescsCpu.size());
 
     // Sub-override는 Basic으로
     ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
@@ -1049,16 +1297,34 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     if (mSourceCpu.empty() || mGpuCpuBatches.empty() || mSubmeshDescsCpu.empty())
         return;
 
-    UploadGpuDrivenFrameData(frame);
+    UploadGpuDrivenFrameData(cmdList, frame);
 
-    // 2) Frame CB (카메라/컬링 — 매 프레임)
+    // 2) Frame CB (카메라/컬링/오클루전 — 매 프레임)
+    const XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
+    mLastViewProj = viewProj;
+    mLastRtWidth = (mHiZWidth > 0) ? mHiZWidth : 1;
+    mLastRtHeight = (mHiZHeight > 0) ? mHiZHeight : 1;
+
     GpuDrivenFrameConstants cb{};
-    ExtractFrustumPlanes(XMMatrixMultiply(viewMatrix, projMatrix), cb.frustumPlanes);
+    ExtractFrustumPlanes(viewProj, cb.frustumPlanes);
     cb.numInstances = static_cast<uint32_t>(mSourceCpu.size());
     cb.enableFrustumCull = mGpuFrustumCull ? 1u : 0u;
     cb.numBatches = static_cast<uint32_t>(mBatchDescsCpu.size());
     cb.numSubmeshDraws = static_cast<uint32_t>(mSubmeshDescsCpu.size());
     cb.maxInstances = kMaxInstancesPerDraw;
+    const bool hizReady = IsHiZSampleReady();
+    cb.enableOcclusion = (mGpuOcclusion && hizReady) ? 1u : 0u;
+    cb.hizMipCount = mHiZMipCount;
+    cb.hizValid = hizReady ? 1u : 0u;
+    {
+        XMFLOAT4X4 vpT;
+        XMStoreFloat4x4(&vpT, XMMatrixTranspose(viewProj));
+        std::memcpy(cb.viewProj, &vpT, sizeof(vpT));
+    }
+    cb.rtWidth = static_cast<float>((std::max)(1u, mLastRtWidth));
+    cb.rtHeight = static_cast<float>((std::max)(1u, mLastRtHeight));
+    cb.zNear = mLastNear;
+    cb.zFar = mLastFar;
     std::memcpy(frame.frameCBMapped, &cb, sizeof(cb));
 
     ID3D12RootSignature* buildRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::IndirectBuild);
@@ -1120,18 +1386,39 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         if (nb) cmdList->ResourceBarrier(nb, b);
     }
 
-    // 4) 전역 CullCompact 1회
+    // 4) 전역 CullCompact 1회 (DEFAULT 힙 source/batch/submesh + HiZ t3)
     cmdList->SetComputeRootSignature(buildRS);
     cmdList->SetComputeRootConstantBufferView(0, frame.frameCBUpload->GetGPUVirtualAddress());
-    cmdList->SetComputeRootShaderResourceView(1, frame.requestUpload->GetGPUVirtualAddress());
-    cmdList->SetComputeRootShaderResourceView(2, frame.batchUpload->GetGPUVirtualAddress());
-    cmdList->SetComputeRootShaderResourceView(3, frame.submeshUpload->GetGPUVirtualAddress());
-    cmdList->SetComputeRootUnorderedAccessView(4, frame.instanceBuffer->GetGPUVirtualAddress());
-    cmdList->SetComputeRootUnorderedAccessView(5, frame.countBuffer->GetGPUVirtualAddress());
-    cmdList->SetComputeRootUnorderedAccessView(6, frame.drawCmdBuffer->GetGPUVirtualAddress());
+    cmdList->SetComputeRootShaderResourceView(1, frame.sourceDefault->GetGPUVirtualAddress());
+    cmdList->SetComputeRootShaderResourceView(2, frame.batchDefault->GetGPUVirtualAddress());
+    cmdList->SetComputeRootShaderResourceView(3, frame.submeshDefault->GetGPUVirtualAddress());
+
+    // Hi-Z: 링에서 "충분히 오래된" 슬롯만 샘플 (in-flight 쓰기와 분리)
+    EnsureDummyHiZSrv(descriptorAllocator);
+    D3D12_GPU_DESCRIPTOR_HANDLE hizGpu = GetHiZSampleSrvGpu();
+    if (hizGpu.ptr == 0)
+        hizGpu = mDummyHiZSrv.GPU;
+    if (hizGpu.ptr == 0)
+    {
+        static bool sLogged = false;
+        if (!sLogged)
+        {
+            OutputDebugStringA("[RenderSystem] No valid HiZ SRV; skip GPU-driven frame.\n");
+            sLogged = true;
+        }
+        return;
+    }
+    cmdList->SetComputeRootDescriptorTable(4, hizGpu);
+
+    cmdList->SetComputeRootUnorderedAccessView(5, frame.instanceBuffer->GetGPUVirtualAddress());
+    cmdList->SetComputeRootUnorderedAccessView(6, frame.countBuffer->GetGPUVirtualAddress());
+    cmdList->SetComputeRootUnorderedAccessView(7, frame.drawCmdBuffer->GetGPUVirtualAddress());
 
     cmdList->SetPipelineState(mCullCompactPSO.Get());
-    const UINT numInst = static_cast<UINT>(mSourceCpu.size());
+    const UINT numInst = static_cast<UINT>((std::min)(
+        mSourceCpu.size(), static_cast<size_t>(kMaxInstancesPerDraw)));
+    if (numInst == 0)
+        return;
     cmdList->Dispatch((numInst + 63u) / 64u, 1, 1);
 
     {
@@ -1143,7 +1430,10 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 
     // 5) 전역 BuildCommands 1회
     cmdList->SetPipelineState(mBuildCommandsPSO.Get());
-    const UINT numSubs = static_cast<UINT>(mSubmeshDescsCpu.size());
+    const UINT numSubs = static_cast<UINT>((std::min)(
+        mSubmeshDescsCpu.size(), static_cast<size_t>(kMaxGpuSubmeshDraws)));
+    if (numSubs == 0)
+        return;
     cmdList->Dispatch((numSubs + 63u) / 64u, 1, 1);
 
     {
@@ -1205,4 +1495,242 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
                 nullptr, 0);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Step D: Hierarchical-Z (triple-buffered ring)
+// ---------------------------------------------------------------------------
+bool RenderSystem::IsHiZSampleReady() const
+{
+    // GPU가 최대 (kHiZRingSize-1) 프레임 뒤처질 수 있으므로
+    // 링을 한 바퀴 채운 뒤에만 샘플 허용
+    return mHiZBuildCount >= kHiZRingSize
+        && mHiZRing[0].texture != nullptr;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE RenderSystem::GetHiZSampleSrvGpu() const
+{
+    if (!IsHiZSampleReady())
+    {
+        if (mDummyHiZSrv.Index != UINT_MAX)
+            return mDummyHiZSrv.GPU;
+        return {};
+    }
+    // mHiZWriteSlot = 다음에 쓸 칸
+    // 마지막 기록 = writeSlot-1, 안전한 샘플 = writeSlot+1 (= 2프레임 전, ring=3)
+    const UINT readSlot = (mHiZWriteSlot + 1u) % kHiZRingSize;
+    return mHiZRing[readSlot].srv.GPU;
+}
+
+void RenderSystem::DestroyHiZResources(DescriptorAllocator* alloc)
+{
+    if (alloc)
+    {
+        for (UINT i = 0; i < kHiZRingSize; ++i)
+        {
+            if (mHiZRing[i].srv.Index != UINT_MAX)
+            {
+                alloc->Free(mHiZRing[i].srv);
+                mHiZRing[i].srv = {};
+            }
+            if (mHiZRing[i].uav.Index != UINT_MAX)
+            {
+                alloc->Free(mHiZRing[i].uav);
+                mHiZRing[i].uav = {};
+            }
+            mHiZRing[i].texture.Reset();
+            mHiZRing[i].state = D3D12_RESOURCE_STATE_COMMON;
+        }
+    }
+    else
+    {
+        for (UINT i = 0; i < kHiZRingSize; ++i)
+        {
+            mHiZRing[i].texture.Reset();
+            mHiZRing[i].srv = {};
+            mHiZRing[i].uav = {};
+            mHiZRing[i].state = D3D12_RESOURCE_STATE_COMMON;
+        }
+    }
+    mHiZWidth = mHiZHeight = 0;
+    mHiZMipCount = 1;
+    mHiZWriteSlot = 0;
+    mHiZBuildCount = 0;
+}
+
+void RenderSystem::EnsureDummyHiZSrv(DescriptorAllocator* alloc)
+{
+    if (!mDevice || !alloc)
+        return;
+    if (mDummyHiZSrv.Index != UINT_MAX && mDummyHiZTexture)
+        return;
+
+    if (!mDummyHiZTexture)
+    {
+        D3D12_RESOURCE_DESC d{};
+        d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        d.Width = 1;
+        d.Height = 1;
+        d.DepthOrArraySize = 1;
+        d.MipLevels = 1;
+        d.Format = DXGI_FORMAT_R32_FLOAT;
+        d.SampleDesc.Count = 1;
+        d.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        ThrowIfFailed(mDevice->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &d,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            nullptr,
+            IID_PPV_ARGS(&mDummyHiZTexture)));
+    }
+
+    if (mDummyHiZSrv.Index == UINT_MAX)
+    {
+        mDummyHiZSrv = alloc->Allocate();
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+        srv.Format = DXGI_FORMAT_R32_FLOAT;
+        srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv.Texture2D.MostDetailedMip = 0;
+        srv.Texture2D.MipLevels = 1;
+        mDevice->CreateShaderResourceView(mDummyHiZTexture.Get(), &srv, mDummyHiZSrv.CPU);
+    }
+}
+
+void RenderSystem::EnsureHiZResources(DescriptorAllocator* alloc, UINT width, UINT height)
+{
+    if (!mDevice || !alloc)
+        return;
+
+    width = (std::max)(1u, width);
+    height = (std::max)(1u, height);
+
+    if (mHiZRing[0].texture && mHiZWidth == width && mHiZHeight == height)
+        return;
+
+    DestroyHiZResources(alloc);
+    mSrvAlloc = alloc;
+    mHiZMipCount = 1;
+    mHiZWidth = width;
+    mHiZHeight = height;
+    mHiZWriteSlot = 0;
+    mHiZBuildCount = 0;
+
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = DXGI_FORMAT_R32_FLOAT;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MostDetailedMip = 0;
+    srv.Texture2D.MipLevels = 1;
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+    uav.Format = DXGI_FORMAT_R32_FLOAT;
+    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    uav.Texture2D.MipSlice = 0;
+
+    for (UINT i = 0; i < kHiZRingSize; ++i)
+    {
+        ThrowIfFailed(mDevice->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&mHiZRing[i].texture)));
+        mHiZRing[i].state = D3D12_RESOURCE_STATE_COMMON;
+
+        mHiZRing[i].srv = alloc->Allocate();
+        mDevice->CreateShaderResourceView(mHiZRing[i].texture.Get(), &srv, mHiZRing[i].srv.CPU);
+
+        mHiZRing[i].uav = alloc->Allocate();
+        mDevice->CreateUnorderedAccessView(
+            mHiZRing[i].texture.Get(), nullptr, &uav, mHiZRing[i].uav.CPU);
+    }
+
+    EnsureDummyHiZSrv(alloc);
+}
+
+void RenderSystem::BuildHiZ(
+    ID3D12GraphicsCommandList* cmdList,
+    DescriptorAllocator* descriptorAllocator,
+    ID3D12Resource* sceneDepth,
+    D3D12_CPU_DESCRIPTOR_HANDLE sceneDepthSrvCpu,
+    D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthSrvGpu,
+    UINT width, UINT height)
+{
+    (void)sceneDepth;
+    (void)sceneDepthSrvCpu;
+
+    mLastStats.didBuildHiZ = false;
+    mLastStats.hizMs = 0.f;
+
+    if (!cmdList || !descriptorAllocator || !mDevice)
+        return;
+    if (!mHiZCopyPSO)
+        return;
+    if (width == 0 || height == 0)
+        return;
+    if (sceneDepthSrvGpu.ptr == 0)
+        return;
+
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    mSrvAlloc = descriptorAllocator;
+    EnsureHiZResources(descriptorAllocator, width, height);
+
+    ID3D12RootSignature* hizRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::HiZBuild);
+    HiZSlot& slot = mHiZRing[mHiZWriteSlot];
+    if (!hizRS || !slot.texture || slot.uav.Index == UINT_MAX)
+        return;
+
+    ID3D12DescriptorHeap* heaps[] = { descriptorAllocator->GetHeap() };
+    cmdList->SetDescriptorHeaps(1, heaps);
+    cmdList->SetComputeRootSignature(hizRS);
+
+    // 이 슬롯만 쓰기 — 샘플 중인 다른 슬롯과 분리
+    if (slot.state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            slot.texture.Get(), slot.state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+        slot.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    }
+
+    uint32_t consts[8] = { width, height, mHiZWidth, mHiZHeight, 0, 0, 0, 0 };
+    cmdList->SetComputeRoot32BitConstants(0, 8, consts, 0);
+    cmdList->SetComputeRootDescriptorTable(1, sceneDepthSrvGpu);
+    cmdList->SetComputeRootDescriptorTable(2, slot.uav.GPU);
+    cmdList->SetPipelineState(mHiZCopyPSO.Get());
+    cmdList->Dispatch((mHiZWidth + 7) / 8, (mHiZHeight + 7) / 8, 1);
+
+    {
+        D3D12_RESOURCE_BARRIER b[2];
+        b[0] = CD3DX12_RESOURCE_BARRIER::UAV(slot.texture.Get());
+        b[1] = CD3DX12_RESOURCE_BARRIER::Transition(
+            slot.texture.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        cmdList->ResourceBarrier(2, b);
+        slot.state = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+
+    mHiZWriteSlot = (mHiZWriteSlot + 1u) % kHiZRingSize;
+    ++mHiZBuildCount;
+
+    mLastStats.didBuildHiZ = true;
+    mLastStats.hizMs = ElapsedMs(t0);
+    mLastStats.hizMips = mHiZMipCount;
+    mLastStats.hizValid = IsHiZSampleReady();
 }

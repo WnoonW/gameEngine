@@ -312,7 +312,7 @@ void Engine::RotateSelected(float dYaw, float dPitch)
         tf->rotation.y += dYaw;
         tf->rotation.x += dPitch;
         tf->rotation.x = MathHelper::Clamp(tf->rotation.x, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
-        tf->MarkDirty();
+        tf->MarkDirty(selected);
     }
 }
 
@@ -354,7 +354,7 @@ void Engine::MoveSelectedViewRelative(float forward, float right, float up, floa
     tf->position.x += d.x;
     tf->position.y += d.y;
     tf->position.z += d.z;
-    tf->MarkDirty();
+    tf->MarkDirty(selected);
 }
 
 void Engine::MoveSelectedPlanar(float forward, float right, float up, float speed,
@@ -371,7 +371,7 @@ void Engine::MoveSelectedPlanar(float forward, float right, float up, float spee
     tf->position.x += horizForward.x * forward * speed + horizRight.x * right * speed;
     tf->position.y += up * speed;
     tf->position.z += horizForward.z * forward * speed + horizRight.z * right * speed;
-    tf->MarkDirty();
+    tf->MarkDirty(selected);
 }
 
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
@@ -407,6 +407,36 @@ void Engine::SetGpuFrustumCullEnabled(bool enabled)
 bool Engine::IsGpuFrustumCullEnabled() const
 {
     return mRenderSystem.IsGpuFrustumCullEnabled();
+}
+
+const GpuDrivenFrameStats& Engine::GetLastFrameStats() const
+{
+    return mRenderSystem.GetLastFrameStats();
+}
+
+void Engine::SetGpuOcclusionEnabled(bool enabled)
+{
+    mRenderSystem.SetGpuOcclusionEnabled(enabled);
+}
+
+bool Engine::IsGpuOcclusionEnabled() const
+{
+    return mRenderSystem.IsGpuOcclusionEnabled();
+}
+
+void Engine::BuildHiZ(
+    ID3D12GraphicsCommandList* cmdList,
+    ID3D12Resource* sceneDepth,
+    D3D12_CPU_DESCRIPTOR_HANDLE sceneDepthSrvCpu,
+    D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthSrvGpu,
+    UINT width, UINT height)
+{
+    if (!mDescriptorAllocator)
+        return;
+    mRenderSystem.BuildHiZ(
+        cmdList, mDescriptorAllocator,
+        sceneDepth, sceneDepthSrvCpu, sceneDepthSrvGpu,
+        width, height);
 }
 
 void Engine::NotifyRenderableListChanged()
@@ -469,7 +499,7 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
 
     TransformComponent tf{};
     tf.position = position;
-    tf.MarkDirty();
+    tf.MarkDirty(entity);
     mWorld.AddComponent(entity, std::move(tf));
     mWorld.AddComponent(entity, RenderableComponent{
         .mesh = mesh,

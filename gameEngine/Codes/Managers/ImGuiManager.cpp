@@ -594,6 +594,42 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 
     const size_t objectCount = engine->GetRenderableObjectCount();
     ImGui::Text("Objects: %zu", objectCount);
+    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
+    // Step A: GPU-driven / 렌더 경로 통계
+    {
+        const GpuDrivenFrameStats& st = engine->GetLastFrameStats();
+        const char* pathName = "Basic";
+        if (st.path == RenderPath::Instanced) pathName = "Instanced";
+        else if (st.path == RenderPath::ComputeIndirect) pathName = "GPU-driven";
+
+        if (ImGui::CollapsingHeader("Render Stats", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Text("Path: %s", pathName);
+            ImGui::Text("Frustum Cull: %s", st.cullEnabled ? "ON" : "OFF");
+            ImGui::Text("Occlusion(HiZ): %s  valid=%s  mips=%u",
+                st.occlusionEnabled ? "ON" : "OFF",
+                st.hizValid ? "Y" : "N",
+                st.hizMips);
+            ImGui::Text("Sources: %u  Batches: %u  SubDraws: %u",
+                st.sourceCount, st.batchCount, st.submeshDraws);
+            ImGui::Text("Rebuild: %s (%.3f ms)", st.didRebuild ? "Y" : "N", st.rebuildMs);
+            ImGui::Text("Patch: %s  dirtyIn=%u patched=%u pend=%u  %.3f ms",
+                st.skippedPatch ? "SKIP" : (st.usedDirtyList ? "LIST" : "SCAN"),
+                st.dirtyListIn, st.dirtyPatched, st.pendingDirty, st.patchMs);
+            ImGui::Text("Upload src=%s meta=%s defaultCopy=%s  %.3f ms",
+                st.didSourceUpload ? "Y" : "N",
+                st.didMetaUpload ? "Y" : "N",
+                st.usedDefaultHeapCopy ? "Y" : "N",
+                st.uploadMs);
+            ImGui::Text("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
+            if (ImGui::Button(st.cullEnabled ? "Disable Frustum Cull" : "Enable Frustum Cull"))
+                engine->SetGpuFrustumCullEnabled(!st.cullEnabled);
+            ImGui::SameLine();
+            if (ImGui::Button(st.occlusionEnabled ? "Disable Occlusion" : "Enable Occlusion"))
+                engine->SetGpuOcclusionEnabled(!st.occlusionEnabled);
+        }
+    }
 
     const size_t selCount = engine->GetSelectedCount();
     if (selCount == 0)
@@ -719,7 +755,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
                     t->position.x += delta.x;
                     t->position.y += delta.y;
                     t->position.z += delta.z;
-                    t->MarkDirty();
+                    t->MarkDirty(e);
                 }
             });
         }
@@ -739,7 +775,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
                     t->rotation.x += delta.x;
                     t->rotation.y += delta.y;
                     t->rotation.z += delta.z;
-                    t->MarkDirty();
+                    t->MarkDirty(e);
                 }
             });
         }
@@ -753,7 +789,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
                 if (TransformComponent* t = engine->GetTransform(e))
                 {
                     t->scale = scl;
-                    t->MarkDirty();
+                    t->MarkDirty(e);
                 }
             });
         }

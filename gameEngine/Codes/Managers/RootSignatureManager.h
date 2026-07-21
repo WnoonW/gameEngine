@@ -11,8 +11,8 @@ enum class RootSignatureType
     Scene,          // 일반 오브젝트 렌더링
     ImGui,          // ImGui 전용
     Shadow,         // Shadow Map
-    IndirectBuild,  // Compute: 간접 커맨드 생성
-    // Transparent, PostProcess 등 나중에 추가
+    IndirectBuild,  // Path3: cull/compact/build commands
+    HiZBuild,       // Path3: hierarchical-Z pyramid
 };
 
 class RootSignatureManager
@@ -32,6 +32,7 @@ private:
 
     void CreateSceneRootSignature();
     void CreateIndirectBuildRootSignature();
+    void CreateHiZBuildRootSignature();
     void CreateSceneCommandSignature();
 
     ID3D12Device* mDevice = nullptr;

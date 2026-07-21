@@ -28,9 +28,35 @@ enum class RenderPath
     Instanced = 1,
     ComputeIndirect = 2,
 
-    // 별칭 (기존 코드 호환)
     Direct = Basic,
     Indirect = Instanced,
+};
+
+// Step A: 프레임 단위 CPU 통계 (ImGui / 디버그)
+struct GpuDrivenFrameStats
+{
+    RenderPath path = RenderPath::Instanced;
+    bool cullEnabled = false;
+    bool occlusionEnabled = false;
+    bool hizValid = false;
+    bool didRebuild = false;
+    bool didSourceUpload = false;
+    bool didMetaUpload = false;
+    bool usedDirtyList = false;
+    bool skippedPatch = false;
+    bool usedDefaultHeapCopy = false;
+    bool didBuildHiZ = false;
+    uint32_t sourceCount = 0;
+    uint32_t batchCount = 0;
+    uint32_t submeshDraws = 0;
+    uint32_t dirtyPatched = 0;
+    uint32_t dirtyListIn = 0;
+    uint32_t pendingDirty = 0;
+    uint32_t hizMips = 0;
+    float rebuildMs = 0.f;
+    float patchMs = 0.f;
+    float uploadMs = 0.f;
+    float hizMs = 0.f;
 };
 
 class RenderSystem
@@ -43,12 +69,23 @@ public:
     RenderPath GetRenderPath() const { return mRenderPath; }
     bool IsComputeIndirectReady() const { return mComputeIndirectReady; }
 
-    // ComputeIndirect: GPU 절두체 컬링 (기본 ON)
     void SetGpuFrustumCullEnabled(bool enabled) { mGpuFrustumCull = enabled; }
     bool IsGpuFrustumCullEnabled() const { return mGpuFrustumCull; }
 
-    // 스폰/삭제/머티리얼 변경 시 Path2 캐시 + Path3 구조 무효화
+    void SetGpuOcclusionEnabled(bool enabled) { mGpuOcclusion = enabled; }
+    bool IsGpuOcclusionEnabled() const { return mGpuOcclusion; }
+
     void InvalidateDrawCache();
+
+    const GpuDrivenFrameStats& GetLastFrameStats() const { return mLastStats; }
+
+    void BuildHiZ(
+        ID3D12GraphicsCommandList* cmdList,
+        DescriptorAllocator* descriptorAllocator,
+        ID3D12Resource* sceneDepth,
+        D3D12_CPU_DESCRIPTOR_HANDLE sceneDepthSrvCpu,
+        D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthSrvGpu,
+        UINT width, UINT height);
 
     void render(World& world,
         ID3D12GraphicsCommandList* cmdList,
@@ -61,15 +98,20 @@ public:
 private:
     struct FrameGpuResources
     {
-        // Path2: requestUpload = InstanceWorld[]
-        // Path3: sourceUpload = GpuInstanceSource[], batch/submesh meta, frame CB
+        // Staging (UPLOAD) — Path2 instances / Path3 copy source
         ComPtr<ID3D12Resource> requestUpload;
         ComPtr<ID3D12Resource> batchUpload;
         ComPtr<ID3D12Resource> submeshUpload;
         ComPtr<ID3D12Resource> frameCBUpload;
-        ComPtr<ID3D12Resource> instanceBuffer;  // compact InstanceWorld[] UAV
-        ComPtr<ID3D12Resource> countBuffer;     // per-batch counters
-        ComPtr<ID3D12Resource> drawCmdBuffer;   // IndirectCommand[]
+
+        // Step C: GPU-resident DEFAULT (Path3 CS가 읽음)
+        ComPtr<ID3D12Resource> sourceDefault;
+        ComPtr<ID3D12Resource> batchDefault;
+        ComPtr<ID3D12Resource> submeshDefault;
+
+        ComPtr<ID3D12Resource> instanceBuffer;
+        ComPtr<ID3D12Resource> countBuffer;
+        ComPtr<ID3D12Resource> drawCmdBuffer;
 
         BYTE* requestMapped = nullptr;
         BYTE* batchMapped = nullptr;
@@ -79,12 +121,14 @@ private:
         D3D12_RESOURCE_STATES instanceState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES countState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES drawCmdState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
 
         uint32_t uploadedSourceVersion = 0;
         uint32_t uploadedMetaVersion = 0;
     };
 
-    // Path3: CPU 배치 (바인딩용 mesh/material 포함)
     struct GpuCpuBatch
     {
         Mesh* mesh = nullptr;
@@ -119,45 +163,24 @@ private:
         const DirectX::XMMATRIX& viewMatrix,
         const DirectX::XMMATRIX& projMatrix);
 
-    void renderDirect(World& world,
-        ID3D12GraphicsCommandList* cmdList,
-        FrameResource* currentFrameResource,
-        DescriptorAllocator* descriptorAllocator,
-        const DirectX::XMMATRIX& viewMatrix,
-        const DirectX::XMMATRIX& projMatrix)
-    {
-        renderBasic(world, cmdList, currentFrameResource, descriptorAllocator, viewMatrix, projMatrix);
-    }
-
-    void renderIndirect(World& world,
-        ID3D12GraphicsCommandList* cmdList,
-        FrameResource* currentFrameResource,
-        DescriptorAllocator* descriptorAllocator,
-        int currentFrameIndex,
-        const DirectX::XMMATRIX& viewMatrix,
-        const DirectX::XMMATRIX& projMatrix)
-    {
-        renderInstanced(world, cmdList, currentFrameResource, descriptorAllocator,
-            currentFrameIndex, viewMatrix, projMatrix);
-    }
-
     void EnsureGpuResources(ID3D12Device* device);
     void DestroyGpuResources();
     void ExtractFrustumPlanes(const DirectX::XMMATRIX& viewProj, float outPlanes[6][4]);
     static UINT FrameCBAlignedSize();
 
-    // Path3 scene management
     void RebuildGpuDrivenScene(World& world);
     void PatchGpuDrivenTransforms(World& world, FrameResource* frameResource);
-    void UploadGpuDrivenFrameData(FrameGpuResources& frame);
+    // returns: source copied, meta copied
+    void UploadGpuDrivenFrameData(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame);
 
-    // Path2 cache draw
     void DrawInstancedBatches(
         ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
         FrameGpuResources& frame,
         const std::vector<Entity>& overrideEntities,
         World& world);
+
+    bool PatchOneGpuEntity(World& world, FrameResource* frameResource, Entity e, bool& anyPatched);
 
     struct CachedInstancedBatch
     {
@@ -166,24 +189,57 @@ private:
         std::vector<InstanceWorld> instances;
     };
 
+    void EnsureHiZResources(DescriptorAllocator* alloc, UINT width, UINT height);
+    void EnsureDummyHiZSrv(DescriptorAllocator* alloc);
+    void DestroyHiZResources(DescriptorAllocator* alloc);
+    bool IsHiZSampleReady() const;
+    D3D12_GPU_DESCRIPTOR_HANDLE GetHiZSampleSrvGpu() const;
+
     RenderPath mRenderPath = RenderPath::ComputeIndirect;
-    bool mGpuFrustumCull = true; // Path3 기본 ON
+    bool mGpuFrustumCull = true;
+    bool mGpuOcclusion = true; // ring-buffer 적용 후 시작 ON 가능
     ID3D12Device* mDevice = nullptr;
+    DescriptorAllocator* mSrvAlloc = nullptr;
 
     ComPtr<ID3D12PipelineState> mCullCompactPSO;
     ComPtr<ID3D12PipelineState> mBuildCommandsPSO;
+    ComPtr<ID3D12PipelineState> mHiZCopyPSO;
+    ComPtr<ID3D12PipelineState> mHiZDownsamplePSO;
     ComPtr<ID3D12Resource> mCounterZeroUpload;
     ComPtr<ID3D12Resource> mDummyInstanceBuffer;
+    ComPtr<ID3D12Resource> mDummyHiZTexture; // 1x1 far depth
+    DescriptorAllocator::DescriptorHandle mDummyHiZSrv{};
+
+    // Hierarchical-Z: 프레임 지연(triple buffer) — 읽기/쓰기 충돌 방지
+    // 증상: 시작 시 occlusion=true → TDR, 런타임 토글은 정상
+    static constexpr UINT kHiZRingSize = kIndirectFrameCount; // 3
+    struct HiZSlot
+    {
+        ComPtr<ID3D12Resource> texture;
+        DescriptorAllocator::DescriptorHandle srv{};
+        DescriptorAllocator::DescriptorHandle uav{};
+        D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+    };
+    HiZSlot mHiZRing[kHiZRingSize]{};
+    UINT mHiZWriteSlot = 0;   // next BuildHiZ target
+    UINT mHiZBuildCount = 0;  // total successful builds
+    UINT mHiZWidth = 0;
+    UINT mHiZHeight = 0;
+    UINT mHiZMipCount = 1;
+    XMMATRIX mLastViewProj = DirectX::XMMatrixIdentity();
+    float mLastNear = 0.1f;
+    float mLastFar = 1000.f;
+    UINT mLastRtWidth = 1;
+    UINT mLastRtHeight = 1;
 
     FrameGpuResources mFrames[kIndirectFrameCount]{};
     bool mComputeIndirectReady = false;
 
-    // Path2 static cache
     bool mInstancedCacheValid = false;
     std::vector<CachedInstancedBatch> mCachedInstancedBatches;
     std::vector<Entity> mCachedOverrideEntities;
+    uint32_t mPath2CachedDirtyGen = 0;
 
-    // Path3 CPU mirror + versions
     bool mGpuStructureDirty = true;
     uint32_t mSourceContentVersion = 1;
     uint32_t mMetaVersion = 1;
@@ -193,4 +249,10 @@ private:
     std::vector<GpuCpuBatch> mGpuCpuBatches;
     std::vector<Entity> mGpuOverrideEntities;
     std::unordered_map<Entity, UINT> mEntityToGpuSlot;
+
+    // Step B: multi-frame dirtyFrames 유지용
+    std::vector<Entity> mPendingTransformDirty;
+    uint32_t mLastProcessedDirtyGen = 0;
+
+    GpuDrivenFrameStats mLastStats{};
 };

@@ -75,7 +75,7 @@ namespace
             if (entry.gravity && !entry.collision->isStatic)
                 entry.gravity->velocity.z = 0.0f;
         }
-        entry.transform->MarkDirty();
+        entry.transform->MarkDirty(entry.entity);
     }
 
     float GetAxisCenter(const ColliderEntry& entry, int axis)
@@ -127,7 +127,7 @@ namespace
         const float pushUp = -minPt.y;
         entry.transform->position.y += pushUp;
         entry.bounds->worldBounds.Center.y += pushUp;
-        entry.transform->MarkDirty();
+        entry.transform->MarkDirty(entry.entity);
 
         if (entry.gravity && entry.gravity->velocity.y < 0.0f)
             entry.gravity->velocity.y = 0.0f;

@@ -202,13 +202,14 @@ bool InitDirect3DApp::Initialize()
 	LoadAssets();
 	CreateInitialScene();
 
-	// 렌더 경로 (기본 ComputeIndirect = GPU-driven)
-	// mEngine.SetRenderPath(RenderPath::Basic);            // 1: 원본 per-object
-	// mEngine.SetRenderPath(RenderPath::Instanced);        // 2: CPU 인스턴싱 폴백
-	// mEngine.SetRenderPath(RenderPath::ComputeIndirect);  // 3: GPU-driven (기본)
-	// mEngine.SetGpuFrustumCullEnabled(false);             // 경로3 컬링 (기본 true)
+	// 렌더 경로
+	// mEngine.SetRenderPath(RenderPath::Basic);
+	// mEngine.SetRenderPath(RenderPath::Instanced);
+	// mEngine.SetRenderPath(RenderPath::ComputeIndirect);
 	mEngine.SetRenderPath(RenderPath::ComputeIndirect);
 	mEngine.SetGpuFrustumCullEnabled(true);
+	// Hi-Z: 3슬롯 링 버퍼로 in-flight 읽기/쓰기 분리 (시작 시 true 가능)
+	mEngine.SetGpuOcclusionEnabled(true);
 
 	ThrowIfFailed(mCommandList->Close());
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
@@ -585,6 +586,18 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 		mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
 
 		sceneVP.End(mCommandList.Get());
+
+		// Step D: Hi-Z only when occlusion enabled (avoid extra CS cost / TDR risk)
+		if (sceneVP.HasDepthSrv() && mEngine.IsGpuOcclusionEnabled())
+		{
+			mEngine.BuildHiZ(
+				mCommandList.Get(),
+				sceneVP.GetDepthResource(),
+				sceneVP.GetDepthSrvCpu(),
+				sceneVP.GetDepthSrvGpu(),
+				sceneVP.GetWidth(),
+				sceneVP.GetHeight());
+		}
 	}
 
 	// === 2) 백버퍼에 ImGui (Scene 패널이 offscreen 결과를 Image로 표시) ===
