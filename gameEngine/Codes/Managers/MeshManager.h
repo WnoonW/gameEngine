@@ -80,12 +80,28 @@ public:
 
     std::vector<std::string> GetLoadedMeshNames() const;
 
+    // Step H: vertex-cluster LOD → name_lod1 / name_lod2 (solid, no random holes)
+    // forceRebuild: replace existing _lod* (after algorithm change)
+    bool EnsureAutoLodVariants(const std::string& baseName,
+        ID3D12Device* device, ID3D12GraphicsCommandList* cmdList,
+        bool forceRebuild = false);
+
+    // Fill LodComponent.levels from base mesh + auto variants
+    int BuildLodLevelList(const std::string& baseName, Mesh* outLevels[4], int maxLevels = 4) const;
+
     void Shutdown();
 
 private:
     // cpuModel.submeshes 가 채워진 Mesh를 GPU에 올리고 캐시에 등록
     bool UploadAndRegisterMesh(const std::string& name, Mesh& mesh,
         ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
+
+    // gridCells: longest AABB axis divided into this many cells (higher = more detail)
+    bool CreateClusteredLod(const std::string& srcName, const std::string& dstName,
+        int gridCells, ID3D12Device* device, ID3D12GraphicsCommandList* cmdList,
+        bool forceRebuild);
+
+    void RemoveMesh(const std::string& name);
 
     std::unordered_map<std::string, std::shared_ptr<Mesh>> mMeshes;
 };

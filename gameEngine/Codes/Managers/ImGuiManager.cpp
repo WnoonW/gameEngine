@@ -220,9 +220,14 @@ namespace
             if (GravityComponent* gravity = engine->GetGravityComponent(selected))
             {
                 ImGui::Indent();
-                ImGui::Checkbox("Enabled##Gravity", &gravity->enabled);
-                ImGui::DragFloat("Strength", &gravity->strength, 0.1f, 0.0f, 50.0f);
-                ImGui::DragFloat3("Velocity", &gravity->velocity.x, 0.1f);
+                if (ImGui::Checkbox("Enabled##Gravity", &gravity->enabled))
+                    engine->NotifyEntityMotionChanged(selected);
+                if (ImGui::DragFloat("Strength", &gravity->strength, 0.1f, 0.0f, 50.0f))
+                    engine->NotifyEntityMotionChanged(selected);
+                if (ImGui::DragFloat3("Velocity", &gravity->velocity.x, 0.1f))
+                    engine->NotifyEntityMotionChanged(selected);
+                if (ImGui::DragFloat3("Angular Vel", &gravity->angularVelocity.x, 0.01f))
+                    engine->NotifyEntityMotionChanged(selected);
                 ImGui::Unindent();
             }
 
@@ -629,6 +634,11 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                 st.didGpuMotion ? "Y" : "N",
                 st.motionActive,
                 st.motionMs);
+            ImGui::Text("LOD: %s  L0=%u L1=%u L2=%u L3=%u  culled=%u  sw=%u  %.3f ms",
+                st.lodEnabled ? "ON" : "OFF",
+                st.lodLevelCounts[0], st.lodLevelCounts[1],
+                st.lodLevelCounts[2], st.lodLevelCounts[3],
+                st.lodCulled, st.lodSwitches, st.lodMs);
             ImGui::Text("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
 
             if (ImGui::Button(st.autoPath ? "Auto Path: ON" : "Auto Path: OFF"))
@@ -648,6 +658,20 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
             ImGui::SameLine();
             if (ImGui::Button(st.gpuMotionEnabled ? "Disable GPU Motion" : "Enable GPU Motion"))
                 engine->SetGpuMotionEnabled(!st.gpuMotionEnabled);
+            if (ImGui::Button(st.lodEnabled ? "Disable LOD" : "Enable LOD"))
+                engine->SetLodEnabled(!st.lodEnabled);
+            ImGui::SameLine();
+            if (ImGui::Button(engine->IsLodDistanceCullEnabled()
+                ? "Disable DistCull" : "Enable DistCull"))
+                engine->SetLodDistanceCullEnabled(!engine->IsLodDistanceCullEnabled());
+            {
+                float bias = engine->GetLodBias();
+                if (ImGui::SliderFloat("LOD Bias", &bias, 0.25f, 4.f))
+                    engine->SetLodBias(bias);
+                float cullD = engine->GetLodCullDistance();
+                if (ImGui::SliderFloat("Cull Distance", &cullD, 20.f, 1000.f))
+                    engine->SetLodCullDistance(cullD);
+            }
         }
     }
 
@@ -837,6 +861,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
                 {
                     if (GravityComponent* g = engine->GetGravityComponent(e))
                         g->enabled = gEnabled;
+                    engine->NotifyEntityMotionChanged(e);
                 });
             }
             float strength = gravity->strength;
@@ -846,6 +871,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
                 {
                     if (GravityComponent* g = engine->GetGravityComponent(e))
                         g->strength = strength;
+                    engine->NotifyEntityMotionChanged(e);
                 });
             }
             XMFLOAT3 vel = gravity->velocity;
@@ -855,6 +881,17 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
                 {
                     if (GravityComponent* g = engine->GetGravityComponent(e))
                         g->velocity = vel;
+                    engine->NotifyEntityMotionChanged(e);
+                });
+            }
+            XMFLOAT3 ang = gravity->angularVelocity;
+            if (ImGui::DragFloat3("Angular Vel", &ang.x, 0.01f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (GravityComponent* g = engine->GetGravityComponent(e))
+                        g->angularVelocity = ang;
+                    engine->NotifyEntityMotionChanged(e);
                 });
             }
             ImGui::Unindent();

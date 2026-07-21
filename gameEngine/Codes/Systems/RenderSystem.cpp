@@ -252,7 +252,9 @@ namespace
         out.linearVelocity[0] = gravity->velocity.x;
         out.linearVelocity[1] = gravity->velocity.y;
         out.linearVelocity[2] = gravity->velocity.z;
-        out.angularVelocity[0] = out.angularVelocity[1] = out.angularVelocity[2] = 0.f;
+        out.angularVelocity[0] = gravity->angularVelocity.x;
+        out.angularVelocity[1] = gravity->angularVelocity.y;
+        out.angularVelocity[2] = gravity->angularVelocity.z;
         out.gravity = gravity->strength;
         out.flags = 1u;
         out.pad0 = out.pad1 = 0.f;
@@ -830,7 +832,9 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
-            if (!rend.mesh) return;
+            if (!rend.visible || !rend.mesh) return;
+            if (const auto* lod = world.GetComponent<LodComponent>(e); lod && lod->culled)
+                return;
             if (HasEntitySubMaterialOverride(e))
             {
                 mGpuOverrideEntities.push_back(e);
@@ -994,34 +998,29 @@ bool RenderSystem::PatchOneGpuEntity(
         return false; // no longer pending
     }
 
+    const bool gpuOwnsMotion = mGpuMotionEnabled && mUpdateMotionPSO
+        && (mMotionCpu[slot].flags & 1u) != 0;
+    // Gravity 미러 dirty: CPU/bounds만 갱신, GPU TRS·velocity 덮어쓰지 않음
+    const bool skipGpuTrs = gpuOwnsMotion && tf->suppressGpuUpload;
+
     BoundsComponent* bounds = world.GetComponent<BoundsComponent>(e);
     const UINT batchId = mTransformCpu[slot].batchId;
-    FillTransformFromEntity(mTransformCpu[slot], *tf, *rend, bounds, batchId);
-    FillSourceFromEntity(mSourceCpu[slot], *tf, *rend, bounds, batchId);
-
-    // F2: GPU owns velocity after seed. Re-seed motion only when:
-    // - GPU motion off (CPU gravity path), or
-    // - enable flag toggled (add/remove gravity)
     GravityComponent* gravity = world.GetComponent<GravityComponent>(e);
-    const bool gpuOwnsMotion = mGpuMotionEnabled && mUpdateMotionPSO;
-    if (!gpuOwnsMotion)
+
+    if (!skipGpuTrs)
     {
+        FillTransformFromEntity(mTransformCpu[slot], *tf, *rend, bounds, batchId);
+        FillSourceFromEntity(mSourceCpu[slot], *tf, *rend, bounds, batchId);
+        // 에디터 이동·충돌 보정: motion도 CPU 상태로 재시드
         FillMotionFromEntity(mMotionCpu[slot], gravity);
         motionPatched = true;
+        anyPatched = true;
     }
     else
     {
-        const uint32_t want = (gravity && gravity->enabled) ? 1u : 0u;
-        const uint32_t prev = mMotionCpu[slot].flags & 1u;
-        if (want != prev)
-        {
-            FillMotionFromEntity(mMotionCpu[slot], gravity);
-            if (want)
-                ++mMotionActiveCount;
-            else if (mMotionActiveCount > 0)
-                --mMotionActiveCount;
-            motionPatched = true;
-        }
+        // visibility flag only on CPU mirror path
+        mTransformCpu[slot].flags = rend->visible ? 1u : 0u;
+        mSourceCpu[slot].flags = mTransformCpu[slot].flags;
     }
 
     if (frameResource && frameResource->ObjectCB
@@ -1031,8 +1030,10 @@ bool RenderSystem::PatchOneGpuEntity(
         XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf->GetWorldMatrix()));
         frameResource->ObjectCB->CopyData(static_cast<int>(rend->objectCBIndex), objConst);
     }
+
     --tf->dirtyFrames;
-    anyPatched = true;
+    if (tf->dirtyFrames <= 0)
+        tf->suppressGpuUpload = false;
     return tf->dirtyFrames > 0;
 }
 
@@ -1121,13 +1122,14 @@ void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameRe
     mLastStats.patchMs = ElapsedMs(t0);
 }
 
-void RenderSystem::UploadGpuDrivenFrameData(
+bool RenderSystem::UploadGpuDrivenFrameData(
     ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame)
 {
     const auto t0 = std::chrono::high_resolution_clock::now();
     mLastStats.didSourceUpload = false;
     mLastStats.didMetaUpload = false;
     mLastStats.usedDefaultHeapCopy = false;
+    bool didTransformUpload = false;
 
     auto transition = [&](ID3D12Resource* res, D3D12_RESOURCE_STATES& st, D3D12_RESOURCE_STATES target)
     {
@@ -1153,6 +1155,7 @@ void RenderSystem::UploadGpuDrivenFrameData(
             transition(frame.transformDefault.Get(), frame.transformDefaultState,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             mLastStats.usedDefaultHeapCopy = true;
+            didTransformUpload = true;
         }
         frame.uploadedTransformVersion = mTransformContentVersion;
         mLastStats.didSourceUpload = true; // TRS upload (legacy stat name)
@@ -1227,6 +1230,7 @@ void RenderSystem::UploadGpuDrivenFrameData(
     }
 
     mLastStats.uploadMs = ElapsedMs(t0);
+    return didTransformUpload;
 }
 
 bool RenderSystem::ShouldSkipCpuGravity() const
@@ -1292,9 +1296,15 @@ void RenderSystem::SyncGpuMotionFromWorld(World& world)
         const bool wantOn = (want.flags & 1u) != 0;
         const bool curOn = (cur.flags & 1u) != 0;
 
-        // Enable / disable / strength change → reseed from ECS (resets v to component)
-        // Stay-on: do NOT overwrite velocity (GPU owns it after seed)
-        if (wantOn != curOn || (wantOn && want.gravity != cur.gravity))
+        // Enable/disable/strength/ω change → reseed from ECS
+        // Stay-on with same params: GPU owns integrated velocity (do not overwrite)
+        const bool paramChanged = wantOn && curOn
+            && (want.gravity != cur.gravity
+                || want.angularVelocity[0] != cur.angularVelocity[0]
+                || want.angularVelocity[1] != cur.angularVelocity[1]
+                || want.angularVelocity[2] != cur.angularVelocity[2]);
+
+        if (wantOn != curOn || paramChanged)
         {
             cur = want;
             anyChange = true;
@@ -1307,6 +1317,25 @@ void RenderSystem::SyncGpuMotionFromWorld(World& world)
     mMotionActiveCount = active;
     if (anyChange)
         ++mMotionContentVersion;
+}
+
+// Full TRS pull before GPU upload so motion objects aren't reset to stale seeds
+void RenderSystem::PullGpuTransformsFromWorld(World& world)
+{
+    for (const auto& kv : mEntityToGpuSlot)
+    {
+        const UINT slot = kv.second;
+        if (slot >= mTransformCpu.size() || slot >= mSourceCpu.size())
+            continue;
+        auto* tf = world.GetComponent<TransformComponent>(kv.first);
+        auto* rend = world.GetComponent<RenderableComponent>(kv.first);
+        if (!tf || !rend)
+            continue;
+        BoundsComponent* bounds = world.GetComponent<BoundsComponent>(kv.first);
+        const UINT batchId = mTransformCpu[slot].batchId;
+        FillTransformFromEntity(mTransformCpu[slot], *tf, *rend, bounds, batchId);
+        FillSourceFromEntity(mSourceCpu[slot], *tf, *rend, bounds, batchId);
+    }
 }
 
 bool RenderSystem::DispatchUpdateMotion(
@@ -1487,6 +1516,131 @@ void RenderSystem::DispatchComposeWorld(
     mLastStats.composeMs = ElapsedMs(t0);
 }
 
+void RenderSystem::SetLodEnabled(bool enabled)
+{
+    if (mLodEnabled == enabled)
+        return;
+    mLodEnabled = enabled;
+    mGpuStructureDirty = true;
+    mInstancedCacheValid = false;
+}
+
+void RenderSystem::UpdateEntityLods(World& world, const XMMATRIX& viewMatrix)
+{
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    mLastStats.lodEnabled = mLodEnabled;
+    mLastStats.lodCulled = 0;
+    mLastStats.lodSwitches = 0;
+    mLastStats.lodLevelCounts[0] = mLastStats.lodLevelCounts[1] =
+        mLastStats.lodLevelCounts[2] = mLastStats.lodLevelCounts[3] = 0;
+
+    XMMATRIX invView = XMMatrixInverse(nullptr, viewMatrix);
+    XMFLOAT3 eye{};
+    XMStoreFloat3(&eye, invView.r[3]);
+
+    const float bias = mLodBias;
+    bool anyChange = false;
+
+    world.ForEach<TransformComponent, RenderableComponent, LodComponent>(
+        [&](Entity, TransformComponent& tf, RenderableComponent& rend, LodComponent& lod)
+        {
+            if (lod.levelCount <= 0 || !lod.levels[0])
+            {
+                if (rend.mesh)
+                    lod.levels[0] = rend.mesh;
+                lod.levelCount = lod.levels[0] ? 1 : 0;
+            }
+            if (lod.levelCount <= 0)
+                return;
+
+            if (!mLodEnabled)
+            {
+                if (lod.culled || lod.currentLevel != 0 || rend.mesh != lod.levels[0])
+                {
+                    lod.culled = false;
+                    lod.currentLevel = 0;
+                    rend.mesh = lod.levels[0];
+                    anyChange = true;
+                }
+                ++mLastStats.lodLevelCounts[0];
+                return;
+            }
+
+            const float dx = tf.position.x - eye.x;
+            const float dy = tf.position.y - eye.y;
+            const float dz = tf.position.z - eye.z;
+            const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+
+            int level = 0;
+            if (lod.forcedLevel >= 0)
+            {
+                level = lod.forcedLevel;
+                if (level >= lod.levelCount)
+                    level = lod.levelCount - 1;
+            }
+            else
+            {
+                for (int i = 0; i < lod.levelCount - 1; ++i)
+                {
+                    if (dist > lod.thresholds[i] * bias)
+                        level = i + 1;
+                }
+            }
+
+            const float cullDist = (std::min)(lod.cullDistance, mLodCullDistance) * bias;
+            const bool culled = mLodDistanceCull && (dist > cullDist);
+
+            Mesh* want = lod.levels[level] ? lod.levels[level] : lod.levels[0];
+            if (!want)
+                want = rend.mesh;
+
+            if (lod.currentLevel != level || lod.culled != culled || (!culled && rend.mesh != want))
+            {
+                lod.currentLevel = level;
+                lod.culled = culled;
+                if (!culled && want)
+                    rend.mesh = want;
+                else if (lod.levels[0])
+                    rend.mesh = lod.levels[0]; // keep valid pointer while culled
+                ++mLastStats.lodSwitches;
+                anyChange = true;
+            }
+
+            if (culled)
+                ++mLastStats.lodCulled;
+            else if (level >= 0 && level < 4)
+                ++mLastStats.lodLevelCounts[level];
+        });
+
+    if (anyChange)
+    {
+        mGpuStructureDirty = true;
+        mInstancedCacheValid = false;
+    }
+    mLastStats.lodMs = ElapsedMs(t0);
+
+    mLodStatEnabled = mLastStats.lodEnabled;
+    mLodStatCulled = mLastStats.lodCulled;
+    mLodStatSwitches = mLastStats.lodSwitches;
+    mLodStatMs = mLastStats.lodMs;
+    for (int i = 0; i < 4; ++i)
+        mLodStatLevels[i] = mLastStats.lodLevelCounts[i];
+}
+
+namespace
+{
+    void RestoreLodStats(GpuDrivenFrameStats& st,
+        bool en, uint32_t culled, uint32_t switches, const uint32_t levels[4], float ms)
+    {
+        st.lodEnabled = en;
+        st.lodCulled = culled;
+        st.lodSwitches = switches;
+        st.lodMs = ms;
+        for (int i = 0; i < 4; ++i)
+            st.lodLevelCounts[i] = levels[i];
+    }
+}
+
 void RenderSystem::render(ECS::World& world,
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
@@ -1495,6 +1649,9 @@ void RenderSystem::render(ECS::World& world,
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix)
 {
+    // Step H: distance LOD before path selection / batching
+    UpdateEntityLods(world, viewMatrix);
+
     // Step G: 매 프레임 자동 경로 (수동 SetRenderPath 시 auto off)
     UpdateAutoRenderPath(world);
 
@@ -1579,6 +1736,8 @@ void RenderSystem::renderBasic(ECS::World& world,
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
             if (!rend.visible || !rend.mesh) return;
+            if (const auto* lod = world.GetComponent<LodComponent>(e); lod && lod->culled)
+                return;
             if (rend.objectCBIndex >= kMaxSceneObjects) return;
 
             if (tf.dirtyFrames > 0)
@@ -1783,6 +1942,8 @@ void RenderSystem::renderInstanced(ECS::World& world,
         if (staticScene)
         {
             mLastStats = {};
+            RestoreLodStats(mLastStats, mLodStatEnabled, mLodStatCulled, mLodStatSwitches,
+                mLodStatLevels, mLodStatMs);
             mLastStats.path = RenderPath::Instanced;
             mLastStats.autoPath = mAutoRenderPath;
             mLastStats.skippedPatch = true;
@@ -1808,6 +1969,8 @@ void RenderSystem::renderInstanced(ECS::World& world,
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
             if (!rend.visible || !rend.mesh) return;
+            if (const auto* lod = world.GetComponent<LodComponent>(e); lod && lod->culled)
+                return;
             if (totalObjects >= kMaxInstancesPerDraw) return;
 
             if (HasEntitySubMaterialOverride(e))
@@ -1850,6 +2013,8 @@ void RenderSystem::renderInstanced(ECS::World& world,
     TransformDirtyTracker::ClearEntities();
 
     mLastStats = {};
+    RestoreLodStats(mLastStats, mLodStatEnabled, mLodStatCulled, mLodStatSwitches,
+        mLodStatLevels, mLodStatMs);
     mLastStats.path = RenderPath::Instanced;
     mLastStats.autoPath = mAutoRenderPath;
     mLastStats.pendingDirty = static_cast<uint32_t>(mPendingTransformDirty.size());
@@ -1883,6 +2048,8 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 
     mSrvAlloc = descriptorAllocator;
     mLastStats = {};
+    RestoreLodStats(mLastStats, mLodStatEnabled, mLodStatCulled, mLodStatSwitches,
+        mLodStatLevels, mLodStatMs);
     mLastStats.path = RenderPath::ComputeIndirect;
     mLastStats.autoPath = mAutoRenderPath;
     mLastStats.cullEnabled = mGpuFrustumCull;
@@ -1920,6 +2087,16 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     mLastStats.batchCount = static_cast<uint32_t>(mBatchDescsCpu.size());
     mLastStats.submeshDraws = static_cast<uint32_t>(mSubmeshDescsCpu.size());
 
+    // TRS 업로드 직전: motion 오브젝트 포함 전 슬롯을 CPU 미러로 맞춤
+    // (일부 슬롯 full dirty 시 다른 낙하 오브젝트가 오래된 seed로 리셋되는 것 방지)
+    {
+        const int frameIdx = ((currentFrameIndex % (int)kIndirectFrameCount) + (int)kIndirectFrameCount)
+            % (int)kIndirectFrameCount;
+        FrameGpuResources& fr = mFrames[frameIdx];
+        if (fr.uploadedTransformVersion != mTransformContentVersion && mMotionActiveCount > 0)
+            PullGpuTransformsFromWorld(world);
+    }
+
     // Sub-override는 Basic으로
     ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
     if (sceneRS && !mGpuOverrideEntities.empty())
@@ -1952,15 +2129,21 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     if (mSourceCpu.empty() || mGpuCpuBatches.empty() || mSubmeshDescsCpu.empty())
         return;
 
-    UploadGpuDrivenFrameData(cmdList, frame);
+    const bool didTrsUpload = UploadGpuDrivenFrameData(cmdList, frame);
 
     // Step F2 motion → F1 compose → cull
+    // TRS 업로드 프레임은 motion 스킵 (CPU 미러와 동일 시점 유지)
     const UINT numXforms = static_cast<UINT>((std::min)(
         (std::min)(mTransformCpu.size(), mSourceCpu.size()),
         static_cast<size_t>(kMaxInstancesPerDraw)));
-    if (DispatchUpdateMotion(cmdList, frame, numXforms))
+    if (!didTrsUpload && DispatchUpdateMotion(cmdList, frame, numXforms))
     {
         // GPU changed TRS — force compose this frame slot
+        frame.composedTransformVersion = 0;
+    }
+    else if (didTrsUpload)
+    {
+        // Uploaded TRS already current — force compose
         frame.composedTransformVersion = 0;
     }
     DispatchComposeWorld(cmdList, frame, numXforms);

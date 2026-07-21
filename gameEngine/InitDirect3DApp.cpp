@@ -716,6 +716,25 @@ void InitDirect3DApp::LoadAssets()
 	{
 		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
 	}
+
+	// Step H: vertex-cluster LOD (forceRebuild once after algorithm change)
+	{
+		auto names = MeshManager::Get().GetLoadedMeshNames();
+		// copy names — EnsureAutoLodVariants inserts _lod* into the map
+		std::vector<std::string> bases;
+		bases.reserve(names.size());
+		for (const auto& n : names)
+		{
+			if (n.find("_lod") != std::string::npos)
+				continue;
+			bases.push_back(n);
+		}
+		for (const auto& n : bases)
+		{
+			MeshManager::Get().EnsureAutoLodVariants(
+				n, md3dDevice.Get(), mCommandList.Get(), /*forceRebuild=*/true);
+		}
+	}
 }
 
 // =====================================================

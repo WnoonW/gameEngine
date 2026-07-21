@@ -45,10 +45,11 @@ bool Engine::Initialize(ID3D12Device* device,
 void Engine::Update(float deltaTime)
 {
     mRenderSystem.SetFrameDeltaTime(deltaTime);
-    // F2: Path3 GPU motion integrates gravity objects — skip CPU double-apply
+    // F2: GPU motion ON → CPU도 동일 적분(충돌/선택) + suppressGpuUpload
+    //     GPU는 별도 버퍼에서 적분 (TRS 업로드로 덮지 않음)
     mGravitySystem.Update(mWorld, deltaTime, mRenderSystem.ShouldSkipCpuGravity());
     UpdateBounds();
-    // 충돌이 실제로 움직인 경우에만 bounds 2차 갱신 (정적 대량 씬에서 이중 순회 제거)
+    // 충돌이 움직이면 full MarkDirty → GPU TRS/motion 재시드
     if (mCollisionSystem.Update(mWorld))
         UpdateBounds();
 }
@@ -447,6 +448,46 @@ bool Engine::IsGpuMotionEnabled() const
     return mRenderSystem.IsGpuMotionEnabled();
 }
 
+void Engine::SetLodEnabled(bool enabled)
+{
+    mRenderSystem.SetLodEnabled(enabled);
+}
+
+bool Engine::IsLodEnabled() const
+{
+    return mRenderSystem.IsLodEnabled();
+}
+
+void Engine::SetLodDistanceCullEnabled(bool enabled)
+{
+    mRenderSystem.SetLodDistanceCullEnabled(enabled);
+}
+
+bool Engine::IsLodDistanceCullEnabled() const
+{
+    return mRenderSystem.IsLodDistanceCullEnabled();
+}
+
+void Engine::SetLodBias(float bias)
+{
+    mRenderSystem.SetLodBias(bias);
+}
+
+float Engine::GetLodBias() const
+{
+    return mRenderSystem.GetLodBias();
+}
+
+void Engine::SetLodCullDistance(float d)
+{
+    mRenderSystem.SetLodCullDistance(d);
+}
+
+float Engine::GetLodCullDistance() const
+{
+    return mRenderSystem.GetLodCullDistance();
+}
+
 void Engine::PrepareHiZForSceneSize(UINT width, UINT height)
 {
     if (!mDescriptorAllocator)
@@ -536,6 +577,19 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         .objectCBIndex = mNextObjectCBIndex++
         });
     mWorld.AddComponent(entity, BoundsComponent{});
+
+    // Step H: LOD chain (base + auto _lod1/_lod2 if present)
+    {
+        LodComponent lod{};
+        lod.levelCount = MeshManager::Get().BuildLodLevelList(
+            meshName, lod.levels, LodComponent::kMaxLevels);
+        if (lod.levelCount <= 0)
+        {
+            lod.levels[0] = mesh;
+            lod.levelCount = 1;
+        }
+        mWorld.AddComponent(entity, std::move(lod));
+    }
 
     // 스폰 시 선택한 Main Material 적용 (비어 있으면 메시 init / Default 사용)
     if (!materialName.empty())
@@ -754,6 +808,13 @@ void Engine::SetEntityGravityEnabled(Entity entity, bool enabled)
     }
 
     // F2: Path3 motion buffer must reseed without waiting for scene rebuild
+    mRenderSystem.NotifyEntityMotionChanged(mWorld, entity);
+}
+
+void Engine::NotifyEntityMotionChanged(Entity entity)
+{
+    if (entity == INVALID_ENTITY)
+        return;
     mRenderSystem.NotifyEntityMotionChanged(mWorld, entity);
 }
 

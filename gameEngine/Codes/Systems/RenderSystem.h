@@ -50,6 +50,10 @@ struct GpuDrivenFrameStats
     bool didComposeWorld = false; // Step F1
     bool didGpuMotion = false;    // Step F2
     bool gpuMotionEnabled = false;
+    bool lodEnabled = false;      // Step H
+    uint32_t lodCulled = 0;
+    uint32_t lodLevelCounts[4]{};
+    uint32_t lodSwitches = 0;
     uint32_t sourceCount = 0;
     uint32_t batchCount = 0;
     uint32_t submeshDraws = 0;
@@ -65,6 +69,7 @@ struct GpuDrivenFrameStats
     float uploadMs = 0.f;
     float composeMs = 0.f;
     float motionMs = 0.f;
+    float lodMs = 0.f;
     float hizMs = 0.f;
 };
 
@@ -97,6 +102,16 @@ public:
     void NotifyEntityMotionChanged(World& world, Entity e);
 
     void SetFrameDeltaTime(float dt) { mFrameDeltaTime = dt; }
+
+    // Step H: distance LOD + far cull
+    void SetLodEnabled(bool enabled);
+    bool IsLodEnabled() const { return mLodEnabled; }
+    void SetLodDistanceCullEnabled(bool enabled) { mLodDistanceCull = enabled; }
+    bool IsLodDistanceCullEnabled() const { return mLodDistanceCull; }
+    void SetLodBias(float bias) { mLodBias = (bias > 0.05f) ? bias : 0.05f; }
+    float GetLodBias() const { return mLodBias; }
+    void SetLodCullDistance(float d) { mLodCullDistance = (d > 1.f) ? d : 1.f; }
+    float GetLodCullDistance() const { return mLodCullDistance; }
 
     void InvalidateDrawCache();
 
@@ -209,7 +224,10 @@ private:
     void PatchGpuDrivenTransforms(World& world, FrameResource* frameResource);
     // Compare ECS Gravity vs mMotionCpu; reseed + bump version on change
     void SyncGpuMotionFromWorld(World& world);
-    void UploadGpuDrivenFrameData(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame);
+    // Before TRS upload: refresh all slots from live ECS (collision/editor sync)
+    void PullGpuTransformsFromWorld(World& world);
+    // Returns true if TRS was uploaded this call (skip GPU motion same frame — avoid +1dt drift)
+    bool UploadGpuDrivenFrameData(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame);
     // Returns true if any instance was integrated (forces recompose)
     bool DispatchUpdateMotion(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances);
     void DispatchComposeWorld(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances);
@@ -240,14 +258,25 @@ private:
     bool IsHiZSampleReady() const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetHiZSampleSrvGpu() const;
     void UpdateAutoRenderPath(World& world);
+    void UpdateEntityLods(World& world, const DirectX::XMMATRIX& viewMatrix);
 
     RenderPath mRenderPath = RenderPath::ComputeIndirect;
     bool mAutoRenderPath = true; // Step G 기본 ON
     bool mGpuFrustumCull = true;
     bool mGpuOcclusion = true;
     bool mGpuMotionEnabled = true; // Step F2 default ON for Path3
+    bool mLodEnabled = true;       // Step H default ON
+    bool mLodDistanceCull = true;
+    float mLodBias = 1.f;
+    float mLodCullDistance = 250.f; // global override if > 0 applied as max with component
     float mFrameDeltaTime = 1.f / 60.f;
     uint32_t mMotionActiveCount = 0;
+    // preserved across path-local mLastStats = {}
+    bool mLodStatEnabled = false;
+    uint32_t mLodStatCulled = 0;
+    uint32_t mLodStatSwitches = 0;
+    uint32_t mLodStatLevels[4]{};
+    float mLodStatMs = 0.f;
     ID3D12Device* mDevice = nullptr;
     DescriptorAllocator* mSrvAlloc = nullptr;
 

@@ -52,6 +52,14 @@ public:
     bool IsGpuOcclusionEnabled() const;
     void SetGpuMotionEnabled(bool enabled);
     bool IsGpuMotionEnabled() const;
+    void SetLodEnabled(bool enabled);
+    bool IsLodEnabled() const;
+    void SetLodDistanceCullEnabled(bool enabled);
+    bool IsLodDistanceCullEnabled() const;
+    void SetLodBias(float bias);
+    float GetLodBias() const;
+    void SetLodCullDistance(float d);
+    float GetLodCullDistance() const;
     const GpuDrivenFrameStats& GetLastFrameStats() const;
 
     // Scene RT 리사이즈 후 GPU idle 상태에서 Hi-Z 재할당
@@ -128,6 +136,8 @@ public:
     bool HasGravityComponent(Entity entity);
     GravityComponent* GetGravityComponent(Entity entity);
     void SetEntityGravityEnabled(Entity entity, bool enabled);
+    // F2: gravity param edit → reseed Path3 motion slot
+    void NotifyEntityMotionChanged(Entity entity);
 
     bool HasCollisionComponent(Entity entity);
     CollisionComponent* GetCollisionComponent(Entity entity);

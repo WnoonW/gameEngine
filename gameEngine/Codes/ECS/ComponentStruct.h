@@ -17,17 +17,34 @@ struct TransformComponent {
     // ObjectCB / 인스턴스 버퍼에 다시 올려야 하는 프레임 수 (보통 gNumFrameResources)
     int dirtyFrames = 0;
 
+    // F2: true면 Path3 TRS 업로드 생략 (CPU bounds/충돌용 미러 적분만)
+    // 에디터 이동·충돌 보정 등 full MarkDirty()는 항상 false로 리셋
+    bool suppressGpuUpload = false;
+
     // 엔티티를 알면 MarkDirty(entity) 권장 — dirty 리스트 기반 패치
     void MarkDirty(int frames = 3)
     {
         if (frames > dirtyFrames)
             dirtyFrames = frames;
+        suppressGpuUpload = false;
         mWorldValid = false;
         TransformDirtyTracker::NotifyUnknown();
     }
 
     void MarkDirty(ECS::Entity entity, int frames = 3)
     {
+        MarkDirty(entity, frames, false);
+    }
+
+    // suppressGpuUploadFlag: GPU motion 소유 슬롯의 gravity 미러 적분용
+    void MarkDirty(ECS::Entity entity, int frames, bool suppressGpuUploadFlag)
+    {
+        if (!suppressGpuUploadFlag)
+            suppressGpuUpload = false;
+        else
+            // full dirty가 이미 잡혀 있으면 업로드 우선 유지
+            suppressGpuUpload = suppressGpuUpload || (dirtyFrames <= 0);
+
         if (frames > dirtyFrames)
             dirtyFrames = frames;
         mWorldValid = false;
@@ -62,9 +79,22 @@ struct TransformComponent {
 
 
 struct RenderableComponent {
-    Mesh* mesh = nullptr;
+    Mesh* mesh = nullptr;       // 현재 드로우 메시 (LOD 적용 후)
     uint32_t objectCBIndex = 0;
     bool visible = true;
+};
+
+// Step H: 거리 기반 LOD (levels[0] = 최고 해상도)
+struct LodComponent {
+    static constexpr int kMaxLevels = 4;
+    Mesh* levels[kMaxLevels]{};
+    int levelCount = 1;
+    // dist > thresholds[i] * bias → level i+1
+    float thresholds[kMaxLevels - 1]{ 20.f, 50.f, 100.f };
+    float cullDistance = 250.f;
+    int currentLevel = 0;
+    bool culled = false;
+    int forcedLevel = -1; // -1 = auto, 0..levelCount-1 = force
 };
 
 
@@ -86,6 +116,8 @@ struct GravityComponent {
     bool enabled = true;
     float strength = 9.81f;
     XMFLOAT3 velocity{ 0.0f, 0.0f, 0.0f };
+    // rad/s — pitch, yaw, roll (GetWorldMatrix / GPU motion과 동일)
+    XMFLOAT3 angularVelocity{ 0.0f, 0.0f, 0.0f };
 };
 
 struct CollisionComponent {

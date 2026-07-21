@@ -6,6 +6,6 @@ using namespace ECS;
 class GravitySystem
 {
 public:
-    // skipCpuIntegrate: Path3 GPU motion (F2) owns integration — avoid double-apply
-    void Update(World& world, float deltaTime, bool skipCpuIntegrate = false);
+    // gpuMotionMirror: CPU도 동일 적분(충돌/선택) + suppressGpuUpload (Path3 TRS 미업로드)
+    void Update(World& world, float deltaTime, bool gpuMotionMirror = false);
 };
