@@ -36,6 +36,94 @@ namespace
         std::memcpy(out, &m, sizeof(XMFLOAT4X4));
     }
 
+    // Mirrors compose_world.hlsl (column_major store of W == StoreWorldTransposed)
+    void GpuStyleComposeStore(float px, float py, float pz,
+        float pitch, float yaw, float roll,
+        float sx, float sy, float sz,
+        float out[16])
+    {
+        const float cp = cosf(pitch), sp = sinf(pitch);
+        const float cy = cosf(yaw),   syw = sinf(yaw);
+        const float cr = cosf(roll),  sr = sinf(roll);
+
+        // R elements (DirectXMath XMMatrixRotationRollPitchYaw)
+        const float r11 = cr * cy + sr * sp * syw;
+        const float r12 = sr * cp;
+        const float r13 = sr * sp * cy - cr * syw;
+        const float r21 = cr * sp * syw - sr * cy;
+        const float r22 = cr * cp;
+        const float r23 = sr * syw + cr * sp * cy;
+        const float r31 = cp * syw;
+        const float r32 = -sp;
+        const float r33 = cp * cy;
+
+        // W = S * R * T  (scale axes of R, translation in last row for row-vector)
+        // S*R:
+        const float sr11 = sx * r11, sr12 = sx * r12, sr13 = sx * r13;
+        const float sr21 = sy * r21, sr22 = sy * r22, sr23 = sy * r23;
+        const float sr31 = sz * r31, sr32 = sz * r32, sr33 = sz * r33;
+        // (S*R)*T — translation only affects row3: t * (S*R) added... 
+        // Row-vector: T has translation in row3; (S*R)*T keeps upper 3x3, row3 = t * upper + e4
+        // DirectXMath multiply A*B: row i of result = row i of A dotted with columns of B.
+        // For A=S*R (no translation) and B=T (identity + translation in row3):
+        // result rows 0-2 = rows 0-2 of S*R
+        // result row3 = (px,py,pz,1) transformed... actually row3 of T is (tx,ty,tz,1),
+        // result.r3 = A.r0*tx + A.r1*ty + A.r2*tz + A.r3 = tx*row0 + ty*row1 + tz*row2 + row3
+        // With A.r3 = (0,0,0,1): r3 = (tx*sr11 + ty*sr21 + tz*sr31, ... , 1)  NO that's wrong for DXMath
+        //
+        // DXMath matrices are row-major; XMMatrixTranslation puts tx,ty,tz in _41,_42,_43 (row3).
+        // XMMatrixMultiply(A,B): for each row i: result.r[i] = A.r[i] * B (vector-matrix).
+        // So (S*R)*T: rows 0-2 of S*R multiplied by T → same rows 0-2 (T only changes via w component)
+        // Since rows 0-2 have w=0: unchanged 3x3.
+        // row3 of S*R is (0,0,0,1); (0,0,0,1)*T = row3 of T = (tx,ty,tz,1).
+        // So W upper 3x3 = S*R, translation = (px,py,pz). Correct.
+
+        XMFLOAT4X4 W{};
+        W._11 = sr11; W._12 = sr12; W._13 = sr13; W._14 = 0.f;
+        W._21 = sr21; W._22 = sr22; W._23 = sr23; W._24 = 0.f;
+        W._31 = sr31; W._32 = sr32; W._33 = sr33; W._34 = 0.f;
+        W._41 = px;   W._42 = py;   W._43 = pz;   W._44 = 1.f;
+
+        // column_major store of W == rows of W^T == StoreWorldTransposed
+        XMFLOAT4X4 stored;
+        XMStoreFloat4x4(&stored, XMMatrixTranspose(XMLoadFloat4x4(&W)));
+        std::memcpy(out, &stored, sizeof(stored));
+    }
+
+    void ValidateComposeWorldMatchesCpu()
+    {
+        const float samples[][9] = {
+            { 0,0,0, 0,0,0, 1,1,1 },
+            { 1,2,3, 0.1f, 0.2f, 0.3f, 2, 0.5f, 1.5f },
+            { -4, 0.5f, 8, XM_PIDIV2, -0.7f, 1.1f, 0.25f, 3.f, 0.8f },
+        };
+        for (const auto& s : samples)
+        {
+            TransformComponent tf{};
+            tf.position = { s[0], s[1], s[2] };
+            tf.rotation = { s[3], s[4], s[5] };
+            tf.scale = { s[6], s[7], s[8] };
+
+            float cpu[16]{}, gpuStyle[16]{};
+            StoreWorldTransposed(tf.GetWorldMatrix(), cpu);
+            GpuStyleComposeStore(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], gpuStyle);
+
+            for (int i = 0; i < 16; ++i)
+            {
+                if (fabsf(cpu[i] - gpuStyle[i]) > 1e-5f)
+                {
+                    char buf[192];
+                    sprintf_s(buf,
+                        "[RenderSystem] ComposeWorld CPU/GPU mismatch at [%d]: cpu=%f gpuStyle=%f\n",
+                        i, cpu[i], gpuStyle[i]);
+                    OutputDebugStringA(buf);
+                    return;
+                }
+            }
+        }
+        OutputDebugStringA("[RenderSystem] ComposeWorld matrix layout validated (CPU match).\n");
+    }
+
     Material* ResolveSubmeshMaterial(const SubmeshGeometry& sub)
     {
         Material* material = sub.initMaterial;
@@ -156,6 +244,45 @@ namespace
         return true;
     }
 
+    // Step F1: TRS mirror (future GPU motion). Drawing uses FillSourceFromEntity.
+    void FillTransformFromEntity(
+        GpuTransform& out,
+        TransformComponent& tf,
+        RenderableComponent& rend,
+        BoundsComponent* bounds,
+        UINT batchId)
+    {
+        out.position[0] = tf.position.x;
+        out.position[1] = tf.position.y;
+        out.position[2] = tf.position.z;
+        out.rotation[0] = tf.rotation.x;
+        out.rotation[1] = tf.rotation.y;
+        out.rotation[2] = tf.rotation.z;
+        out.scale[0] = tf.scale.x;
+        out.scale[1] = tf.scale.y;
+        out.scale[2] = tf.scale.z;
+        out.pad0 = out.pad1 = out.pad2 = 0.f;
+        out.batchId = batchId;
+        out.flags = rend.visible ? 1u : 0u;
+        out.pad5 = out.pad6 = 0;
+        if (bounds)
+        {
+            out.boundsCenter[0] = bounds->worldBounds.Center.x;
+            out.boundsCenter[1] = bounds->worldBounds.Center.y;
+            out.boundsCenter[2] = bounds->worldBounds.Center.z;
+            out.boundsExtents[0] = bounds->worldBounds.Extents.x;
+            out.boundsExtents[1] = bounds->worldBounds.Extents.y;
+            out.boundsExtents[2] = bounds->worldBounds.Extents.z;
+        }
+        else
+        {
+            out.boundsCenter[0] = out.boundsCenter[1] = out.boundsCenter[2] = 0.f;
+            out.boundsExtents[0] = out.boundsExtents[1] = out.boundsExtents[2] = 0.f;
+        }
+        out.pad3 = out.pad4 = 0.f;
+    }
+
+    // Path3 draw source: world = GetWorldMatrix (Path2/Basic과 바이트 동일)
     void FillSourceFromEntity(
         GpuInstanceSource& out,
         TransformComponent& tf,
@@ -279,11 +406,15 @@ void RenderSystem::Initialize(ID3D12Device* device)
 
     ID3D12RootSignature* buildRS =
         RootSignatureManager::Get().GetRootSignature(RootSignatureType::IndirectBuild);
+    ID3D12RootSignature* composeRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::ComposeWorld);
 
     auto cullBlob = ShaderManager::Get().GetShader(
         L"Resources\\Shaders\\build_indirect_commands.hlsl", "CS_CullCompact", "cs_5_1");
     auto buildBlob = ShaderManager::Get().GetShader(
         L"Resources\\Shaders\\build_indirect_commands.hlsl", "CS_BuildCommands", "cs_5_1");
+    auto composeBlob = ShaderManager::Get().GetShader(
+        L"Resources\\Shaders\\compose_world.hlsl", "CS_ComposeWorld", "cs_5_1");
 
     if (cullBlob && buildBlob && buildRS)
     {
@@ -296,6 +427,17 @@ void RenderSystem::Initialize(ID3D12Device* device)
             if (SUCCEEDED(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mBuildCommandsPSO))))
                 mComputeIndirectReady = true;
         }
+    }
+
+    if (composeBlob && composeRS)
+    {
+        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+        psoDesc.pRootSignature = composeRS;
+        psoDesc.CS = { composeBlob->GetBufferPointer(), composeBlob->GetBufferSize() };
+        if (FAILED(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mComposeWorldPSO))))
+            mComposeWorldPSO.Reset();
+        else
+            ValidateComposeWorldMatchesCpu();
     }
 
     ID3D12RootSignature* hizRS =
@@ -318,8 +460,10 @@ void RenderSystem::Initialize(ID3D12Device* device)
 
     if (!mComputeIndirectReady)
         OutputDebugStringA("[RenderSystem] Path3 GPU-driven unavailable (CS/PSO). Path1/2 OK.\n");
+    else if (mComposeWorldPSO)
+        OutputDebugStringA("[RenderSystem] Path3 ready (ComposeWorld + Cull + EI + HiZ).\n");
     else
-        OutputDebugStringA("[RenderSystem] Path3 GPU-driven ready (CullCompact + BuildCommands + HiZ).\n");
+        OutputDebugStringA("[RenderSystem] Path3 ready (no ComposeWorld PSO; fallback needed).\n");
 
     {
         InstanceWorld dummy{};
@@ -351,6 +495,11 @@ void RenderSystem::DestroyGpuResources()
             f.requestUpload->Unmap(0, nullptr);
             f.requestMapped = nullptr;
         }
+        if (f.transformUpload && f.transformMapped)
+        {
+            f.transformUpload->Unmap(0, nullptr);
+            f.transformMapped = nullptr;
+        }
         if (f.batchUpload && f.batchMapped)
         {
             f.batchUpload->Unmap(0, nullptr);
@@ -367,9 +516,11 @@ void RenderSystem::DestroyGpuResources()
             f.frameCBMapped = nullptr;
         }
         f.requestUpload.Reset();
+        f.transformUpload.Reset();
         f.batchUpload.Reset();
         f.submeshUpload.Reset();
         f.frameCBUpload.Reset();
+        f.transformDefault.Reset();
         f.sourceDefault.Reset();
         f.batchDefault.Reset();
         f.submeshDefault.Reset();
@@ -379,10 +530,12 @@ void RenderSystem::DestroyGpuResources()
         f.instanceState = D3D12_RESOURCE_STATE_COMMON;
         f.countState = D3D12_RESOURCE_STATE_COMMON;
         f.drawCmdState = D3D12_RESOURCE_STATE_COMMON;
+        f.transformDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
         f.submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
-        f.uploadedSourceVersion = 0;
+        f.uploadedTransformVersion = 0;
+        f.composedTransformVersion = 0;
         f.uploadedMetaVersion = 0;
     }
     mCounterZeroUpload.Reset();
@@ -395,12 +548,14 @@ void RenderSystem::Shutdown()
     DestroyGpuResources();
     mCullCompactPSO.Reset();
     mBuildCommandsPSO.Reset();
+    mComposeWorldPSO.Reset();
     mHiZCopyPSO.Reset();
     mHiZDownsamplePSO.Reset();
     mComputeIndirectReady = false;
     mInstancedCacheValid = false;
     mCachedInstancedBatches.clear();
     mCachedOverrideEntities.clear();
+    mTransformCpu.clear();
     mSourceCpu.clear();
     mBatchDescsCpu.clear();
     mSubmeshDescsCpu.clear();
@@ -418,10 +573,12 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
     if (mFrames[0].instanceBuffer)
         return;
 
-    // Path2 InstanceWorld upload OR Path3 GpuInstanceSource — take max
+    // Path2 InstanceWorld upload OR Path3 source/transform sizes
     const UINT64 reqBufSize = (std::max)(
         sizeof(GpuInstanceSource) * kMaxInstancesPerDraw,
         sizeof(InstanceWorld) * kMaxInstancesPerDraw);
+    const UINT64 xformBufSize = sizeof(GpuTransform) * kMaxInstancesPerDraw;
+    const UINT64 sourceBufSize = sizeof(GpuInstanceSource) * kMaxInstancesPerDraw;
     const UINT64 instBufSize = sizeof(InstanceWorld) * kMaxInstancesPerDraw;
     const UINT64 batchBufSize = sizeof(GpuBatchDesc) * kMaxGpuBatches;
     const UINT64 submeshBufSize = sizeof(GpuSubmeshDesc) * kMaxGpuSubmeshDraws;
@@ -469,6 +626,16 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
             IID_PPV_ARGS(&f.requestUpload)));
         ThrowIfFailed(f.requestUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.requestMapped)));
 
+        // Step F1: TRS upload staging
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(xformBufSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&f.transformUpload)));
+        ThrowIfFailed(f.transformUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.transformMapped)));
+
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
             D3D12_HEAP_FLAG_NONE,
@@ -496,11 +663,21 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
             IID_PPV_ARGS(&f.frameCBUpload)));
         ThrowIfFailed(f.frameCBUpload->Map(0, nullptr, reinterpret_cast<void**>(&f.frameCBMapped)));
 
-        // Step C: DEFAULT 힙 — CS SRV 읽기용 (프레임별 트리플버퍼)
+        // Step F1: TRS DEFAULT (Compose input)
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
             D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(reqBufSize),
+            &CD3DX12_RESOURCE_DESC::Buffer(xformBufSize),
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&f.transformDefault)));
+        f.transformDefaultState = D3D12_RESOURCE_STATE_COMMON;
+
+        // Compose output / Cull input (UAV+SRV)
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(sourceBufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
             D3D12_RESOURCE_STATE_COMMON,
             nullptr,
             IID_PPV_ARGS(&f.sourceDefault)));
@@ -614,13 +791,16 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
             return a.mainMat < b.mainMat;
         });
 
+    mTransformCpu.clear();
     mSourceCpu.clear();
     mBatchDescsCpu.clear();
     mSubmeshDescsCpu.clear();
     mGpuCpuBatches.clear();
     mEntityToGpuSlot.clear();
 
-    mSourceCpu.reserve((std::min)(entries.size(), static_cast<size_t>(kMaxInstancesPerDraw)));
+    const size_t cap = (std::min)(entries.size(), static_cast<size_t>(kMaxInstancesPerDraw));
+    mTransformCpu.reserve(cap);
+    mSourceCpu.reserve(cap);
 
     UINT slot = 0;
     size_t i = 0;
@@ -675,9 +855,12 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         for (UINT k = 0; k < groupCount; ++k)
         {
             const Entry& en = entries[groupBegin + k];
+            GpuTransform xf{};
             GpuInstanceSource src{};
+            FillTransformFromEntity(xf, *en.tf, *en.rend, en.bounds, batchId);
             FillSourceFromEntity(src, *en.tf, *en.rend, en.bounds, batchId);
             mEntityToGpuSlot[en.entity] = slot;
+            mTransformCpu.push_back(xf);
             mSourceCpu.push_back(src);
             ++slot;
         }
@@ -706,7 +889,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         mGpuCpuBatches.push_back(std::move(cpuBatch));
     }
 
-    ++mSourceContentVersion;
+    ++mTransformContentVersion;
     ++mMetaVersion;
     mGpuStructureDirty = false;
 }
@@ -724,14 +907,15 @@ bool RenderSystem::PatchOneGpuEntity(
         return false;
 
     const UINT slot = it->second;
-    if (slot >= mSourceCpu.size())
+    if (slot >= mTransformCpu.size() || slot >= mSourceCpu.size())
         return false;
 
     if (tf->dirtyFrames <= 0)
     {
         const uint32_t want = rend->visible ? 1u : 0u;
-        if ((mSourceCpu[slot].flags & 1u) != want)
+        if ((mTransformCpu[slot].flags & 1u) != want)
         {
+            mTransformCpu[slot].flags = want;
             mSourceCpu[slot].flags = want;
             anyPatched = true;
         }
@@ -739,8 +923,9 @@ bool RenderSystem::PatchOneGpuEntity(
     }
 
     BoundsComponent* bounds = world.GetComponent<BoundsComponent>(e);
-    FillSourceFromEntity(
-        mSourceCpu[slot], *tf, *rend, bounds, mSourceCpu[slot].batchId);
+    const UINT batchId = mTransformCpu[slot].batchId;
+    FillTransformFromEntity(mTransformCpu[slot], *tf, *rend, bounds, batchId);
+    FillSourceFromEntity(mSourceCpu[slot], *tf, *rend, bounds, batchId);
 
     if (frameResource && frameResource->ObjectCB
         && rend->objectCBIndex < kMaxSceneObjects)
@@ -828,7 +1013,7 @@ void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameRe
     mLastStats.pendingDirty = static_cast<uint32_t>(mPendingTransformDirty.size());
 
     if (anyPatched)
-        ++mSourceContentVersion;
+        ++mTransformContentVersion;
 
     mLastStats.patchMs = ElapsedMs(t0);
 }
@@ -850,29 +1035,28 @@ void RenderSystem::UploadGpuDrivenFrameData(
         }
     };
 
-    // Source: staging memcpy → DEFAULT copy (프레임 버전 다를 때만)
-    if (frame.uploadedSourceVersion != mSourceContentVersion && frame.requestMapped)
+    // Step F1: TRS staging → DEFAULT (compose input)
+    if (frame.uploadedTransformVersion != mTransformContentVersion && frame.transformMapped)
     {
-        const UINT64 bytes = sizeof(GpuInstanceSource) * mSourceCpu.size();
-        if (!mSourceCpu.empty() && bytes > 0)
+        const UINT64 bytes = sizeof(GpuTransform) * mTransformCpu.size();
+        if (!mTransformCpu.empty() && bytes > 0)
         {
-            std::memcpy(frame.requestMapped, mSourceCpu.data(), static_cast<size_t>(bytes));
-            transition(frame.sourceDefault.Get(), frame.sourceDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
+            std::memcpy(frame.transformMapped, mTransformCpu.data(), static_cast<size_t>(bytes));
+            transition(frame.transformDefault.Get(), frame.transformDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
             cmdList->CopyBufferRegion(
-                frame.sourceDefault.Get(), 0,
-                frame.requestUpload.Get(), 0,
+                frame.transformDefault.Get(), 0,
+                frame.transformUpload.Get(), 0,
                 bytes);
-            transition(frame.sourceDefault.Get(), frame.sourceDefaultState,
+            transition(frame.transformDefault.Get(), frame.transformDefaultState,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             mLastStats.usedDefaultHeapCopy = true;
         }
-        frame.uploadedSourceVersion = mSourceContentVersion;
-        mLastStats.didSourceUpload = true;
+        frame.uploadedTransformVersion = mTransformContentVersion;
+        mLastStats.didSourceUpload = true; // TRS upload (legacy stat name)
     }
     else
     {
-        // CS가 읽을 수 있게 SRV 상태 보장
-        transition(frame.sourceDefault.Get(), frame.sourceDefaultState,
+        transition(frame.transformDefault.Get(), frame.transformDefaultState,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
@@ -916,6 +1100,114 @@ void RenderSystem::UploadGpuDrivenFrameData(
     }
 
     mLastStats.uploadMs = ElapsedMs(t0);
+}
+
+void RenderSystem::DispatchComposeWorld(
+    ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances)
+{
+    mLastStats.didComposeWorld = false;
+    mLastStats.composeMs = 0.f;
+
+    if (!frame.sourceDefault || numInstances == 0)
+        return;
+    if (numInstances > mTransformCpu.size())
+        numInstances = static_cast<UINT>(mTransformCpu.size());
+    if (numInstances == 0)
+        return;
+
+    // Already composed for this transform version on this frame slot
+    if (frame.composedTransformVersion == mTransformContentVersion
+        && frame.composedTransformVersion != 0)
+    {
+        // Cull expects source as SRV
+        if (frame.sourceDefaultState != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+        {
+            cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+                frame.sourceDefault.Get(),
+                frame.sourceDefaultState,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+            frame.sourceDefaultState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        }
+        return;
+    }
+
+    const auto t0 = std::chrono::high_resolution_clock::now();
+
+    auto transition = [&](ID3D12Resource* res, D3D12_RESOURCE_STATES& st, D3D12_RESOURCE_STATES target)
+    {
+        if (st != target)
+        {
+            cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(res, st, target));
+            st = target;
+        }
+    };
+
+    ID3D12RootSignature* composeRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::ComposeWorld);
+
+    // GPU path: TRS (transformDefault) → CS_ComposeWorld → sourceDefault
+    if (mComposeWorldPSO && composeRS && frame.transformDefault)
+    {
+        transition(frame.transformDefault.Get(), frame.transformDefaultState,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transition(frame.sourceDefault.Get(), frame.sourceDefaultState,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        cmdList->SetComputeRootSignature(composeRS);
+        cmdList->SetPipelineState(mComposeWorldPSO.Get());
+
+        const UINT constants[4] = {
+            numInstances,
+            kMaxInstancesPerDraw,
+            0u,
+            0u
+        };
+        cmdList->SetComputeRoot32BitConstants(0, 4, constants, 0);
+        cmdList->SetComputeRootShaderResourceView(
+            1, frame.transformDefault->GetGPUVirtualAddress());
+        cmdList->SetComputeRootUnorderedAccessView(
+            2, frame.sourceDefault->GetGPUVirtualAddress());
+
+        cmdList->Dispatch((numInstances + 63u) / 64u, 1, 1);
+
+        // UAV write → SRV read (cull)
+        {
+            D3D12_RESOURCE_BARRIER b[2];
+            b[0] = CD3DX12_RESOURCE_BARRIER::UAV(frame.sourceDefault.Get());
+            b[1] = CD3DX12_RESOURCE_BARRIER::Transition(
+                frame.sourceDefault.Get(),
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            cmdList->ResourceBarrier(2, b);
+            frame.sourceDefaultState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        }
+
+        frame.composedTransformVersion = mTransformContentVersion;
+        mLastStats.didComposeWorld = true;
+        mLastStats.composeMs = ElapsedMs(t0);
+        return;
+    }
+
+    // Fallback: CPU GetWorldMatrix path (PSO missing)
+    if (!frame.requestMapped || mSourceCpu.empty())
+        return;
+    if (numInstances > mSourceCpu.size())
+        numInstances = static_cast<UINT>(mSourceCpu.size());
+
+    const UINT64 bytes = sizeof(GpuInstanceSource) * numInstances;
+    std::memcpy(frame.requestMapped, mSourceCpu.data(), static_cast<size_t>(bytes));
+
+    transition(frame.sourceDefault.Get(), frame.sourceDefaultState, D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList->CopyBufferRegion(
+        frame.sourceDefault.Get(), 0,
+        frame.requestUpload.Get(), 0,
+        bytes);
+    transition(frame.sourceDefault.Get(), frame.sourceDefaultState,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    frame.composedTransformVersion = mTransformContentVersion;
+    mLastStats.didComposeWorld = true;
+    mLastStats.composeMs = ElapsedMs(t0);
 }
 
 void RenderSystem::render(ECS::World& world,
@@ -1383,6 +1675,12 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 
     UploadGpuDrivenFrameData(cmdList, frame);
 
+    // Step F1: TRS (GPU) → world in sourceDefault; CPU fallback if no Compose PSO
+    const UINT numXforms = static_cast<UINT>((std::min)(
+        (std::min)(mTransformCpu.size(), mSourceCpu.size()),
+        static_cast<size_t>(kMaxInstancesPerDraw)));
+    DispatchComposeWorld(cmdList, frame, numXforms);
+
     // 2) Frame CB (카메라/컬링/오클루전 — 매 프레임)
     const XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
     mLastViewProj = viewProj;
@@ -1391,7 +1689,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 
     GpuDrivenFrameConstants cb{};
     ExtractFrustumPlanes(viewProj, cb.frustumPlanes);
-    cb.numInstances = static_cast<uint32_t>(mSourceCpu.size());
+    cb.numInstances = numXforms;
     cb.enableFrustumCull = mGpuFrustumCull ? 1u : 0u;
     cb.numBatches = static_cast<uint32_t>(mBatchDescsCpu.size());
     cb.numSubmeshDraws = static_cast<uint32_t>(mSubmeshDescsCpu.size());
@@ -1499,11 +1797,9 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     cmdList->SetComputeRootUnorderedAccessView(7, frame.drawCmdBuffer->GetGPUVirtualAddress());
 
     cmdList->SetPipelineState(mCullCompactPSO.Get());
-    const UINT numInst = static_cast<UINT>((std::min)(
-        mSourceCpu.size(), static_cast<size_t>(kMaxInstancesPerDraw)));
-    if (numInst == 0)
+    if (numXforms == 0)
         return;
-    cmdList->Dispatch((numInst + 63u) / 64u, 1, 1);
+    cmdList->Dispatch((numXforms + 63u) / 64u, 1, 1);
 
     {
         D3D12_RESOURCE_BARRIER uav[2];

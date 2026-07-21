@@ -623,6 +623,7 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                 st.didMetaUpload ? "Y" : "N",
                 st.usedDefaultHeapCopy ? "Y" : "N",
                 st.uploadMs);
+            ImGui::Text("Compose: %s  %.3f ms", st.didComposeWorld ? "Y" : "N", st.composeMs);
             ImGui::Text("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
 
             if (ImGui::Button(st.autoPath ? "Auto Path: ON" : "Auto Path: OFF"))

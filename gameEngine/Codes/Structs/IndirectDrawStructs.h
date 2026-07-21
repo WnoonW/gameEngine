@@ -44,6 +44,27 @@ struct GpuInstanceSource
 };
 static_assert(sizeof(GpuInstanceSource) == 112, "GpuInstanceSource");
 
+// Step F1: CPU uploads TRS; CS_ComposeWorld fills GpuInstanceSource.world
+// (column_major store of S*R*T == StoreWorldTransposed on CPU)
+struct GpuTransform
+{
+    float position[3]{};
+    float pad0 = 0;
+    float rotation[3]{}; // pitch, yaw, roll (GetWorldMatrix와 동일)
+    float pad1 = 0;
+    float scale[3]{ 1, 1, 1 };
+    float pad2 = 0;
+    float boundsCenter[3]{};
+    float pad3 = 0;
+    float boundsExtents[3]{};
+    float pad4 = 0;
+    uint32_t batchId = 0;
+    uint32_t flags = 1;
+    uint32_t pad5 = 0;
+    uint32_t pad6 = 0;
+};
+static_assert(sizeof(GpuTransform) == 96, "GpuTransform");
+
 struct GpuBatchDesc
 {
     uint32_t firstInstance = 0;

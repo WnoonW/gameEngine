@@ -47,6 +47,7 @@ struct GpuDrivenFrameStats
     bool skippedPatch = false;
     bool usedDefaultHeapCopy = false;
     bool didBuildHiZ = false;
+    bool didComposeWorld = false; // Step F1
     uint32_t sourceCount = 0;
     uint32_t batchCount = 0;
     uint32_t submeshDraws = 0;
@@ -59,6 +60,7 @@ struct GpuDrivenFrameStats
     float rebuildMs = 0.f;
     float patchMs = 0.f;
     float uploadMs = 0.f;
+    float composeMs = 0.f;
     float hizMs = 0.f;
 };
 
@@ -108,14 +110,16 @@ public:
 private:
     struct FrameGpuResources
     {
-        // Staging (UPLOAD) — Path2 instances / Path3 copy source
+        // Staging (UPLOAD) — Path2 instances / Path3 transform TRS
         ComPtr<ID3D12Resource> requestUpload;
+        ComPtr<ID3D12Resource> transformUpload; // Step F1 GpuTransform[]
         ComPtr<ID3D12Resource> batchUpload;
         ComPtr<ID3D12Resource> submeshUpload;
         ComPtr<ID3D12Resource> frameCBUpload;
 
-        // Step C: GPU-resident DEFAULT (Path3 CS가 읽음)
-        ComPtr<ID3D12Resource> sourceDefault;
+        // Step C/F: GPU-resident DEFAULT
+        ComPtr<ID3D12Resource> transformDefault; // TRS input to ComposeWorld
+        ComPtr<ID3D12Resource> sourceDefault;    // ComposeWorld output / Cull input
         ComPtr<ID3D12Resource> batchDefault;
         ComPtr<ID3D12Resource> submeshDefault;
 
@@ -124,6 +128,7 @@ private:
         ComPtr<ID3D12Resource> drawCmdBuffer;
 
         BYTE* requestMapped = nullptr;
+        BYTE* transformMapped = nullptr;
         BYTE* batchMapped = nullptr;
         BYTE* submeshMapped = nullptr;
         BYTE* frameCBMapped = nullptr;
@@ -131,11 +136,13 @@ private:
         D3D12_RESOURCE_STATES instanceState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES countState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES drawCmdState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES transformDefaultState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES sourceDefaultState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES batchDefaultState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
 
-        uint32_t uploadedSourceVersion = 0;
+        uint32_t uploadedTransformVersion = 0;
+        uint32_t composedTransformVersion = 0;
         uint32_t uploadedMetaVersion = 0;
     };
 
@@ -181,8 +188,8 @@ private:
 
     void RebuildGpuDrivenScene(World& world);
     void PatchGpuDrivenTransforms(World& world, FrameResource* frameResource);
-    // returns: source copied, meta copied
     void UploadGpuDrivenFrameData(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame);
+    void DispatchComposeWorld(ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame, UINT numInstances);
 
     void DrawInstancedBatches(
         ID3D12GraphicsCommandList* cmdList,
@@ -219,6 +226,7 @@ private:
 
     ComPtr<ID3D12PipelineState> mCullCompactPSO;
     ComPtr<ID3D12PipelineState> mBuildCommandsPSO;
+    ComPtr<ID3D12PipelineState> mComposeWorldPSO;
     ComPtr<ID3D12PipelineState> mHiZCopyPSO;
     ComPtr<ID3D12PipelineState> mHiZDownsamplePSO;
     ComPtr<ID3D12Resource> mCounterZeroUpload;
@@ -257,9 +265,10 @@ private:
     uint32_t mPath2CachedDirtyGen = 0;
 
     bool mGpuStructureDirty = true;
-    uint32_t mSourceContentVersion = 1;
+    uint32_t mTransformContentVersion = 1; // TRS + world source content
     uint32_t mMetaVersion = 1;
-    std::vector<GpuInstanceSource> mSourceCpu;
+    std::vector<GpuTransform> mTransformCpu;      // Step F1 TRS mirror (F2 motion)
+    std::vector<GpuInstanceSource> mSourceCpu;    // cull input: entity-exact world
     std::vector<GpuBatchDesc> mBatchDescsCpu;
     std::vector<GpuSubmeshDesc> mSubmeshDescsCpu;
     std::vector<GpuCpuBatch> mGpuCpuBatches;

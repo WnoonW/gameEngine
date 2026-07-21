@@ -13,6 +13,7 @@ enum class RootSignatureType
     Shadow,         // Shadow Map
     IndirectBuild,  // Path3: cull/compact/build commands
     HiZBuild,       // Path3: hierarchical-Z pyramid
+    ComposeWorld,   // Step F1: TRS → world matrix
 };
 
 class RootSignatureManager
@@ -33,6 +34,7 @@ private:
     void CreateSceneRootSignature();
     void CreateIndirectBuildRootSignature();
     void CreateHiZBuildRootSignature();
+    void CreateComposeWorldRootSignature();
     void CreateSceneCommandSignature();
 
     ID3D12Device* mDevice = nullptr;
