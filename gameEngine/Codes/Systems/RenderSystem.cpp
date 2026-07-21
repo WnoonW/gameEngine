@@ -124,12 +124,36 @@ namespace
                 continue;
 
             cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
-            cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
+            // Step E: heap Index → GPU handle (table of 1)
+            if (material->mTextureHandle.Index != UINT_MAX)
+            {
+                cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
+            }
             cmdList->DrawIndexedInstanced(
                 sub.IndexCount, 1,
                 sub.StartIndexLocation,
                 sub.BaseVertexLocation, 0);
         }
+    }
+
+    // Step E: bind SRV table slot by descriptor heap index (skip if same as last)
+    bool BindMaterialByIndex(
+        ID3D12GraphicsCommandList* cmdList,
+        DescriptorAllocator* descriptorAllocator,
+        UINT materialIndex,
+        UINT& inoutLastIndex)
+    {
+        if (!descriptorAllocator || materialIndex == UINT_MAX)
+            return false;
+        if (materialIndex == inoutLastIndex)
+            return true;
+
+        D3D12_GPU_DESCRIPTOR_HANDLE h =
+            descriptorAllocator->GetHeap()->GetGPUDescriptorHandleForHeapStart();
+        h.ptr += static_cast<UINT64>(materialIndex) * descriptorAllocator->GetDescriptorSize();
+        cmdList->SetGraphicsRootDescriptorTable(2, h);
+        inoutLastIndex = materialIndex;
+        return true;
     }
 
     void FillSourceFromEntity(
@@ -579,7 +603,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
 
         // 서브메시/머티리얼 먼저 해석 — 유효할 때만 소스 커밋
         std::vector<GpuSubmeshDesc> localSubs;
-        std::vector<UINT64> localMats;
+        std::vector<UINT> localMatIndices;
         for (auto& pair : mesh->DrawArgs)
         {
             if (mSubmeshDescsCpu.size() + localSubs.size() >= kMaxGpuSubmeshDraws)
@@ -596,7 +620,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
             sd.baseVertexLocation = sub.BaseVertexLocation;
             sd.batchId = 0; // 아래에서 채움
             localSubs.push_back(sd);
-            localMats.push_back(material->mTextureHandle.GPU.ptr);
+            localMatIndices.push_back(material->mTextureHandle.Index);
         }
         if (localSubs.empty())
             continue;
@@ -621,7 +645,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         cpuBatch.instanceCount = groupCount;
         cpuBatch.firstSubmesh = static_cast<UINT>(mSubmeshDescsCpu.size());
         cpuBatch.submeshCount = static_cast<UINT>(localSubs.size());
-        cpuBatch.materialGpuPtrs = std::move(localMats);
+        cpuBatch.materialIndices = std::move(localMatIndices);
 
         for (auto& sd : localSubs)
         {
@@ -934,6 +958,7 @@ void RenderSystem::renderBasic(ECS::World& world,
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
 
+    UINT lastMat = UINT_MAX;
     world.ForEach<TransformComponent, RenderableComponent>(
         [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
         {
@@ -967,7 +992,8 @@ void RenderSystem::renderBasic(ECS::World& world,
                     continue;
 
                 cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
-                cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
+                BindMaterialByIndex(cmdList, descriptorAllocator,
+                    material->mTextureHandle.Index, lastMat);
                 cmdList->DrawIndexedInstanced(
                     sub.IndexCount, 1,
                     sub.StartIndexLocation,
@@ -983,6 +1009,7 @@ void RenderSystem::DrawInstancedBatches(
     ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
     FrameGpuResources& frame,
+    DescriptorAllocator* descriptorAllocator,
     const std::vector<Entity>& overrideEntities,
     World& world)
 {
@@ -996,6 +1023,8 @@ void RenderSystem::DrawInstancedBatches(
         cmdList->SetGraphicsRootConstantBufferView(
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
+
+    UINT lastMat = UINT_MAX;
 
     if (!overrideEntities.empty())
     {
@@ -1016,6 +1045,7 @@ void RenderSystem::DrawInstancedBatches(
             if (tf && rend)
                 DrawEntityWithResolvedMaterials(cmdList, currentFrameResource, e, *tf, *rend);
         }
+        lastMat = UINT_MAX; // PSO/path switch — force rebind
     }
 
     if (mCachedInstancedBatches.empty())
@@ -1040,6 +1070,7 @@ void RenderSystem::DrawInstancedBatches(
     }
 
     cmdList->SetPipelineState(gfxPSO);
+    lastMat = UINT_MAX;
 
     BYTE* upload = frame.requestMapped;
     UINT uploadCursor = 0;
@@ -1078,10 +1109,11 @@ void RenderSystem::DrawInstancedBatches(
                 continue;
 
             Material* material = ResolveBatchMaterial(batch.mainMaterial, sub);
-            if (!material)
+            if (!material || !material->HasValidTexture())
                 continue;
 
-            cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
+            BindMaterialByIndex(cmdList, descriptorAllocator,
+                material->mTextureHandle.Index, lastMat);
             cmdList->DrawIndexedInstanced(
                 sub.IndexCount, n,
                 sub.StartIndexLocation,
@@ -1142,7 +1174,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
                 mLastStats.sourceCount += static_cast<uint32_t>(b.instances.size());
             mLastStats.batchCount = static_cast<uint32_t>(mCachedInstancedBatches.size());
             DrawInstancedBatches(cmdList, currentFrameResource, frame,
-                mCachedOverrideEntities, world);
+                descriptorAllocator, mCachedOverrideEntities, world);
             return;
         }
 
@@ -1208,7 +1240,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
         mLastStats.sourceCount += static_cast<uint32_t>(b.instances.size());
 
     DrawInstancedBatches(cmdList, currentFrameResource, frame,
-        mCachedOverrideEntities, world);
+        descriptorAllocator, mCachedOverrideEntities, world);
 }
 
 // ---------------------------------------------------------------------------
@@ -1451,7 +1483,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         frame.instanceState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     }
 
-    // 6) 배치별 바인딩 + 서브메시 ExecuteIndirect (InstanceCount는 GPU가 채움)
+    // 6) Step E: material heap Index로 테이블 바인딩 (동일 인덱스면 스킵)
     cmdList->SetGraphicsRootSignature(sceneRS);
     cmdList->SetPipelineState(gfxPSO);
     if (currentFrameResource && currentFrameResource->PassCB)
@@ -1460,6 +1492,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
 
+    UINT lastMat = UINT_MAX;
     for (const GpuCpuBatch& batch : mGpuCpuBatches)
     {
         if (!batch.mesh || batch.instanceCount == 0 || batch.submeshCount == 0)
@@ -1481,12 +1514,11 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
             const UINT cmdIndex = batch.firstSubmesh + si;
             if (cmdIndex >= mSubmeshDescsCpu.size())
                 break;
-            if (si >= batch.materialGpuPtrs.size())
+            if (si >= batch.materialIndices.size())
                 break;
 
-            D3D12_GPU_DESCRIPTOR_HANDLE mat{};
-            mat.ptr = batch.materialGpuPtrs[si];
-            cmdList->SetGraphicsRootDescriptorTable(2, mat);
+            BindMaterialByIndex(cmdList, descriptorAllocator,
+                batch.materialIndices[si], lastMat);
 
             const UINT64 argOffset = (UINT64)cmdIndex * sizeof(IndirectCommand);
             cmdList->ExecuteIndirect(
@@ -1599,6 +1631,20 @@ void RenderSystem::EnsureDummyHiZSrv(DescriptorAllocator* alloc)
     }
 }
 
+void RenderSystem::PrepareHiZForSceneSize(DescriptorAllocator* alloc, UINT width, UINT height)
+{
+    // Caller must guarantee GPU idle (e.g. Flush after SceneViewport::Resize).
+    width = (std::max)(1u, width);
+    height = (std::max)(1u, height);
+    if (mHiZRing[0].texture && mHiZWidth == width && mHiZHeight == height)
+        return;
+
+    DestroyHiZResources(alloc);
+    // Actual create deferred to BuildHiZ / EnsureHiZResources
+    mHiZWidth = 0;
+    mHiZHeight = 0;
+}
+
 void RenderSystem::EnsureHiZResources(DescriptorAllocator* alloc, UINT width, UINT height)
 {
     if (!mDevice || !alloc)
@@ -1610,7 +1656,20 @@ void RenderSystem::EnsureHiZResources(DescriptorAllocator* alloc, UINT width, UI
     if (mHiZRing[0].texture && mHiZWidth == width && mHiZHeight == height)
         return;
 
-    DestroyHiZResources(alloc);
+    // Size mismatch with live resources: do NOT destroy in-flight (TDR).
+    // Wait for PrepareHiZForSceneSize after GPU flush.
+    if (mHiZRing[0].texture)
+    {
+        static bool sLogged = false;
+        if (!sLogged)
+        {
+            OutputDebugStringA(
+                "[RenderSystem] HiZ size mismatch mid-flight; skip recreate until GPU idle prepare.\n");
+            sLogged = true;
+        }
+        return;
+    }
+
     mSrvAlloc = alloc;
     mHiZMipCount = 1;
     mHiZWidth = width;
@@ -1689,6 +1748,10 @@ void RenderSystem::BuildHiZ(
     const auto t0 = std::chrono::high_resolution_clock::now();
     mSrvAlloc = descriptorAllocator;
     EnsureHiZResources(descriptorAllocator, width, height);
+
+    // Still wrong size / not created (wait for PrepareHiZ after flush)
+    if (!mHiZRing[0].texture || mHiZWidth != width || mHiZHeight != height)
+        return;
 
     ID3D12RootSignature* hizRS =
         RootSignatureManager::Get().GetRootSignature(RootSignatureType::HiZBuild);

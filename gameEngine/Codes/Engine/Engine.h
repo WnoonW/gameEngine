@@ -50,6 +50,9 @@ public:
     bool IsGpuOcclusionEnabled() const;
     const GpuDrivenFrameStats& GetLastFrameStats() const;
 
+    // Scene RT 리사이즈 후 GPU idle 상태에서 Hi-Z 재할당
+    void PrepareHiZForSceneSize(UINT width, UINT height);
+
     // Scene End 이후: previous-frame Hi-Z 갱신
     void BuildHiZ(
         ID3D12GraphicsCommandList* cmdList,

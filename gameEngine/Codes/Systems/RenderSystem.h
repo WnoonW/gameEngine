@@ -87,6 +87,9 @@ public:
         D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthSrvGpu,
         UINT width, UINT height);
 
+    // Scene RT 리사이즈 직후(GPU idle / Flush 이후)에만 호출
+    void PrepareHiZForSceneSize(DescriptorAllocator* alloc, UINT width, UINT height);
+
     void render(World& world,
         ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
@@ -137,7 +140,8 @@ private:
         UINT instanceCount = 0;
         UINT firstSubmesh = 0;
         UINT submeshCount = 0;
-        std::vector<UINT64> materialGpuPtrs;
+        // Step E: DescriptorAllocator heap index (bindless)
+        std::vector<UINT> materialIndices;
     };
 
     void renderBasic(World& world,
@@ -177,6 +181,7 @@ private:
         ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
         FrameGpuResources& frame,
+        DescriptorAllocator* descriptorAllocator,
         const std::vector<Entity>& overrideEntities,
         World& world);
 
@@ -187,6 +192,8 @@ private:
         Mesh* mesh = nullptr;
         Material* mainMaterial = nullptr;
         std::vector<InstanceWorld> instances;
+        // Parallel to mesh DrawArgs order used at cache build (bindless indices)
+        std::vector<UINT> materialIndices;
     };
 
     void EnsureHiZResources(DescriptorAllocator* alloc, UINT width, UINT height);

@@ -1,3 +1,6 @@
+// Instanced path
+// Root: b1 pass | table t0 single texture | t1 instances (space0)
+
 cbuffer cbPass : register(b1)
 {
     float4x4 gView;

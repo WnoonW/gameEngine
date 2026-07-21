@@ -1,3 +1,6 @@
+// Per-object path
+// Root: b0 object | b1 pass | table t0 texture | t1 dummy instances
+
 cbuffer cbPerObject : register(b0)
 {
     float4x4 gWorld;
@@ -23,7 +26,6 @@ cbuffer cbPass : register(b1)
     float    gDeltaTime;
 
     float4   gAmbientLight;
-    // Light Lights[16] omitted since not used in this shader
 };
 
 Texture2D gTexture : register(t0);
@@ -46,24 +48,18 @@ struct VertexOut
 VertexOut VS(VertexIn vin)
 {
     VertexOut vout;
-	
-	// World transform first (ObjectCB), then ViewProj from PassCB
+
     float4 worldPos = mul(float4(vin.PosL, 1.0f), gWorld);
     float4 viewPos  = mul(worldPos, gView);
     vout.PosH       = mul(viewPos, gProj);
 
-    // Pass normal (raw for now — can add WorldIT later if needed)
     vout.Normal = vin.Normal;
-    // Pass texture coordinates.
     vout.TexC = vin.TexC;
-    
+
     return vout;
 }
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    // 샘플 그대로 출력.
-    // 바인딩/해석 실패 디버그는 CPU에서 마젠타 1x1 텍스처 머티리얼을 붙이는 방식으로 처리
-    // (정상 검정 알베도를 "실패"로 오인하지 않음).
     return gTexture.Sample(gSampler, pin.TexC);
 }

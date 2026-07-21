@@ -45,7 +45,9 @@ ID3D12CommandSignature* RootSignatureManager::GetSceneCommandSignature()
 
 void RootSignatureManager::CreateSceneRootSignature()
 {
-    // b0 ObjectCB | b1 PassCB | table t0 texture | root SRV t1 instances
+    // b0 ObjectCB | b1 PassCB | table t0 (1 texture) | root SRV t1 instances
+    // Step E: CPU stores material heap Index and binds table via heapStart+Index*stride
+    // (full-heap 8192 array sampling caused DEVICE_HUNG on invalid slots)
     CD3DX12_ROOT_PARAMETER slotRootParameter[4];
 
     slotRootParameter[0].InitAsConstantBufferView(0);

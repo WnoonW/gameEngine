@@ -424,6 +424,13 @@ bool Engine::IsGpuOcclusionEnabled() const
     return mRenderSystem.IsGpuOcclusionEnabled();
 }
 
+void Engine::PrepareHiZForSceneSize(UINT width, UINT height)
+{
+    if (!mDescriptorAllocator)
+        return;
+    mRenderSystem.PrepareHiZForSceneSize(mDescriptorAllocator, width, height);
+}
+
 void Engine::BuildHiZ(
     ID3D12GraphicsCommandList* cmdList,
     ID3D12Resource* sceneDepth,

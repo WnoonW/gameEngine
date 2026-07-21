@@ -208,7 +208,7 @@ bool InitDirect3DApp::Initialize()
 	// mEngine.SetRenderPath(RenderPath::ComputeIndirect);
 	mEngine.SetRenderPath(RenderPath::ComputeIndirect);
 	mEngine.SetGpuFrustumCullEnabled(true);
-	// Hi-Z: 3슬롯 링 버퍼로 in-flight 읽기/쓰기 분리 (시작 시 true 가능)
+	// Occlusion: 시작 true 가능 (Hi-Z ring + resize 시 GPU-idle recreate)
 	mEngine.SetGpuOcclusionEnabled(true);
 
 	ThrowIfFailed(mCommandList->Close());
@@ -528,6 +528,13 @@ void InitDirect3DApp::BeginFrame()
 
 	// Scene RT 리사이즈는 커맨드 리스트가 열리기 전에 처리 (GPU idle 보장)
 	mImGuiManager.EnsureSceneViewport([this]() { FlushCommandQueue(); });
+
+	// Hi-Z는 리사이즈 직후(GPU idle)에만 재생성 — 프레임 중 destroy는 TDR 원인
+	{
+		const SceneViewport& sceneVP = mImGuiManager.GetSceneViewport();
+		if (sceneVP.IsValid())
+			mEngine.PrepareHiZForSceneSize(sceneVP.GetWidth(), sceneVP.GetHeight());
+	}
 
 	// 3. Allocator + CommandList Reset
 	ThrowIfFailed(mCurrFrameResource->CmdListAlloc->Reset());
