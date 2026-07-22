@@ -64,7 +64,7 @@ public:
     void Render(ID3D12GraphicsCommandList* cmdList);
 
 	// ImGui Dockspace + 메인 메뉴
-    void SetupDockspace();
+    void SetupDockspace(Engine* engine = nullptr);
 
     // 표시 중인 에디터 패널 일괄 그리기
     void DrawEditorPanels(Engine* engine = nullptr);
@@ -107,7 +107,7 @@ public:
     void PresentMainWindow();
 
 private:
-    void DrawMainMenuBar();
+    void DrawMainMenuBar(Engine* engine);
     void ApplyDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& workSize);
     void CaptureDockSplitRatios(ImGuiDockNode* node);
     void ApplyDockSplitRatios(ImGuiDockNode* node, ImVec2 size);
@@ -177,6 +177,11 @@ private:
 
     std::string mSelectedMesh;
     std::string mSelectedMaterial;
+
+    // 씬 파일 IO 상태
+    std::string mLastScenePath;
+    std::string mSceneStatus;
+    bool mSceneStatusIsError = false;
 
     SceneViewport mSceneViewport;
     UINT mDesiredSceneWidth = 1;

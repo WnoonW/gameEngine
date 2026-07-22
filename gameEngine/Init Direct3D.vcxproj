@@ -166,6 +166,7 @@
     <ClCompile Include="Codes\Common\MathHelper.cpp" />
     <ClCompile Include="Codes\Engine\Engine.cpp" />
     <ClCompile Include="Codes\File_IO\ResourceLoader.cpp" />
+    <ClCompile Include="Codes\File_IO\SceneSerializer.cpp" />
     <ClCompile Include="Codes\Managers\ImGuiManager.cpp" />
     <ClCompile Include="Codes\Managers\SceneViewport.cpp" />
     <ClCompile Include="Codes\Managers\MaterialManager.cpp" />
@@ -206,6 +207,7 @@
     <ClInclude Include="Codes\ECS\World.h" />
     <ClInclude Include="Codes\Engine\Engine.h" />
     <ClInclude Include="Codes\File_IO\ResourceLoader.h" />
+    <ClInclude Include="Codes\File_IO\SceneSerializer.h" />
     <ClInclude Include="Codes\Managers\ImGuiManager.h" />
     <ClInclude Include="Codes\Managers\SceneViewport.h" />
     <ClInclude Include="Codes\Managers\MaterialManager.h" />

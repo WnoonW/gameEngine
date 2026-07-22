@@ -99,6 +99,9 @@
     <ClCompile Include="Codes\File_IO\ResourceLoader.cpp">
       <Filter>FileIO</Filter>
     </ClCompile>
+    <ClCompile Include="Codes\File_IO\SceneSerializer.cpp">
+      <Filter>FileIO</Filter>
+    </ClCompile>
     <ClCompile Include="Codes\Managers\ShaderManager.cpp">
       <Filter>Managers</Filter>
     </ClCompile>
@@ -213,6 +216,9 @@
       <Filter>Memory</Filter>
     </ClInclude>
     <ClInclude Include="Codes\File_IO\ResourceLoader.h">
+      <Filter>FileIO</Filter>
+    </ClInclude>
+    <ClInclude Include="Codes\File_IO\SceneSerializer.h">
       <Filter>FileIO</Filter>
     </ClInclude>
     <ClInclude Include="Codes\Managers\ShaderManager.h">

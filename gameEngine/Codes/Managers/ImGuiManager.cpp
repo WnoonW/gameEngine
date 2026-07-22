@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "Entity.h"
 #include "ComponentStruct.h"
+#include "SceneSerializer.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 namespace
 {
@@ -534,10 +536,75 @@ namespace
 #pragma region docking UI
 // ==================== DockSpace + 메인 메뉴 ====================
 
-void ImGuiManager::DrawMainMenuBar()
+void ImGuiManager::DrawMainMenuBar(Engine* engine)
 {
     if (!ImGui::BeginMainMenuBar())
         return;
+
+    if (ImGui::BeginMenu("File"))
+    {
+        if (ImGui::MenuItem("Save Scene...", "Ctrl+S"))
+        {
+            if (engine)
+            {
+                std::string path = SceneSerializer::ShowSaveDialog(m_Hwnd,
+                    mLastScenePath.empty() ? "scene.scene" : std::filesystem::path(mLastScenePath).filename().string());
+                if (!path.empty())
+                {
+                    if (engine->SaveSceneToFile(path))
+                    {
+                        mLastScenePath = path;
+                        mSceneStatus = "Scene saved: " + path;
+                        mSceneStatusIsError = false;
+                    }
+                    else
+                    {
+                        mSceneStatus = "Failed to save scene: " + path;
+                        mSceneStatusIsError = true;
+                    }
+                }
+            }
+            else
+            {
+                mSceneStatus = "Engine not available";
+                mSceneStatusIsError = true;
+            }
+        }
+        if (ImGui::MenuItem("Load Scene...", "Ctrl+O"))
+        {
+            if (engine)
+            {
+                std::string path = SceneSerializer::ShowOpenDialog(m_Hwnd);
+                if (!path.empty())
+                {
+                    std::string err;
+                    if (engine->LoadSceneFromFile(path, &err))
+                    {
+                        mLastScenePath = path;
+                        mSceneStatus = "Scene loaded: " + path
+                            + " (" + std::to_string(engine->GetRenderableObjectCount()) + " objects)";
+                        mSceneStatusIsError = false;
+                    }
+                    else
+                    {
+                        mSceneStatus = "Failed to load: " + (err.empty() ? path : err);
+                        mSceneStatusIsError = true;
+                    }
+                }
+            }
+            else
+            {
+                mSceneStatus = "Engine not available";
+                mSceneStatusIsError = true;
+            }
+        }
+        ImGui::Separator();
+        if (!mLastScenePath.empty())
+            ImGui::TextDisabled("%s", mLastScenePath.c_str());
+        else
+            ImGui::TextDisabled("No scene file yet");
+        ImGui::EndMenu();
+    }
 
     if (ImGui::BeginMenu("View"))
     {
@@ -579,11 +646,25 @@ void ImGuiManager::DrawMainMenuBar()
         ImGui::EndMenu();
     }
 
-    // 우측 상태 힌트
+    // 우측 상태 (씬 IO / 힌트)
     {
-        const float hintWidth = 280.0f;
-        ImGui::SameLine(ImGui::GetWindowWidth() - hintWidth);
-        ImGui::TextDisabled("View menu: show/hide panels");
+        if (!mSceneStatus.empty())
+        {
+            const ImVec4 col = mSceneStatusIsError
+                ? ImVec4(1.0f, 0.45f, 0.35f, 1.0f)
+                : ImVec4(0.55f, 0.9f, 0.55f, 1.0f);
+            ImGui::SameLine();
+            ImGui::TextColored(col, " | %s", mSceneStatus.c_str());
+        }
+        else
+        {
+            const float hintWidth = 220.0f;
+            if (ImGui::GetWindowWidth() > hintWidth + 200.0f)
+            {
+                ImGui::SameLine(ImGui::GetWindowWidth() - hintWidth);
+                ImGui::TextDisabled("File: Save/Load Scene");
+            }
+        }
     }
 
     ImGui::EndMainMenuBar();
@@ -1091,9 +1172,9 @@ void ImGuiManager::AutosaveUiSettingsIfNeeded()
         ImGui::SaveIniSettingsToDisk(mImGuiIniPath);
 }
 
-void ImGuiManager::SetupDockspace()
+void ImGuiManager::SetupDockspace(Engine* engine)
 {
-    DrawMainMenuBar();
+    DrawMainMenuBar(engine);
 
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImVec2 workPos = viewport->WorkPos;

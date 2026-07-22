@@ -8,8 +8,10 @@
 #include "Entity.h"
 #include "RenderLimits.h"
 #include "MathHelper.h"
+#include "SceneSerializer.h"
 #include <algorithm>
 #include <vector>
+#include <filesystem>
 
 using namespace DirectX;
 
@@ -845,4 +847,180 @@ void Engine::SetEntityCollisionEnabled(Entity entity, bool enabled)
     {
         mWorld.RemoveComponent<CollisionComponent>(entity);
     }
+}
+
+void Engine::DestroyRenderableEntity(Entity entity)
+{
+    if (entity == INVALID_ENTITY)
+        return;
+    if (!GetRenderable(entity))
+        return;
+
+    if (IsEntitySelected(entity))
+        ToggleSelectedEntity(entity); // remove selection tag
+
+    MaterialManager::Get().ClearEntityMaterialData(entity);
+    mWorld.DestroyEntity(entity);
+    NotifyRenderableListChanged();
+    mRenderSystem.InvalidateDrawCache();
+}
+
+void Engine::ClearRenderableEntities()
+{
+    ClearSelection();
+
+    // 복사본 — Destroy 중 캐시가 바뀌므로
+    std::vector<Entity> list = GetRenderableEntities();
+    for (Entity e : list)
+    {
+        MaterialManager::Get().ClearEntityMaterialData(e);
+        mWorld.DestroyEntity(e);
+    }
+
+    mNextObjectCBIndex = 0;
+    NotifyRenderableListChanged();
+    mRenderSystem.InvalidateDrawCache();
+}
+
+bool Engine::SaveSceneToFile(const std::string& path, const std::string& sceneName)
+{
+    SceneFileData scene;
+    scene.version = SceneFileData::kCurrentVersion;
+    if (!sceneName.empty())
+        scene.name = sceneName;
+    else
+    {
+        // 파일명 stem
+        try
+        {
+            scene.name = std::filesystem::path(path).stem().string();
+        }
+        catch (...)
+        {
+            scene.name = "scene";
+        }
+    }
+
+    const auto& entities = GetRenderableEntities();
+    scene.entities.reserve(entities.size());
+
+    for (Entity e : entities)
+    {
+        RenderableComponent* rend = GetRenderable(e);
+        TransformComponent* tf = GetTransform(e);
+        if (!rend || !rend->mesh || !tf)
+            continue;
+
+        SceneEntityData data;
+        data.meshName = rend->mesh->name;
+        // LOD 메시 이름(_lod1 등)이면 베이스 이름으로 저장
+        {
+            const auto lodPos = data.meshName.find("_lod");
+            if (lodPos != std::string::npos)
+                data.meshName = data.meshName.substr(0, lodPos);
+        }
+        data.mainMaterial = GetEntityMainMaterial(e);
+        data.position = tf->position;
+        data.rotation = tf->rotation;
+        data.scale = tf->scale;
+        data.visible = rend->visible;
+
+        if (GravityComponent* g = GetGravityComponent(e))
+        {
+            data.hasGravity = true;
+            data.gravityEnabled = g->enabled;
+            data.gravityStrength = g->strength;
+            data.gravityVelocity = g->velocity;
+            data.gravityAngularVelocity = g->angularVelocity;
+        }
+
+        if (CollisionComponent* c = GetCollisionComponent(e))
+        {
+            data.hasCollision = true;
+            data.collisionEnabled = c->enabled;
+            data.collisionStatic = c->isStatic;
+            data.collisionRestitution = c->restitution;
+        }
+
+        if (rend->mesh)
+        {
+            for (const auto& pair : rend->mesh->DrawArgs)
+            {
+                const std::string sub = GetEntitySubMaterial(e, pair.first);
+                if (!sub.empty())
+                    data.subMaterials[pair.first] = sub;
+            }
+        }
+
+        scene.entities.push_back(std::move(data));
+    }
+
+    return SceneSerializer::SaveToFile(path, scene);
+}
+
+bool Engine::LoadSceneFromFile(const std::string& path, std::string* outError)
+{
+    SceneFileData scene;
+    if (!SceneSerializer::LoadFromFile(path, scene, outError))
+        return false;
+
+    ClearRenderableEntities();
+
+    size_t created = 0;
+    for (const auto& data : scene.entities)
+    {
+        if (data.meshName.empty())
+            continue;
+
+        Entity e = CreateRenderableEntity(data.meshName, data.mainMaterial, data.position);
+        if (e == INVALID_ENTITY)
+        {
+            // 메시/머티리얼 없으면 스킵하고 계속
+            continue;
+        }
+
+        if (TransformComponent* tf = GetTransform(e))
+        {
+            tf->rotation = data.rotation;
+            tf->scale = data.scale;
+            tf->MarkDirty(e);
+        }
+
+        if (RenderableComponent* r = GetRenderable(e))
+            r->visible = data.visible;
+
+        if (data.hasGravity)
+        {
+            SetEntityGravityEnabled(e, true);
+            if (GravityComponent* g = GetGravityComponent(e))
+            {
+                g->enabled = data.gravityEnabled;
+                g->strength = data.gravityStrength;
+                g->velocity = data.gravityVelocity;
+                g->angularVelocity = data.gravityAngularVelocity;
+            }
+            NotifyEntityMotionChanged(e);
+        }
+
+        if (data.hasCollision)
+        {
+            SetEntityCollisionEnabled(e, true);
+            if (CollisionComponent* c = GetCollisionComponent(e))
+            {
+                c->enabled = data.collisionEnabled;
+                c->isStatic = data.collisionStatic;
+                c->restitution = data.collisionRestitution;
+            }
+        }
+
+        for (const auto& sub : data.subMaterials)
+            SetEntitySubMaterial(e, sub.first, sub.second);
+
+        ++created;
+    }
+
+    if (created == 0 && !scene.entities.empty() && outError)
+        *outError = "No entities could be created (missing meshes/materials?)";
+
+    return true;
 }

@@ -316,7 +316,7 @@ LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
-	mImGuiManager.SetupDockspace();
+	mImGuiManager.SetupDockspace(&mEngine);
 	mImGuiManager.DrawEditorPanels(&mEngine);
 
 	// Inspector 체크박스 → 앱의 3인칭 조작 모드 동기화

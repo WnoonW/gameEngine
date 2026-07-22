@@ -152,6 +152,14 @@ public:
     // 생성/삭제 등으로 목록·인스턴스 캐시 무효화
     void NotifyRenderableListChanged();
 
+    // 렌더 엔티티 삭제 (카메라 등 비-렌더 엔티티는 유지)
+    void DestroyRenderableEntity(Entity entity);
+    void ClearRenderableEntities();
+
+    // 씬 파일 (.scene) 저장/불러오기 — 렌더 오브젝트만
+    bool SaveSceneToFile(const std::string& path, const std::string& sceneName = {});
+    bool LoadSceneFromFile(const std::string& path, std::string* outError = nullptr);
+
     void Shutdown();
 private:
     void RebuildRenderableListCacheIfNeeded();
