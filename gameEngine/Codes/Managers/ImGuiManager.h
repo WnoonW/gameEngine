@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <unordered_map>
 
 #include <Backends/imgui_impl_win32.h>
 #include <Backends/imgui_impl_dx12.h>
@@ -50,8 +51,6 @@ public:
         DescriptorAllocator& globalDescriptorAllocator,
         IFunctionCallback* callback = nullptr);
 
-    //void CustomUI(Engine* engine = nullptr);
-
     // for object creation from loaded assets
     const std::string& GetSelectedMesh() const { return mSelectedMesh; }
     const std::string& GetSelectedMaterial() const { return mSelectedMaterial; }
@@ -64,12 +63,19 @@ public:
     // ImGui 창을 다 그린 후에 호출 (CommandList에 실제 그리기)
     void Render(ID3D12GraphicsCommandList* cmdList);
 
-	// ImGui Dockspace 설정
-    void SetupDockspace();          
+	// ImGui Dockspace + 메인 메뉴
+    void SetupDockspace();
+
+    // 표시 중인 에디터 패널 일괄 그리기
+    void DrawEditorPanels(Engine* engine = nullptr);
+
     void DrawScenePanel();
     void DrawHierarchyPanel(Engine* engine = nullptr);
     void DrawInspectorPanel(Engine* engine = nullptr);
+    void DrawToolsPanel();
     void DrawProjectPanel();
+    void DrawRenderPanel(Engine* engine = nullptr);
+    void DrawHelpPanel();
 
     // Ensure offscreen Scene RT matches last panel size.
     // flushGpu must fully idle the GPU before resources are recreated.
@@ -95,7 +101,31 @@ public:
     void SetManipulateSelected(bool on) { mManipulateSelected = on; }
     bool IsManipulateSelected() const { return mManipulateSelected; }
 
+    // 커맨드 리스트가 닫힌 뒤 호출 (초기화 완료 후 창 위치 복원)
+    void ApplyMainWindowPlacement();
+    // 위치 복원·리사이즈 후 메인 창을 화면에 표시 (최대화 상태 포함)
+    void PresentMainWindow();
+
 private:
+    void DrawMainMenuBar();
+    void ApplyDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& workSize);
+    void CaptureDockSplitRatios(ImGuiDockNode* node);
+    void ApplyDockSplitRatios(ImGuiDockNode* node, ImVec2 size);
+    void SyncDockLayoutToWorkSize(ImGuiID dockspace_id, const ImVec2& workSize);
+    void DrawProjectSpawnContent();
+    void DrawRenderContent(Engine* engine);
+    void DrawHelpContent();
+    void DrawToolsContent();
+
+    // UI 설정 저장/불러오기 (exe 옆 editor_ui.cfg + imgui.ini)
+    void ResolveConfigPaths();
+    bool LoadUiSettings();
+    bool SaveUiSettings();
+    void MarkUiSettingsDirty();
+    void AutosaveUiSettingsIfNeeded();
+    void CaptureMainWindowPlacement();
+    static bool IsPlacementOnScreen(const RECT& rc);
+
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
     ID3D12Device* m_Device = nullptr;
     HWND m_Hwnd = nullptr;
@@ -103,6 +133,47 @@ private:
     DescriptorAllocator* m_DescriptorAllocator = nullptr;
 
     bool mManipulateSelected = false;
+
+    // View 메뉴로 열고 닫는 패널 (X로 닫으면 꺼짐, View에서 다시 켬)
+    bool mShowScene = true;
+    bool mShowHierarchy = true;
+    bool mShowInspector = true;
+    bool mShowTools = true;
+    bool mShowProject = true;
+    bool mShowRender = true;
+    bool mShowHelp = true;
+    bool mRequestResetLayout = false;
+
+    // 레이아웃 버전을 올리면(코드 변경 시) 기본 도크 배치를 다시 깐다.
+    static constexpr int kDockLayoutVersion = 5;
+    static constexpr int kUiSettingsFileVersion = 1;
+    int mAppliedDockLayoutVersion = 0;
+    ImVec2 mLastDockWorkSize{ 0.0f, 0.0f };
+    float mLastDockAspect = 0.0f; // workSize.x / workSize.y
+
+    // 사용자가 조절한 도크 스플릿 비율 (nodeId → Child[0] 비율 0~1).
+    // - SplitAxis X(좌우): 현재 창 너비의 %
+    // - SplitAxis Y(상하): 현재 창 높이의 %
+    // 창이 1:1 → 16:9 로 바뀌면 W/H가 다르게 변하므로 축별로 따로 환산한다.
+    std::unordered_map<ImGuiID, float> mDockSplitRatios;
+    bool mDockRatiosNeedSeed = true;
+
+    // true면 시작 시 기본 레이아웃을 덮어쓰지 않고 저장된 도크/비율을 사용
+    bool mRestoreDockFromSettings = false;
+    bool mUiSettingsDirty = false;
+    double mLastUiSettingsSaveTime = 0.0;
+
+    // exe 디렉터리 기준 설정 경로 (ImGui io.IniFilename 은 수명 동안 유효해야 함)
+    char mImGuiIniPath[MAX_PATH] = {};
+    char mEditorCfgPath[MAX_PATH] = {};
+
+    // 메인 HWND 위치/크기 (WINDOWPLACEMENT 기준, 복원 좌표)
+    bool mHasSavedWindowPlacement = false;
+    int mWindowNormalLeft = 0;
+    int mWindowNormalTop = 0;
+    int mWindowNormalRight = 0;
+    int mWindowNormalBottom = 0;
+    int mWindowShowCmd = SW_SHOWNORMAL; // SW_SHOWNORMAL / SW_SHOWMAXIMIZED
 
     std::string mSelectedMesh;
     std::string mSelectedMaterial;

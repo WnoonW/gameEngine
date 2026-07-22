@@ -64,6 +64,11 @@ struct GpuDrivenFrameStats
     uint32_t eiCalls = 0;       // ExecuteIndirect 호출 수
     uint32_t multiEiRuns = 0;   // MaxCommandCount > 1 인 연속 머티리얼 런
     uint32_t motionActive = 0;  // slots with motion flags
+    // Step I: GPU cull readback (1 ring-slot delayed ≈ 1–3 frames)
+    bool gpuCullReadbackValid = false;
+    uint32_t gpuVisibleInstances = 0;  // after frustum+occlusion compact
+    uint32_t gpuSubmittedInstances = 0; // sources dispatched to cull that frame
+    uint32_t gpuCulledInstances = 0;    // submitted - visible
     float rebuildMs = 0.f;
     float patchMs = 0.f;
     float uploadMs = 0.f;
@@ -157,6 +162,11 @@ private:
         ComPtr<ID3D12Resource> instanceBuffer;
         ComPtr<ID3D12Resource> countBuffer;
         ComPtr<ID3D12Resource> drawCmdBuffer;
+        // Step I: GPU→CPU batch counter readback (READBACK heap)
+        ComPtr<ID3D12Resource> countReadback;
+        bool countReadbackPending = false; // copy scheduled last use of this slot
+        uint32_t countReadbackBatches = 0;
+        uint32_t countReadbackSources = 0;
 
         BYTE* requestMapped = nullptr;
         BYTE* transformMapped = nullptr;
@@ -259,6 +269,11 @@ private:
     D3D12_GPU_DESCRIPTOR_HANDLE GetHiZSampleSrvGpu() const;
     void UpdateAutoRenderPath(World& world);
     void UpdateEntityLods(World& world, const DirectX::XMMATRIX& viewMatrix);
+    // Step I: map previous cull counters on this frame slot
+    void ResolveGpuCullReadback(FrameGpuResources& frame);
+    void ScheduleGpuCullReadback(
+        ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame,
+        UINT numBatches, UINT numSources);
 
     RenderPath mRenderPath = RenderPath::ComputeIndirect;
     bool mAutoRenderPath = true; // Step G 기본 ON

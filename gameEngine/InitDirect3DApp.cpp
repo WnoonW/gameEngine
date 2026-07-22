@@ -197,6 +197,7 @@ bool InitDirect3DApp::Initialize()
 	RegisterMouseRawInput();
 
 	ThrowIfFailed(mCommandList->Reset(mFrameResources[0]->CmdListAlloc.Get(), nullptr));
+	MarkCommandListRecording(true);
 
 	InitializeCoreSystems();
 	LoadAssets();
@@ -209,9 +210,17 @@ bool InitDirect3DApp::Initialize()
 	mEngine.SetGpuOcclusionEnabled(true);
 
 	ThrowIfFailed(mCommandList->Close());
+	MarkCommandListRecording(false);
 	ID3D12CommandList* cmdLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
+
+	// 커맨드 리스트가 닫힌 뒤에 창 위치/크기 복원 (OnResize 안전)
+	mImGuiManager.ApplyMainWindowPlacement();
+	ProcessPendingResize();
+
+	// 에셋 로딩이 끝난 뒤에야 메인 창 표시 → 로딩 중 빈/기본 창이 안 보임
+	mImGuiManager.PresentMainWindow();
 
 	UpdateCamera(0.0f);
 	SyncMouseLookState();
@@ -247,8 +256,7 @@ void InitDirect3DApp::RegisterMouseRawInput()
 
 LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	// ESC는 기본 MsgProc에서 앱 종료로 처리된다.
-	// 마우스 룩 중에는 종료 대신 고정만 풀어 에디터 UI/창 조절이 가능하게 한다.
+	// ESC: 마우스 룩/커서 고정만 해제. 프로그램은 종료하지 않는다.
 	if (msg == WM_KEYUP && wParam == VK_ESCAPE)
 	{
 		if (mMouseLookRequested || mMouseLookActive)
@@ -257,9 +265,8 @@ LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 			// 요청 플래그와 실제 캡처 상태를 같이 끈다.
 			// 이유: 플래그만 끄면 다음 Sync/ACTIVATE에서 다시 켜질 수 있음.
 			SetMouseLookActive(false);
-			return 0;
 		}
-		// 룩이 꺼진 상태의 ESC는 기존처럼 base에서 종료 처리.
+		return 0;
 	}
 
 	// 창 이동/크기 변경 중에는 Update가 pause되어 clip이 옛 스크린 좌표에 남을 수 있음.
@@ -309,11 +316,8 @@ LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
 	mImGuiManager.NewFrame();
-	mImGuiManager.SetupDockspace(); 
-	mImGuiManager.DrawScenePanel();
-	mImGuiManager.DrawHierarchyPanel(&mEngine);
-	mImGuiManager.DrawInspectorPanel(&mEngine);
-	mImGuiManager.DrawProjectPanel();
+	mImGuiManager.SetupDockspace();
+	mImGuiManager.DrawEditorPanels(&mEngine);
 
 	// Inspector 체크박스 → 앱의 3인칭 조작 모드 동기화
 	mManipulateSelected = mImGuiManager.IsManipulateSelected();
@@ -536,6 +540,7 @@ void InitDirect3DApp::BeginFrame()
 	// 3. Allocator + CommandList Reset
 	ThrowIfFailed(mCurrFrameResource->CmdListAlloc->Reset());
 	ThrowIfFailed(mCommandList->Reset(mCurrFrameResource->CmdListAlloc.Get(), nullptr));
+	MarkCommandListRecording(true);
 
 	// 4. 백버퍼는 에디터 UI(ImGui)용. 3D는 Scene offscreen RT에 그림.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
@@ -620,6 +625,7 @@ void InitDirect3DApp::EndFrame()
 
 	// Done recording commands.
 	ThrowIfFailed(mCommandList->Close());
+	MarkCommandListRecording(false);
 
 	// Add the command list to the queue for execution.
 	ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };

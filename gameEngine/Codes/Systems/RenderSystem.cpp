@@ -566,6 +566,10 @@ void RenderSystem::DestroyGpuResources()
         f.instanceBuffer.Reset();
         f.countBuffer.Reset();
         f.drawCmdBuffer.Reset();
+        f.countReadback.Reset();
+        f.countReadbackPending = false;
+        f.countReadbackBatches = 0;
+        f.countReadbackSources = 0;
         f.instanceState = D3D12_RESOURCE_STATE_COMMON;
         f.countState = D3D12_RESOURCE_STATE_COMMON;
         f.drawCmdState = D3D12_RESOURCE_STATE_COMMON;
@@ -629,6 +633,7 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
     const UINT64 counterBufSize = sizeof(UINT) * kMaxGpuBatches;
     const UINT64 drawCmdBufSize = sizeof(IndirectCommand) * kMaxGpuSubmeshDraws;
     const UINT64 frameCbSize = FrameCBAlignedSize();
+    const UINT64 counterReadbackSize = sizeof(UINT) * kMaxGpuBatches;
 
     for (UINT fi = 0; fi < kIndirectFrameCount; ++fi)
     {
@@ -651,6 +656,16 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
             nullptr,
             IID_PPV_ARGS(&f.countBuffer)));
         f.countState = D3D12_RESOURCE_STATE_COMMON;
+
+        // Step I: CPU-readable copy of batch counters (after GPU cull)
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(counterReadbackSize),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&f.countReadback)));
+        f.countReadbackPending = false;
 
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
@@ -1525,6 +1540,78 @@ void RenderSystem::SetLodEnabled(bool enabled)
     mInstancedCacheValid = false;
 }
 
+void RenderSystem::ResolveGpuCullReadback(FrameGpuResources& frame)
+{
+    mLastStats.gpuCullReadbackValid = false;
+    mLastStats.gpuVisibleInstances = 0;
+    mLastStats.gpuSubmittedInstances = 0;
+    mLastStats.gpuCulledInstances = 0;
+
+    if (!frame.countReadback || !frame.countReadbackPending)
+        return;
+
+    const UINT numBatches = (std::min)(frame.countReadbackBatches, kMaxGpuBatches);
+    if (numBatches == 0)
+    {
+        frame.countReadbackPending = false;
+        return;
+    }
+
+    const UINT64 bytes = sizeof(UINT) * numBatches;
+    D3D12_RANGE range{ 0, bytes };
+    void* mapped = nullptr;
+    if (FAILED(frame.countReadback->Map(0, &range, &mapped)) || !mapped)
+        return;
+
+    const UINT* counters = static_cast<const UINT*>(mapped);
+    uint32_t visible = 0;
+    for (UINT i = 0; i < numBatches; ++i)
+    {
+        uint32_t n = counters[i];
+        if (i < mBatchDescsCpu.size() && n > mBatchDescsCpu[i].instanceCount)
+            n = mBatchDescsCpu[i].instanceCount;
+        visible += n;
+    }
+
+    D3D12_RANGE empty{};
+    frame.countReadback->Unmap(0, &empty);
+
+    const uint32_t submitted = frame.countReadbackSources;
+    mLastStats.gpuCullReadbackValid = true;
+    mLastStats.gpuVisibleInstances = visible;
+    mLastStats.gpuSubmittedInstances = submitted;
+    mLastStats.gpuCulledInstances = (submitted > visible) ? (submitted - visible) : 0;
+    // Keep pending true so we keep showing last good until next copy overwrites
+    // Actually after read, next Schedule will overwrite — pending stays true after schedule
+}
+
+void RenderSystem::ScheduleGpuCullReadback(
+    ID3D12GraphicsCommandList* cmdList, FrameGpuResources& frame,
+    UINT numBatches, UINT numSources)
+{
+    if (!cmdList || !frame.countBuffer || !frame.countReadback || numBatches == 0)
+        return;
+
+    numBatches = (std::min)(numBatches, kMaxGpuBatches);
+    const UINT64 bytes = sizeof(UINT) * numBatches;
+
+    if (frame.countState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            frame.countBuffer.Get(), frame.countState, D3D12_RESOURCE_STATE_COPY_SOURCE));
+        frame.countState = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    }
+
+    cmdList->CopyBufferRegion(
+        frame.countReadback.Get(), 0,
+        frame.countBuffer.Get(), 0,
+        bytes);
+
+    frame.countReadbackPending = true;
+    frame.countReadbackBatches = numBatches;
+    frame.countReadbackSources = numSources;
+}
+
 void RenderSystem::UpdateEntityLods(World& world, const XMMATRIX& viewMatrix)
 {
     const auto t0 = std::chrono::high_resolution_clock::now();
@@ -2059,6 +2146,9 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     mLastStats.eiCalls = 0;
     mLastStats.multiEiRuns = 0;
 
+    // Step I: previous use of this frame slot finished → map cull counters
+    ResolveGpuCullReadback(frame);
+
     // 1) CPU: 구조 변경 시 배치 재빌드 + dirty 슬롯 패치
     if (mGpuStructureDirty)
     {
@@ -2297,6 +2387,12 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         frame.drawCmdState = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
         frame.instanceState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     }
+
+    // 5b) Step I: batch visible counts → READBACK (resolved next time this slot is used)
+    ScheduleGpuCullReadback(
+        cmdList, frame,
+        static_cast<UINT>(mBatchDescsCpu.size()),
+        numXforms);
 
     // 6) Step E: material heap Index로 테이블 바인딩 (동일 인덱스면 스킵)
     cmdList->SetGraphicsRootSignature(sceneRS);

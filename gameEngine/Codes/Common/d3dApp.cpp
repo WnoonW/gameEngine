@@ -5,6 +5,7 @@
 #include <WindowsX.h>
 #include "d3dApp.h"
 #include "RenderLimits.h"
+#include <algorithm>
 #include <dxgidebug.h>
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
@@ -115,6 +116,9 @@ int D3DApp::Run()
 
 		if (!mAppPaused)
 		{
+			// 커맨드 리스트를 열기 전에 스왑체인 리사이즈 (Reset 충돌 방지)
+			ProcessPendingResize();
+
 			CalculateFrameStats();
 			BeginFrame();
 			Update(mTimer);
@@ -123,6 +127,8 @@ int D3DApp::Run()
 		}
 		else
 		{
+			// 최소화 등 pause 중에도 크기 변경 반영 (다음에 그릴 때 맞춤)
+			ProcessPendingResize();
 			Sleep(100);
 		}
 	}
@@ -177,7 +183,8 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 	// WM_SIZE is sent when the user resizes the window.  
 	case WM_SIZE:
-		// Save the new client area dimensions.
+		// 클라이언트 크기만 갱신하고, 실제 GPU 리사이즈는 프레임 시작으로 미룬다.
+		// (커맨드 리스트가 열린 상태에서 OnResize→Reset 하면 COMMAND_LIST_OPEN 발생)
 		mClientWidth  = LOWORD(lParam);
 		mClientHeight = HIWORD(lParam);
 		if( md3dDevice )
@@ -193,59 +200,36 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				mAppPaused = false;
 				mMinimized = false;
 				mMaximized = true;
-				OnResize();
+				mPendingResize = true;
 			}
 			else if( wParam == SIZE_RESTORED )
 			{
-				
-				// Restoring from minimized state?
 				if( mMinimized )
 				{
 					mAppPaused = false;
 					mMinimized = false;
-					OnResize();
 				}
-
-				// Restoring from maximized state?
 				else if( mMaximized )
 				{
 					mAppPaused = false;
 					mMaximized = false;
-					OnResize();
 				}
-				else if( mResizing )
-				{
-					// If user is dragging the resize bars, we do not resize 
-					// the buffers here because as the user continuously 
-					// drags the resize bars, a stream of WM_SIZE messages are
-					// sent to the window, and it would be pointless (and slow)
-					// to resize for each WM_SIZE message received from dragging
-					// the resize bars.  So instead, we reset after the user is 
-					// done resizing the window and releases the resize bars, which 
-					// sends a WM_EXITSIZEMOVE message.
-				}
-				else // API call such as SetWindowPos or mSwapChain->SetFullscreenState.
-				{
-					OnResize();
-				}
+				if (mClientWidth > 0 && mClientHeight > 0)
+					mPendingResize = true;
 			}
 		}
 		return 0;
 
-	// WM_EXITSIZEMOVE is sent when the user grabs the resize bars.
+	// 리사이즈 바를 잡았을 때. 에디터 UI는 계속 그려서 도크 레이아웃이 창 크기를 따라가게 한다.
 	case WM_ENTERSIZEMOVE:
-		mAppPaused = true;
-		mResizing  = true;
-		mTimer.Stop();
+		mResizing = true;
 		return 0;
 
-	// WM_EXITSIZEMOVE is sent when the user releases the resize bars.
-	// Here we reset everything based on the new window dimensions.
+	// 리사이즈 바를 놓았을 때 — 최종 크기로 리사이즈 예약.
 	case WM_EXITSIZEMOVE:
-		mAppPaused = false;
-		mResizing  = false;
-		mTimer.Start();
-		OnResize();
+		mResizing = false;
+		if (mClientWidth > 0 && mClientHeight > 0)
+			mPendingResize = true;
 		return 0;
  
 	// WM_DESTROY is sent when the window is being destroyed.
@@ -285,11 +269,8 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam), GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
     case WM_KEYUP:
-        if(wParam == VK_ESCAPE)
-        {
-            PostQuitMessage(0);
-        }
-        else if((int)wParam == VK_F2)
+        // ESC는 앱 종료에 쓰지 않는다 (에디터/마우스 룩 해제 등 파생 클래스에서 처리).
+        if((int)wParam == VK_F2)
             Set4xMsaaState(!m4xMsaaState);
 
         D3DApp::GetApp()->OnKeyUp(wParam);
@@ -330,6 +311,9 @@ bool D3DApp::InitMainWindow()
 	int width  = R.right - R.left;
 	int height = R.bottom - R.top;
 
+	// 초기화(에셋 로딩) 동안에는 창을 숨긴다.
+	// 기본 위치/크기로 잠깐 보였다가 저장된 위치로 튀는 깜빡임을 막기 위함.
+	// 표시는 InitDirect3DApp::Initialize 끝에서 위치 복원 후 ShowMainWindow()로 한다.
 	mhMainWnd = CreateWindow(L"MainWnd", mMainWndCaption.c_str(), 
 		WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, 0, 0, mhAppInst, 0); 
 	if( !mhMainWnd )
@@ -338,9 +322,7 @@ bool D3DApp::InitMainWindow()
 		return false;
 	}
 
-	ShowWindow(mhMainWnd, SW_SHOW);
-	UpdateWindow(mhMainWnd);
-
+	// 숨김 유지 — ShowWindow 호출하지 않음
 	return true;
 }
 
@@ -415,16 +397,73 @@ bool D3DApp::InitDirect3D()
 //Helpers===============================================================================================================================================
 #pragma region Helpers
 
+void D3DApp::ProcessPendingResize()
+{
+	if (!mPendingResize)
+		return;
+	mPendingResize = false;
+	if (mClientWidth > 0 && mClientHeight > 0)
+		OnResize();
+}
+
+void D3DApp::ShowMainWindow()
+{
+	if (!mhMainWnd)
+		return;
+
+	// 이미 보이는 경우(SetWindowPlacement가 표시한 경우)에도 Update만 해 준다.
+	if (!IsWindowVisible(mhMainWnd))
+		ShowWindow(mhMainWnd, SW_SHOW);
+	UpdateWindow(mhMainWnd);
+	SetForegroundWindow(mhMainWnd);
+}
+
 void D3DApp::OnResize()
 {
 	assert(md3dDevice);
 	assert(mSwapChain);
 	if (!mCurrFrameResource) return;
 
+	// 재진입 방지 (SetWindowPlacement 등으로 중첩 WM_SIZE)
+	if (mInOnResize)
+	{
+		mPendingResize = true;
+		return;
+	}
+
+	struct InResizeGuard
+	{
+		bool& flag;
+		explicit InResizeGuard(bool& f) : flag(f) { flag = true; }
+		~InResizeGuard() { flag = false; }
+	} guard(mInOnResize);
+
+	// 최소화/0 크기 메시지에서 ResizeBuffers 실패를 막는다.
+	const UINT width = static_cast<UINT>((std::max)(1, mClientWidth));
+	const UINT height = static_cast<UINT>((std::max)(1, mClientHeight));
+	mClientWidth = static_cast<int>(width);
+	mClientHeight = static_cast<int>(height);
+
+	// 동일 크기면 GPU 리소스 재생성을 건너뛴다 (라이브 리사이즈 스로틀/중복 호출 대비).
+	if (mSwapChainBuffer[0] &&
+		mScreenViewport.Width == static_cast<float>(width) &&
+		mScreenViewport.Height == static_cast<float>(height))
+	{
+		return;
+	}
+
 	// Flush before changing any resources.
 	FlushCommandQueue();
 
+	// recording 중일 때만 Close. 이미 닫힌 리스트에 Close 하면 COMMAND_LIST_CLOSED 오류.
+	if (mCommandListRecording)
+	{
+		ThrowIfFailed(mCommandList->Close());
+		mCommandListRecording = false;
+	}
+
 	ThrowIfFailed(mCommandList->Reset(mCurrFrameResource->CmdListAlloc.Get(), nullptr));
+	mCommandListRecording = true;
 
 	// Release the previous resources we will be recreating.
 	for (int i = 0; i < SwapChainBufferCount; ++i)
@@ -434,7 +473,7 @@ void D3DApp::OnResize()
 	// Resize the swap chain.
 	ThrowIfFailed(mSwapChain->ResizeBuffers(
 		SwapChainBufferCount,
-		mClientWidth, mClientHeight,
+		width, height,
 		mBackBufferFormat,
 		DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
 
@@ -452,8 +491,8 @@ void D3DApp::OnResize()
 	D3D12_RESOURCE_DESC depthStencilDesc;
 	depthStencilDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 	depthStencilDesc.Alignment = 0;
-	depthStencilDesc.Width = mClientWidth;
-	depthStencilDesc.Height = mClientHeight;
+	depthStencilDesc.Width = width;
+	depthStencilDesc.Height = height;
 	depthStencilDesc.DepthOrArraySize = 1;
 	depthStencilDesc.MipLevels = 1;
 
@@ -495,6 +534,7 @@ void D3DApp::OnResize()
 
 	// Execute the resize commands.
 	ThrowIfFailed(mCommandList->Close());
+	mCommandListRecording = false;
 	ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
@@ -504,12 +544,12 @@ void D3DApp::OnResize()
 	// Update the viewport transform to cover the client area.
 	mScreenViewport.TopLeftX = 0;
 	mScreenViewport.TopLeftY = 0;
-	mScreenViewport.Width = static_cast<float>(mClientWidth);
-	mScreenViewport.Height = static_cast<float>(mClientHeight);
+	mScreenViewport.Width = static_cast<float>(width);
+	mScreenViewport.Height = static_cast<float>(height);
 	mScreenViewport.MinDepth = 0.0f;
 	mScreenViewport.MaxDepth = 1.0f;
 
-	mScissorRect = { 0, 0, mClientWidth, mClientHeight };
+	mScissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
 }
 
 void D3DApp::CreateRtvAndDsvDescriptorHeaps()
@@ -559,6 +599,7 @@ void D3DApp::CreateCommandObjects()
 	// to the command list we will Reset it, and it needs to be closed before
 	// calling Reset.
 	mCommandList->Close();
+	mCommandListRecording = false;
 }
 
 void D3DApp::CreateSwapChain()

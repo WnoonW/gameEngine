@@ -69,6 +69,16 @@ protected:
 
 	void FlushCommandQueue();
 
+	// 대기 중인 스왑체인 리사이즈를 지금 수행 (커맨드 리스트가 닫혀 있을 때 호출)
+	void ProcessPendingResize();
+
+	// 초기화 완료 후 메인 창 표시 (숨김 상태로 생성됨)
+	void ShowMainWindow();
+
+	// 커맨드 리스트 recording 상태 (Reset/Close 와 짝을 맞출 것)
+	void MarkCommandListRecording(bool recording) { mCommandListRecording = recording; }
+	bool IsCommandListRecording() const { return mCommandListRecording; }
+
 	ID3D12Resource* CurrentBackBuffer()const;
 	D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView()const;
 	D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView()const;
@@ -90,6 +100,13 @@ protected:
 	bool      mMaximized = false;  // is the application maximized?
 	bool      mResizing = false;   // are the resize bars being dragged?
     bool      mFullscreenState = false;// fullscreen enabled
+
+	// WM_SIZE 시 즉시 OnResize 하지 않고, 프레임 시작(커맨드 리스트 닫힌 상태)에서 처리.
+	// 이유: BeginFrame 이후 열린 리스트에서 OnResize→Reset 하면 COMMAND_LIST_OPEN 크래시.
+	bool      mPendingResize = false;
+	bool      mInOnResize = false;
+	// true = Reset 이후 Close 전 (recording). Close 를 닫힌 리스트에 또 호출하지 않기 위함.
+	bool      mCommandListRecording = false;
 
 	// Set true to use 4X MSAA (?.1.8).  The default is false.
     bool      m4xMsaaState = false;    // 4X MSAA enabled

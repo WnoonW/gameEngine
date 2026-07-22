@@ -5,7 +5,12 @@
 #include "Entity.h"
 #include "ComponentStruct.h"
 #include <algorithm>
+#include <cstdarg>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace
@@ -14,7 +19,8 @@ namespace
     {
         io.Fonts->Clear();
 
-        const float fontSize = 18.0f;
+        // 도크 패널이 좁을 때 잘림을 줄이기 위해 기본 16px (이전 18은 라벨/수치가 자주 잘림)
+        const float fontSize = 16.0f;
         ImFontConfig cfg;
         cfg.OversampleH = 2;
         cfg.OversampleV = 1;
@@ -52,14 +58,44 @@ bool ImGuiManager::Initialize(
     DescriptorAllocator& globalDescriptorAllocator,
     IFunctionCallback* callback)
 {
+    // DPI 인식 — 고해상도/배율에서 레이아웃이 어긋나 잘리는 현상 완화
+    ImGui_ImplWin32_EnableDpiAwareness();
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigDpiScaleFonts = true;
+    io.ConfigWindowsResizeFromEdges = true;
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    // 실행 파일 옆 imgui.ini / editor_ui.cfg 에 UI 상태 저장
+    ResolveConfigPaths();
+    io.IniFilename = mImGuiIniPath;
+    LoadUiSettings();
 
     LoadUIFonts(io);
+
+    // 좁은 도크 패널에서도 글/위젯이 최대한 보이도록 기본 스타일 조정
+    {
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.WindowMinSize = ImVec2(160.0f, 120.0f);
+        style.WindowPadding = ImVec2(6.0f, 6.0f);
+        style.FramePadding = ImVec2(5.0f, 3.0f);
+        style.ItemSpacing = ImVec2(6.0f, 4.0f);
+        style.ItemInnerSpacing = ImVec2(4.0f, 3.0f);
+        // 스크롤바를 얇게 (기본 ~14~16 대신)
+        style.ScrollbarSize = 9.0f;
+        style.ScrollbarRounding = 3.0f;
+        style.GrabMinSize = 8.0f;
+        style.ChildRounding = 3.0f;
+        style.FrameRounding = 3.0f;
+        style.WindowMenuButtonPosition = ImGuiDir_None;
+        // 기본 위젯 폭 = 창 내용 영역 전체 (라벨 옆 잘림 방지에 유리)
+        style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
+    }
 
     static DescriptorAllocator* s_DescriptorAllocator = nullptr;
     s_DescriptorAllocator = &globalDescriptorAllocator;
@@ -102,6 +138,9 @@ bool ImGuiManager::Initialize(
 
     mSceneViewport.Initialize(device, globalDescriptorAllocator, rtvFormat, depthFormat);
 
+    // 창 위치 복원은 커맨드 리스트가 닫힌 뒤 InitDirect3DApp 쪽에서 ApplyMainWindowPlacement() 호출.
+    // (여기서 SetWindowPlacement → WM_SIZE → OnResize → Reset 하면 열린 리스트와 충돌)
+
     return true;
 }
 
@@ -122,6 +161,187 @@ namespace
         if (idx - 1 < 0 || idx - 1 >= (int)names->size()) return nullptr;
         return (*names)[idx - 1].c_str();
     };
+
+    // --- 좁은 패널용 레이아웃 헬퍼 (글/위젯 잘림 방지) ---
+
+    constexpr ImGuiWindowFlags kPanelWindowFlags =
+        ImGuiWindowFlags_AlwaysVerticalScrollbar |
+        ImGuiWindowFlags_HorizontalScrollbar;
+
+    float ContentRightX()
+    {
+        // 현재 줄에서 사용 가능한 오른쪽 끝 (window-local)
+        return ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x;
+    }
+
+    void WrapPosBegin()
+    {
+        // 명시적 우측 경계 — nested child 에서도 줄바꿈이 동작
+        ImGui::PushTextWrapPos(ContentRightX());
+    }
+
+    void WrapPosEnd()
+    {
+        ImGui::PopTextWrapPos();
+    }
+
+    void TextLine(const char* fmt, ...)
+    {
+        WrapPosBegin();
+        va_list args;
+        va_start(args, fmt);
+        ImGui::TextV(fmt, args);
+        va_end(args);
+        WrapPosEnd();
+    }
+
+    void TextLineDisabled(const char* fmt, ...)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+        WrapPosBegin();
+        va_list args;
+        va_start(args, fmt);
+        ImGui::TextV(fmt, args);
+        va_end(args);
+        WrapPosEnd();
+        ImGui::PopStyleColor();
+    }
+
+    void BulletLine(const char* text)
+    {
+        ImGui::Bullet();
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        WrapPosBegin();
+        ImGui::TextUnformatted(text);
+        WrapPosEnd();
+    }
+
+    // 긴 체크박스 라벨도 줄바꿈 (기본 Checkbox는 라벨 줄바꿈 없음 → 잘림의 주원인)
+    bool CheckboxWrapped(const char* label, bool* v)
+    {
+        // "Enabled##Gravity" → 표시는 "Enabled", ID는 전체 문자열
+        const char* display = label;
+        char displayBuf[128];
+        if (const char* hash = strstr(label, "##"))
+        {
+            const size_t n = static_cast<size_t>(hash - label);
+            if (n >= sizeof(displayBuf)) 
+            {
+                // 너무 길면 전체 표시 (희귀)
+                display = label;
+            }
+            else
+            {
+                memcpy(displayBuf, label, n);
+                displayBuf[n] = '\0';
+                display = displayBuf;
+            }
+        }
+
+        ImGui::PushID(label);
+        const bool changed = ImGui::Checkbox("##cb", v);
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        WrapPosBegin();
+        ImGui::TextUnformatted(display);
+        WrapPosEnd();
+        bool toggled = changed;
+        if (ImGui::IsItemClicked())
+        {
+            *v = !*v;
+            toggled = true;
+        }
+        ImGui::PopID();
+        return toggled;
+    }
+
+    // DragFloat3 가로 3분할은 좁은 패널에서 수치가 잘림 → 항상 X/Y/Z 세로 배치
+    bool DragFloat3Full(const char* label, float v[3], float speed,
+        float v_min = 0.0f, float v_max = 0.0f)
+    {
+        ImGui::TextUnformatted(label);
+        ImGui::PushID(label);
+        bool changed = false;
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        changed |= ImGui::DragFloat("X", &v[0], speed, v_min, v_max, "X: %.3f");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        changed |= ImGui::DragFloat("Y", &v[1], speed, v_min, v_max, "Y: %.3f");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        changed |= ImGui::DragFloat("Z", &v[2], speed, v_min, v_max, "Z: %.3f");
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool DragFloatFull(const char* label, float* v, float speed,
+        float v_min = 0.0f, float v_max = 0.0f)
+    {
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        char id[96];
+        snprintf(id, sizeof(id), "##%s", label);
+        return ImGui::DragFloat(id, v, speed, v_min, v_max);
+    }
+
+    bool SliderFloatFull(const char* label, float* v, float v_min, float v_max)
+    {
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        char id[96];
+        snprintf(id, sizeof(id), "##%s", label);
+        return ImGui::SliderFloat(id, v, v_min, v_max);
+    }
+
+    bool ComboFull(const char* label, int* current,
+        const char* (*getter)(void*, int), void* data, int count)
+    {
+        ImGui::TextUnformatted(label);
+        // 선택 항목 미리보기를 위에도 표시 (콤보 프레임 안에서 잘려도 위 텍스트로 확인)
+        if (current && *current >= 0 && getter)
+        {
+            if (const char* preview = getter(data, *current))
+                TextLineDisabled("Selected: %s", preview);
+        }
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        char id[96];
+        snprintf(id, sizeof(id), "##%s", label);
+        return ImGui::Combo(id, current, getter, data, count);
+    }
+
+    // 좁으면 전체 폭 버튼, 넓으면 가로로 흐르며 자동 줄바꿈
+    bool ButtonAutoWrap(const char* label)
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const float need = ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f + style.ItemSpacing.x;
+
+        // 패널이 좁거나 버튼 하나가 거의 한 줄이면 full-width
+        if (avail < 260.0f || need > avail * 0.9f)
+        {
+            if (ImGui::GetCursorPosX() > ImGui::GetCursorStartPos().x + 1.0f)
+                ImGui::NewLine();
+            return ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f));
+        }
+
+        if (need > avail && ImGui::GetCursorPosX() > ImGui::GetCursorStartPos().x + 1.0f)
+            ImGui::NewLine();
+        const bool pressed = ImGui::Button(label);
+        ImGui::SameLine();
+        return pressed;
+    }
+
+    void EndButtonAutoWrapRow()
+    {
+        if (ImGui::GetCursorPosX() > ImGui::GetCursorStartPos().x + 1.0f)
+            ImGui::NewLine();
+    }
+
+    // Selectable 텍스트가 길 때 가로 스크롤이 생기도록 행 폭을 텍스트에 맞춤
+    bool SelectableFull(const char* label, bool selected)
+    {
+        const float textW = ImGui::CalcTextSize(label, nullptr, true).x
+            + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float rowW = (std::max)(ImGui::GetContentRegionAvail().x, textW);
+        return ImGui::Selectable(label, selected, 0, ImVec2(rowW, 0.0f));
+    }
 }
 
 /*void ImGuiManager::CustomUI(Engine* engine)
@@ -312,11 +532,572 @@ namespace
 }*/
 
 #pragma region docking UI
-// ==================== Step 1: DockSpace 구조 ====================
+// ==================== DockSpace + 메인 메뉴 ====================
+
+void ImGuiManager::DrawMainMenuBar()
+{
+    if (!ImGui::BeginMainMenuBar())
+        return;
+
+    if (ImGui::BeginMenu("View"))
+    {
+        if (ImGui::MenuItem("Scene", nullptr, &mShowScene)) MarkUiSettingsDirty();
+        if (ImGui::MenuItem("Hierarchy", nullptr, &mShowHierarchy)) MarkUiSettingsDirty();
+        if (ImGui::MenuItem("Tools", nullptr, &mShowTools)) MarkUiSettingsDirty();
+        if (ImGui::MenuItem("Inspector", nullptr, &mShowInspector)) MarkUiSettingsDirty();
+        ImGui::Separator();
+        if (ImGui::MenuItem("Project", nullptr, &mShowProject)) MarkUiSettingsDirty();
+        if (ImGui::MenuItem("Render", nullptr, &mShowRender)) MarkUiSettingsDirty();
+        if (ImGui::MenuItem("Help", nullptr, &mShowHelp)) MarkUiSettingsDirty();
+        ImGui::Separator();
+        if (ImGui::MenuItem("Reset Layout"))
+        {
+            mRequestResetLayout = true;
+            MarkUiSettingsDirty();
+        }
+        if (ImGui::MenuItem("Save UI Settings"))
+        {
+            // 스플리터 비율을 최신으로 잡은 뒤 즉시 저장
+            if (ImGuiDockNode* root = ImGui::DockBuilderGetNode(ImGui::GetID("EditorDockSpace")))
+                CaptureDockSplitRatios(root);
+            SaveUiSettings();
+            ImGui::SaveIniSettingsToDisk(mImGuiIniPath);
+        }
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Window"))
+    {
+        ImGui::TextDisabled("Drag title bars onto panels");
+        ImGui::TextDisabled("to dock as tabs (click tab = that window).");
+        ImGui::Separator();
+        ImGui::TextDisabled("Bottom strip holds Project / Render / Help.");
+        ImGui::TextDisabled("Left strip: Hierarchy + Tools.");
+        ImGui::Separator();
+        ImGui::TextDisabled("Settings: editor_ui.cfg + imgui.ini");
+        ImGui::TextDisabled("(next to the .exe, auto-saved)");
+        ImGui::EndMenu();
+    }
+
+    // 우측 상태 힌트
+    {
+        const float hintWidth = 280.0f;
+        ImGui::SameLine(ImGui::GetWindowWidth() - hintWidth);
+        ImGui::TextDisabled("View menu: show/hide panels");
+    }
+
+    ImGui::EndMainMenuBar();
+}
+
+void ImGuiManager::ApplyDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& workSize)
+{
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace_id, workSize);
+
+    // 1) 하단 전체 폭: 여러 메뉴가 탭으로 들어갈 공간
+    ImGuiID dock_id_down = 0;
+    ImGuiID dock_id_main = 0;
+    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.32f, &dock_id_down, &dock_id_main);
+
+    // 2) 상단: 좌 Hierarchy 탭 영역 / 중앙 Scene / 우 Inspector
+    ImGuiID dock_id_left = 0;
+    ImGuiID dock_id_center = 0;
+    ImGui::DockBuilderSplitNode(dock_id_main, ImGuiDir_Left, 0.20f, &dock_id_left, &dock_id_center);
+
+    ImGuiID dock_id_right = 0;
+    ImGui::DockBuilderSplitNode(dock_id_center, ImGuiDir_Right, 0.24f, &dock_id_right, &dock_id_center);
+
+    // 같은 노드에 여러 창을 도킹하면 ImGui 탭 바가 생기고, 탭 클릭 시 그 창만 보인다.
+    ImGui::DockBuilderDockWindow("Scene", dock_id_center);
+
+    ImGui::DockBuilderDockWindow("Hierarchy", dock_id_left);
+    ImGui::DockBuilderDockWindow("Tools", dock_id_left);
+
+    ImGui::DockBuilderDockWindow("Inspector", dock_id_right);
+
+    ImGui::DockBuilderDockWindow("Project", dock_id_down);
+    ImGui::DockBuilderDockWindow("Render", dock_id_down);
+    ImGui::DockBuilderDockWindow("Help", dock_id_down);
+
+    ImGui::DockBuilderFinish(dockspace_id);
+
+    // 다음 프레임에 트리 Size를 읽어 비율 시드
+    mDockSplitRatios.clear();
+    mDockRatiosNeedSeed = true;
+}
+
+void ImGuiManager::CaptureDockSplitRatios(ImGuiDockNode* node)
+{
+    if (!node || !node->IsSplitNode())
+        return;
+
+    ImGuiDockNode* c0 = node->ChildNodes[0];
+    ImGuiDockNode* c1 = node->ChildNodes[1];
+    if (!c0 || !c1)
+        return;
+
+    const int axis = static_cast<int>(node->SplitAxis);
+    // Size = 실제 표시 크기 (유저가 스플리터를 움직인 결과)
+    float s0 = c0->Size[axis];
+    float s1 = c1->Size[axis];
+    if (s0 + s1 < 1.0f)
+    {
+        s0 = c0->SizeRef[axis];
+        s1 = c1->SizeRef[axis];
+    }
+
+    const float sum = s0 + s1;
+    if (sum > 1.0f)
+    {
+        float ratio = s0 / sum;
+        if (ratio < 0.02f) ratio = 0.02f;
+        if (ratio > 0.98f) ratio = 0.98f;
+        const auto it = mDockSplitRatios.find(node->ID);
+        if (it == mDockSplitRatios.end() || ImFabs(it->second - ratio) > 0.0005f)
+        {
+            mDockSplitRatios[node->ID] = ratio;
+            MarkUiSettingsDirty();
+        }
+        else
+        {
+            mDockSplitRatios[node->ID] = ratio;
+        }
+    }
+
+    CaptureDockSplitRatios(c0);
+    CaptureDockSplitRatios(c1);
+}
+
+void ImGuiManager::ApplyDockSplitRatios(ImGuiDockNode* node, ImVec2 size)
+{
+    if (!node)
+        return;
+
+    // 부모 영역의 현재 픽셀 크기 (축별 % 환산의 기준)
+    // - 좌우 스플릿: size.x (너비) 기준
+    // - 상하 스플릿: size.y (높이) 기준
+    // 창 종횡비(1:1 ↔ 16:9)가 바뀌면 size.x/size.y 비율이 달라지므로
+    // 가로·세로 패널이 각각 올바른 %로 재계산된다.
+    node->Size = size;
+    node->SizeRef = size;
+
+    if (!node->IsSplitNode())
+        return;
+
+    ImGuiDockNode* c0 = node->ChildNodes[0];
+    ImGuiDockNode* c1 = node->ChildNodes[1];
+    if (!c0 || !c1)
+        return;
+
+    const int axis = static_cast<int>(node->SplitAxis);
+    float ratio = 0.5f;
+    const auto it = mDockSplitRatios.find(node->ID);
+    if (it != mDockSplitRatios.end())
+    {
+        ratio = it->second;
+    }
+    else
+    {
+        const float r0 = c0->SizeRef[axis];
+        const float r1 = c1->SizeRef[axis];
+        const float sum = r0 + r1;
+        if (sum > 1.0f)
+            ratio = r0 / sum;
+    }
+
+    if (ratio < 0.02f) ratio = 0.02f;
+    if (ratio > 0.98f) ratio = 0.98f;
+
+    // 축 방향만 비율로 나누고, 수직 축은 부모 크기를 그대로 상속
+    // 예) 16:9로 넓어지면 좌우 패널 너비 = ratio * 새 width
+    //     상하 패널 높이 = ratio * 새 height
+    const float spacing = ImGui::GetStyle().DockingSeparatorSize;
+    const float avail = (size[axis] > spacing + 1.0f) ? (size[axis] - spacing) : 1.0f;
+    const float s0 = IM_TRUNC(avail * ratio + 0.5f);
+    const float s1 = avail - s0;
+
+    ImVec2 size0 = size;
+    ImVec2 size1 = size;
+    size0[axis] = s0;
+    size1[axis] = s1;
+
+    c0->SizeRef = size0;
+    c1->SizeRef = size1;
+    c0->Size = size0;
+    c1->Size = size1;
+
+    // 자식 트리도 새 parent 픽셀 크기를 기준으로 재귀 환산
+    ApplyDockSplitRatios(c0, size0);
+    ApplyDockSplitRatios(c1, size1);
+}
+
+void ImGuiManager::SyncDockLayoutToWorkSize(ImGuiID dockspace_id, const ImVec2& workSize)
+{
+    if (workSize.x <= 1.0f || workSize.y <= 1.0f)
+        return;
+
+    ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspace_id);
+    if (!root)
+        return;
+
+    const float aspect = workSize.x / workSize.y;
+    const bool sizeChanged =
+        (workSize.x != mLastDockWorkSize.x) ||
+        (workSize.y != mLastDockWorkSize.y);
+    const bool aspectChanged =
+        (mLastDockAspect <= 0.0f) ||
+        (ImFabs(aspect - mLastDockAspect) > 0.0001f);
+
+    // 스플리터 드래그 중에는 ImGui가 픽셀을 직접 바꾸므로 비율만 읽고, 강제 Apply는 하지 않는다.
+    // (창 리사이즈 중이 아닐 때만 — 창 리사이즈와 스플리터를 구분)
+    const bool splitterDrag =
+        !sizeChanged &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f);
+
+    if (mDockRatiosNeedSeed || mDockSplitRatios.empty())
+    {
+        CaptureDockSplitRatios(root);
+        if (!mDockSplitRatios.empty())
+            mDockRatiosNeedSeed = false;
+    }
+
+    if (splitterDrag)
+    {
+        // 유저가 패널 경계를 조절 중 → 현재 픽셀을 %로 갱신
+        CaptureDockSplitRatios(root);
+    }
+    else
+    {
+        // 유휴 / 창 크기·종횡비 변경:
+        // 저장된 % 를 현재 workSize(너비·높이 각각)에 다시 적용.
+        // 1:1 → 16:9 처럼 가로만 크게 늘어나도
+        //  좌우 스플릿은 새 width% , 상하 스플릿은 새 height% 로 계산된다.
+        ImGui::DockBuilderSetNodeSize(dockspace_id, workSize);
+        ApplyDockSplitRatios(root, workSize);
+    }
+
+    if (sizeChanged || aspectChanged)
+    {
+        mLastDockWorkSize = workSize;
+        mLastDockAspect = aspect;
+    }
+}
+
+void ImGuiManager::ResolveConfigPaths()
+{
+    char modulePath[MAX_PATH] = {};
+    if (GetModuleFileNameA(nullptr, modulePath, MAX_PATH) == 0)
+    {
+        // 실패 시 현재 작업 디렉터리 사용
+        strncpy_s(mImGuiIniPath, "imgui.ini", _TRUNCATE);
+        strncpy_s(mEditorCfgPath, "editor_ui.cfg", _TRUNCATE);
+        return;
+    }
+
+    char* slash = strrchr(modulePath, '\\');
+    if (!slash)
+        slash = strrchr(modulePath, '/');
+    if (slash)
+        *(slash + 1) = '\0';
+    else
+        modulePath[0] = '\0';
+
+    snprintf(mImGuiIniPath, sizeof(mImGuiIniPath), "%simgui.ini", modulePath);
+    snprintf(mEditorCfgPath, sizeof(mEditorCfgPath), "%seditor_ui.cfg", modulePath);
+}
+
+void ImGuiManager::MarkUiSettingsDirty()
+{
+    mUiSettingsDirty = true;
+}
+
+bool ImGuiManager::LoadUiSettings()
+{
+    std::ifstream in(mEditorCfgPath);
+    if (!in)
+    {
+        mRestoreDockFromSettings = false;
+        mAppliedDockLayoutVersion = 0; // 첫 실행 → 기본 레이아웃
+        return false;
+    }
+
+    mDockSplitRatios.clear();
+    int fileVersion = 0;
+    int dockLayoutVersion = 0;
+    bool hasCustomDock = false;
+
+    std::string line;
+    while (std::getline(in, line))
+    {
+        // trim CR
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.empty() || line[0] == '#' || line[0] == ';')
+            continue;
+
+        const auto eq = line.find('=');
+        if (eq == std::string::npos)
+            continue;
+
+        const std::string key = line.substr(0, eq);
+        const std::string val = line.substr(eq + 1);
+
+        auto asBool = [&](bool& out)
+        {
+            out = (val == "1" || val == "true" || val == "True");
+        };
+
+        if (key == "version")
+            fileVersion = std::atoi(val.c_str());
+        else if (key == "show_scene") asBool(mShowScene);
+        else if (key == "show_hierarchy") asBool(mShowHierarchy);
+        else if (key == "show_inspector") asBool(mShowInspector);
+        else if (key == "show_tools") asBool(mShowTools);
+        else if (key == "show_project") asBool(mShowProject);
+        else if (key == "show_render") asBool(mShowRender);
+        else if (key == "show_help") asBool(mShowHelp);
+        else if (key == "manipulate") asBool(mManipulateSelected);
+        else if (key == "selected_mesh") mSelectedMesh = val;
+        else if (key == "selected_material") mSelectedMaterial = val;
+        else if (key == "dock_layout_version")
+            dockLayoutVersion = std::atoi(val.c_str());
+        else if (key == "has_custom_dock")
+            asBool(hasCustomDock);
+        else if (key == "window_left")
+            mWindowNormalLeft = std::atoi(val.c_str());
+        else if (key == "window_top")
+            mWindowNormalTop = std::atoi(val.c_str());
+        else if (key == "window_right")
+            mWindowNormalRight = std::atoi(val.c_str());
+        else if (key == "window_bottom")
+            mWindowNormalBottom = std::atoi(val.c_str());
+        else if (key == "window_show_cmd")
+            mWindowShowCmd = std::atoi(val.c_str());
+        else if (key == "window_valid")
+            asBool(mHasSavedWindowPlacement);
+        else if (key == "split")
+        {
+            // split=<hexId>:<ratio>
+            unsigned int id = 0;
+            float ratio = 0.5f;
+            if (sscanf_s(val.c_str(), "%x:%f", &id, &ratio) == 2)
+            {
+                if (ratio < 0.02f) ratio = 0.02f;
+                if (ratio > 0.98f) ratio = 0.98f;
+                mDockSplitRatios[static_cast<ImGuiID>(id)] = ratio;
+            }
+        }
+    }
+
+    // 잘못된 사각형이면 무시
+    if (mHasSavedWindowPlacement)
+    {
+        RECT rc{
+            mWindowNormalLeft, mWindowNormalTop,
+            mWindowNormalRight, mWindowNormalBottom
+        };
+        if (rc.right - rc.left < 200 || rc.bottom - rc.top < 150 ||
+            !IsPlacementOnScreen(rc))
+        {
+            mHasSavedWindowPlacement = false;
+        }
+        if (mWindowShowCmd != SW_SHOWNORMAL &&
+            mWindowShowCmd != SW_SHOWMAXIMIZED &&
+            mWindowShowCmd != SW_SHOWMINIMIZED)
+        {
+            mWindowShowCmd = SW_SHOWNORMAL;
+        }
+        // 시작 시 minimized 로 복원하지 않음
+        if (mWindowShowCmd == SW_SHOWMINIMIZED)
+            mWindowShowCmd = SW_SHOWNORMAL;
+    }
+
+    (void)fileVersion;
+
+    const bool imguiIniExists = (GetFileAttributesA(mImGuiIniPath) != INVALID_FILE_ATTRIBUTES);
+    // 저장된 도크 + imgui.ini + 레이아웃 버전이 맞을 때만 복원 (버전 올리면 기본 재배치)
+    mRestoreDockFromSettings =
+        hasCustomDock &&
+        imguiIniExists &&
+        dockLayoutVersion == kDockLayoutVersion;
+
+    if (mRestoreDockFromSettings)
+    {
+        mAppliedDockLayoutVersion = kDockLayoutVersion;
+        mDockRatiosNeedSeed = mDockSplitRatios.empty();
+    }
+    else
+    {
+        // 기본 레이아웃 강제 1회
+        mAppliedDockLayoutVersion = 0;
+        if (dockLayoutVersion != kDockLayoutVersion)
+            mDockSplitRatios.clear();
+        mDockRatiosNeedSeed = true;
+    }
+
+    mUiSettingsDirty = false;
+    return true;
+}
+
+bool ImGuiManager::SaveUiSettings()
+{
+    std::ofstream out(mEditorCfgPath, std::ios::trunc);
+    if (!out)
+        return false;
+
+    out << "# GameEngine editor UI settings — auto-saved\n";
+    out << "version=" << kUiSettingsFileVersion << "\n";
+    out << "show_scene=" << (mShowScene ? 1 : 0) << "\n";
+    out << "show_hierarchy=" << (mShowHierarchy ? 1 : 0) << "\n";
+    out << "show_inspector=" << (mShowInspector ? 1 : 0) << "\n";
+    out << "show_tools=" << (mShowTools ? 1 : 0) << "\n";
+    out << "show_project=" << (mShowProject ? 1 : 0) << "\n";
+    out << "show_render=" << (mShowRender ? 1 : 0) << "\n";
+    out << "show_help=" << (mShowHelp ? 1 : 0) << "\n";
+    out << "manipulate=" << (mManipulateSelected ? 1 : 0) << "\n";
+    out << "selected_mesh=" << mSelectedMesh << "\n";
+    out << "selected_material=" << mSelectedMaterial << "\n";
+    out << "dock_layout_version=" << kDockLayoutVersion << "\n";
+    out << "has_custom_dock=1\n";
+
+    // 저장 직전에 최신 창 배치 반영
+    CaptureMainWindowPlacement();
+    out << "window_valid=" << (mHasSavedWindowPlacement ? 1 : 0) << "\n";
+    out << "window_left=" << mWindowNormalLeft << "\n";
+    out << "window_top=" << mWindowNormalTop << "\n";
+    out << "window_right=" << mWindowNormalRight << "\n";
+    out << "window_bottom=" << mWindowNormalBottom << "\n";
+    out << "window_show_cmd=" << mWindowShowCmd << "\n";
+
+    for (const auto& pair : mDockSplitRatios)
+    {
+        char line[128];
+        snprintf(line, sizeof(line), "split=%08x:%.6f\n",
+            static_cast<unsigned>(pair.first), pair.second);
+        out << line;
+    }
+
+    mUiSettingsDirty = false;
+    mLastUiSettingsSaveTime = ImGui::GetTime();
+    return static_cast<bool>(out);
+}
+
+bool ImGuiManager::IsPlacementOnScreen(const RECT& rc)
+{
+    // 복원 사각형이 어떤 모니터와도 겹치지 않으면 잘못된 좌표로 간주
+    HMONITOR mon = MonitorFromRect(&rc, MONITOR_DEFAULTTONULL);
+    return mon != nullptr;
+}
+
+void ImGuiManager::CaptureMainWindowPlacement()
+{
+    if (!m_Hwnd || !IsWindow(m_Hwnd))
+        return;
+
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(wp);
+    if (!GetWindowPlacement(m_Hwnd, &wp))
+        return;
+
+    // rcNormalPosition = 복원 시 위치/크기 (최대화 중이어도 정상 크기 보관)
+    const RECT& rc = wp.rcNormalPosition;
+    int showCmd = static_cast<int>(wp.showCmd);
+    if (showCmd == SW_SHOWMINIMIZED)
+    {
+        // 최소화 직전 상태로 저장 (flags 에 이전 maximize 정보가 있을 수 있음)
+        if (wp.flags & WPF_RESTORETOMAXIMIZED)
+            showCmd = SW_SHOWMAXIMIZED;
+        else
+            showCmd = SW_SHOWNORMAL;
+    }
+
+    const bool changed =
+        !mHasSavedWindowPlacement ||
+        mWindowNormalLeft != rc.left ||
+        mWindowNormalTop != rc.top ||
+        mWindowNormalRight != rc.right ||
+        mWindowNormalBottom != rc.bottom ||
+        mWindowShowCmd != showCmd;
+
+    mWindowNormalLeft = rc.left;
+    mWindowNormalTop = rc.top;
+    mWindowNormalRight = rc.right;
+    mWindowNormalBottom = rc.bottom;
+    mWindowShowCmd = showCmd;
+    mHasSavedWindowPlacement = true;
+
+    if (changed)
+        MarkUiSettingsDirty();
+}
+
+void ImGuiManager::ApplyMainWindowPlacement()
+{
+    if (!m_Hwnd || !IsWindow(m_Hwnd) || !mHasSavedWindowPlacement)
+        return;
+
+    RECT rc{
+        mWindowNormalLeft, mWindowNormalTop,
+        mWindowNormalRight, mWindowNormalBottom
+    };
+    if (rc.right - rc.left < 200 || rc.bottom - rc.top < 150)
+        return;
+    if (!IsPlacementOnScreen(rc))
+        return;
+
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(wp);
+    GetWindowPlacement(m_Hwnd, &wp);
+    wp.flags = 0;
+    // 숨김 생성 직후에는 아직 ShowMainWindow 전이므로, Placement 로 바로 띄우지 않고
+    // 좌표만 맞춘 뒤 SW_HIDE 를 유지한다. (로딩 중 창 깜빡임 방지)
+    // 최대화는 ShowMainWindow 직전에 showCmd 로 다시 적용한다.
+    wp.showCmd = SW_HIDE;
+    wp.rcNormalPosition = rc;
+    SetWindowPlacement(m_Hwnd, &wp);
+
+}
+
+void ImGuiManager::PresentMainWindow()
+{
+    if (!m_Hwnd || !IsWindow(m_Hwnd))
+        return;
+
+    const int cmd = (mHasSavedWindowPlacement && mWindowShowCmd == SW_SHOWMAXIMIZED)
+        ? SW_SHOWMAXIMIZED
+        : SW_SHOWNORMAL;
+
+    ShowWindow(m_Hwnd, cmd);
+    UpdateWindow(m_Hwnd);
+    SetForegroundWindow(m_Hwnd);
+}
+
+void ImGuiManager::AutosaveUiSettingsIfNeeded()
+{
+    // 창 이동/리사이즈도 주기적으로 반영
+    CaptureMainWindowPlacement();
+
+    if (!mUiSettingsDirty)
+        return;
+
+    const double now = ImGui::GetTime();
+    // 드래그 중 과도한 디스크 쓰기 방지
+    if (now - mLastUiSettingsSaveTime < 2.0)
+        return;
+
+    SaveUiSettings();
+    // 도크 구조(창 위치/탭 배치)도 함께 기록
+    if (mImGuiIniPath[0] != '\0')
+        ImGui::SaveIniSettingsToDisk(mImGuiIniPath);
+}
 
 void ImGuiManager::SetupDockspace()
 {
+    DrawMainMenuBar();
+
     ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 workPos = viewport->WorkPos;
+    const ImVec2 workSize = viewport->WorkSize;
 
     ImGuiWindowFlags window_flags =
         ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
@@ -324,49 +1105,103 @@ void ImGuiManager::SetupDockspace()
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
         ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
 
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
+    // 매 프레임 호스트를 클라이언트 work 영역에 고정
+    ImGui::SetNextWindowPos(workPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(workSize, ImGuiCond_Always);
     ImGui::SetNextWindowViewport(viewport->ID);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::Begin("##MainDockSpace", nullptr, window_flags);
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
 
     ImGuiID dockspace_id = ImGui::GetID("EditorDockSpace");
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 
-    // 최초 실행 시 레이아웃 자동 배치
-    static bool first_time = true;
-    if (first_time)
+    // 첫 실행 / Reset Layout / 레이아웃 버전 변경 시에만 기본 배치 재구성.
+    // 그 외에는 imgui.ini + editor_ui.cfg 스플릿 비율을 유지한다.
+    const bool needLayout =
+        mRequestResetLayout ||
+        mAppliedDockLayoutVersion != kDockLayoutVersion;
+
+    if (needLayout)
     {
-        first_time = false;
+        ApplyDefaultDockLayout(dockspace_id, workSize);
+        mAppliedDockLayoutVersion = kDockLayoutVersion;
+        mRequestResetLayout = false;
+        mRestoreDockFromSettings = true;
+        mLastDockWorkSize = workSize;
+        mLastDockAspect = (workSize.y > 0.0f) ? (workSize.x / workSize.y) : 1.0f;
 
-        ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-        ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+        // 기본 배치(또는 Reset Layout) 시 패널을 모두 연다.
+        mShowScene = true;
+        mShowHierarchy = true;
+        mShowInspector = true;
+        mShowTools = true;
+        mShowProject = true;
+        mShowRender = true;
+        mShowHelp = true;
 
-        ImGuiID dock_id_left, dock_id_right, dock_id_down, dock_id_center;
-        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.20f, &dock_id_left, &dock_id_center);
-        ImGui::DockBuilderSplitNode(dock_id_center, ImGuiDir_Right, 0.25f, &dock_id_right, &dock_id_center);
-        ImGui::DockBuilderSplitNode(dock_id_center, ImGuiDir_Down, 0.30f, &dock_id_down, &dock_id_center);
-
-        ImGui::DockBuilderDockWindow("Scene", dock_id_center);
-        ImGui::DockBuilderDockWindow("Hierarchy", dock_id_left);
-        ImGui::DockBuilderDockWindow("Inspector", dock_id_right);
-        ImGui::DockBuilderDockWindow("Project", dock_id_down);
-
-        ImGui::DockBuilderFinish(dockspace_id);
+        MarkUiSettingsDirty();
+    }
+    else
+    {
+        SyncDockLayoutToWorkSize(dockspace_id, workSize);
     }
 
     ImGui::End();
+}
+
+void ImGuiManager::DrawEditorPanels(Engine* engine)
+{
+    const bool prevScene = mShowScene;
+    const bool prevHierarchy = mShowHierarchy;
+    const bool prevInspector = mShowInspector;
+    const bool prevTools = mShowTools;
+    const bool prevProject = mShowProject;
+    const bool prevRender = mShowRender;
+    const bool prevHelp = mShowHelp;
+    const bool prevManip = mManipulateSelected;
+    const std::string prevMesh = mSelectedMesh;
+    const std::string prevMat = mSelectedMaterial;
+
+    if (mShowScene)
+        DrawScenePanel();
+    if (mShowHierarchy)
+        DrawHierarchyPanel(engine);
+    if (mShowTools)
+        DrawToolsPanel();
+    if (mShowInspector)
+        DrawInspectorPanel(engine);
+    if (mShowProject)
+        DrawProjectPanel();
+    if (mShowRender)
+        DrawRenderPanel(engine);
+    if (mShowHelp)
+        DrawHelpPanel();
+
+    if (prevScene != mShowScene || prevHierarchy != mShowHierarchy ||
+        prevInspector != mShowInspector || prevTools != mShowTools ||
+        prevProject != mShowProject || prevRender != mShowRender ||
+        prevHelp != mShowHelp || prevManip != mManipulateSelected ||
+        prevMesh != mSelectedMesh || prevMat != mSelectedMaterial)
+    {
+        MarkUiSettingsDirty();
+    }
+
+    AutosaveUiSettingsIfNeeded();
 }
 
 // ==================== 각 패널 ====================
 
 void ImGuiManager::DrawScenePanel()
 {
-    ImGui::Begin("Scene");
+    if (!ImGui::Begin("Scene", &mShowScene))
+    {
+        ImGui::End();
+        return;
+    }
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const UINT width = static_cast<UINT>((std::max)(1.0f, avail.x));
@@ -588,120 +1423,48 @@ void ImGuiManager::EnsureSceneViewport(const std::function<void()>& flushGpu)
 
 void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 {
-    ImGui::Begin("Hierarchy");
-
-    if (!engine)
+    if (!ImGui::Begin("Hierarchy", &mShowHierarchy, kPanelWindowFlags))
     {
-        ImGui::TextDisabled("Engine not available");
         ImGui::End();
         return;
     }
 
-    const size_t objectCount = engine->GetRenderableObjectCount();
-    ImGui::Text("Objects: %zu", objectCount);
-    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-
-    // Step A: GPU-driven / 렌더 경로 통계
+    if (!engine)
     {
-        const GpuDrivenFrameStats& st = engine->GetLastFrameStats();
-        const char* pathName = "Basic";
-        if (st.path == RenderPath::Instanced) pathName = "Instanced";
-        else if (st.path == RenderPath::ComputeIndirect) pathName = "GPU-driven";
-
-        if (ImGui::CollapsingHeader("Render Stats", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Text("Path: %s %s", pathName, st.autoPath ? "(Auto)" : "(Manual)");
-            ImGui::Text("Frustum Cull: %s", st.cullEnabled ? "ON" : "OFF");
-            ImGui::Text("Occlusion(HiZ): %s  valid=%s  mips=%u",
-                st.occlusionEnabled ? "ON" : "OFF",
-                st.hizValid ? "Y" : "N",
-                st.hizMips);
-            ImGui::Text("Sources: %u  Batches: %u  SubDraws: %u",
-                st.sourceCount, st.batchCount, st.submeshDraws);
-            ImGui::Text("EI calls: %u  multi-runs: %u", st.eiCalls, st.multiEiRuns);
-            ImGui::Text("Rebuild: %s (%.3f ms)", st.didRebuild ? "Y" : "N", st.rebuildMs);
-            ImGui::Text("Patch: %s  dirtyIn=%u patched=%u pend=%u  %.3f ms",
-                st.skippedPatch ? "SKIP" : (st.usedDirtyList ? "LIST" : "SCAN"),
-                st.dirtyListIn, st.dirtyPatched, st.pendingDirty, st.patchMs);
-            ImGui::Text("Upload src=%s meta=%s defaultCopy=%s  %.3f ms",
-                st.didSourceUpload ? "Y" : "N",
-                st.didMetaUpload ? "Y" : "N",
-                st.usedDefaultHeapCopy ? "Y" : "N",
-                st.uploadMs);
-            ImGui::Text("Compose: %s  %.3f ms", st.didComposeWorld ? "Y" : "N", st.composeMs);
-            ImGui::Text("GPU Motion: %s  run=%s  active=%u  %.3f ms",
-                st.gpuMotionEnabled ? "ON" : "OFF",
-                st.didGpuMotion ? "Y" : "N",
-                st.motionActive,
-                st.motionMs);
-            ImGui::Text("LOD: %s  L0=%u L1=%u L2=%u L3=%u  culled=%u  sw=%u  %.3f ms",
-                st.lodEnabled ? "ON" : "OFF",
-                st.lodLevelCounts[0], st.lodLevelCounts[1],
-                st.lodLevelCounts[2], st.lodLevelCounts[3],
-                st.lodCulled, st.lodSwitches, st.lodMs);
-            ImGui::Text("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
-
-            if (ImGui::Button(st.autoPath ? "Auto Path: ON" : "Auto Path: OFF"))
-                engine->SetAutoRenderPathEnabled(!engine->IsAutoRenderPathEnabled());
-            ImGui::SameLine();
-            if (ImGui::Button("Force Instanced"))
-                engine->SetRenderPath(RenderPath::Instanced);
-            ImGui::SameLine();
-            if (ImGui::Button("Force GPU-driven"))
-                engine->SetRenderPath(RenderPath::ComputeIndirect);
-
-            if (ImGui::Button(st.cullEnabled ? "Disable Frustum Cull" : "Enable Frustum Cull"))
-                engine->SetGpuFrustumCullEnabled(!st.cullEnabled);
-            ImGui::SameLine();
-            if (ImGui::Button(st.occlusionEnabled ? "Disable Occlusion" : "Enable Occlusion"))
-                engine->SetGpuOcclusionEnabled(!st.occlusionEnabled);
-            ImGui::SameLine();
-            if (ImGui::Button(st.gpuMotionEnabled ? "Disable GPU Motion" : "Enable GPU Motion"))
-                engine->SetGpuMotionEnabled(!st.gpuMotionEnabled);
-            if (ImGui::Button(st.lodEnabled ? "Disable LOD" : "Enable LOD"))
-                engine->SetLodEnabled(!st.lodEnabled);
-            ImGui::SameLine();
-            if (ImGui::Button(engine->IsLodDistanceCullEnabled()
-                ? "Disable DistCull" : "Enable DistCull"))
-                engine->SetLodDistanceCullEnabled(!engine->IsLodDistanceCullEnabled());
-            {
-                float bias = engine->GetLodBias();
-                if (ImGui::SliderFloat("LOD Bias", &bias, 0.25f, 4.f))
-                    engine->SetLodBias(bias);
-                float cullD = engine->GetLodCullDistance();
-                if (ImGui::SliderFloat("Cull Distance", &cullD, 20.f, 1000.f))
-                    engine->SetLodCullDistance(cullD);
-            }
-        }
+        TextLineDisabled("Engine not available");
+        ImGui::End();
+        return;
     }
+
+    TextLine("Objects: %zu", engine->GetRenderableObjectCount());
+    TextLine("FPS: %.1f", ImGui::GetIO().Framerate);
 
     const size_t selCount = engine->GetSelectedCount();
     if (selCount == 0)
-        ImGui::TextDisabled("Selected: (none)");
+        TextLineDisabled("Selected: (none)");
     else if (selCount == 1)
-        ImGui::Text("Selected: %u", engine->GetSelectedEntity());
+        TextLine("Selected: %u", engine->GetSelectedEntity());
     else
-        ImGui::Text("Selected: %zu entities", selCount);
+        TextLine("Selected: %zu entities", selCount);
 
-    ImGui::TextDisabled("Scene: drag LMB box select | Shift+drag add");
-    ImGui::TextDisabled("List: click | Ctrl+click toggle");
-
-    if (ImGui::Button("Clear Selection"))
+    if (ImGui::Button("Clear Selection", ImVec2(-FLT_MIN, 0)))
         engine->ClearSelection();
 
+    TextLineDisabled("Scene: LMB drag box | Shift+drag add");
+    TextLineDisabled("List: click | Ctrl+click toggle");
     ImGui::Separator();
 
     auto entities = engine->GetRenderableEntities();
     if (entities.empty())
     {
-        ImGui::TextDisabled("No renderable entities");
+        TextLineDisabled("No renderable entities");
         ImGui::End();
         return;
     }
 
-    if (ImGui::BeginListBox("##EntityList", ImVec2(-1, -1)))
+    // 남은 영역을 리스트로 채움 — 가로/세로 스크롤 + 긴 라벨 폭 보장
+    if (ImGui::BeginChild("##EntityList", ImVec2(0, 0), ImGuiChildFlags_Borders, kPanelWindowFlags))
     {
-        // 대량 오브젝트에서도 보이는 행만 생성 (ImGui CPU 병목 제거)
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(entities.size()));
         while (clipper.Step())
@@ -712,55 +1475,84 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                 RenderableComponent* rend = engine->GetRenderable(e);
                 const char* meshName = (rend && rend->mesh) ? rend->mesh->name.c_str() : "(no mesh)";
 
-                char label[128];
+                char label[160];
                 snprintf(label, sizeof(label), "Entity %u  [%s]", e, meshName);
 
                 const bool isSelected = engine->IsEntitySelected(e);
-                if (ImGui::Selectable(label, isSelected))
+                if (SelectableFull(label, isSelected))
                 {
                     if (ImGui::GetIO().KeyCtrl)
                         engine->ToggleSelectedEntity(e);
                     else
                         engine->SetSelectedEntity(e);
                 }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", label);
             }
         }
-        ImGui::EndListBox();
     }
+    ImGui::EndChild();
 
     ImGui::End();
 }
 
-void ImGuiManager::DrawInspectorPanel(Engine* engine)
+void ImGuiManager::DrawToolsContent()
 {
-    ImGui::Begin("Inspector");
-
-    if (!engine)
-    {
-        ImGui::TextDisabled("Engine not available");
-        ImGui::End();
-        return;
-    }
-
-    // --- 선택 오브젝트 조작 (3인칭 팔로우) ---
-    if (ImGui::Checkbox("Manipulate Selected Object", &mManipulateSelected))
+    if (CheckboxWrapped("Manipulate Selected Object", &mManipulateSelected))
     {
         if (m_Callback)
             m_Callback->buttonClicked(ButtonAction::ToggleManipulateSelected);
     }
     if (mManipulateSelected)
     {
-        ImGui::TextWrapped(
+        ImGui::Spacing();
+        TextLine(
             "3rd-person follow: Mouse orbit | WASD move | Space/Shift up/down | Wheel zoom");
     }
+    else
+    {
+        TextLineDisabled("Enable to orbit / move the selected entity.");
+    }
 
+    ImGui::Spacing();
     ImGui::Separator();
+    TextLine("Tips");
+    BulletLine("This panel docks next to Hierarchy as a tab.");
+    BulletLine("Drag any window title onto another to add a tab.");
+    BulletLine("View menu re-opens closed panels.");
+}
+
+void ImGuiManager::DrawToolsPanel()
+{
+    if (!ImGui::Begin("Tools", &mShowTools, kPanelWindowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+    DrawToolsContent();
+    ImGui::End();
+}
+
+void ImGuiManager::DrawInspectorPanel(Engine* engine)
+{
+    if (!ImGui::Begin("Inspector", &mShowInspector, kPanelWindowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+
+    if (!engine)
+    {
+        TextLineDisabled("Engine not available");
+        ImGui::End();
+        return;
+    }
 
     const std::vector<Entity> selectedList = engine->GetSelectedEntities();
     if (selectedList.empty())
     {
-        ImGui::TextDisabled("No entity selected");
-        ImGui::TextDisabled("Scene drag-box, RMB pick, or Hierarchy.");
+        TextLineDisabled("No entity selected");
+        TextLineDisabled("Scene drag-box, RMB pick, or Hierarchy.");
         ImGui::End();
         return;
     }
@@ -769,9 +1561,9 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
     const Entity primary = selectedList.front();
 
     if (selectedList.size() == 1)
-        ImGui::Text("Entity: %u", primary);
+        TextLine("Entity: %u", primary);
     else
-        ImGui::Text("Multi-select: %zu (edits apply to all)", selectedList.size());
+        TextLine("Multi-select: %zu (edits apply to all)", selectedList.size());
 
     auto forEachSelected = [&](auto&& fn)
     {
@@ -779,272 +1571,286 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
             fn(e);
     };
 
-    // --- Transform (드래그 델타를 전체에 적용) ---
-    if (TransformComponent* tf = engine->GetTransform(primary))
+    if (!ImGui::BeginTabBar("InspectorTabs", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_DrawSelectedOverline))
     {
-        ImGui::SeparatorText("Transform");
-
-        XMFLOAT3 pos = tf->position;
-        if (ImGui::DragFloat3("Position", &pos.x, 0.05f))
-        {
-            const XMFLOAT3 delta{
-                pos.x - tf->position.x,
-                pos.y - tf->position.y,
-                pos.z - tf->position.z
-            };
-            forEachSelected([&](Entity e)
-            {
-                if (TransformComponent* t = engine->GetTransform(e))
-                {
-                    t->position.x += delta.x;
-                    t->position.y += delta.y;
-                    t->position.z += delta.z;
-                    t->MarkDirty(e);
-                }
-            });
-        }
-
-        XMFLOAT3 rot = tf->rotation;
-        if (ImGui::DragFloat3("Rotation", &rot.x, 0.01f))
-        {
-            const XMFLOAT3 delta{
-                rot.x - tf->rotation.x,
-                rot.y - tf->rotation.y,
-                rot.z - tf->rotation.z
-            };
-            forEachSelected([&](Entity e)
-            {
-                if (TransformComponent* t = engine->GetTransform(e))
-                {
-                    t->rotation.x += delta.x;
-                    t->rotation.y += delta.y;
-                    t->rotation.z += delta.z;
-                    t->MarkDirty(e);
-                }
-            });
-        }
-
-        XMFLOAT3 scl = tf->scale;
-        if (ImGui::DragFloat3("Scale", &scl.x, 0.01f, 0.001f, 100.0f))
-        {
-            // 스케일은 절대값으로 맞춤 (상대 곱보다 직관적)
-            forEachSelected([&](Entity e)
-            {
-                if (TransformComponent* t = engine->GetTransform(e))
-                {
-                    t->scale = scl;
-                    t->MarkDirty(e);
-                }
-            });
-        }
+        ImGui::End();
+        return;
     }
 
-    // --- Gravity ---
-    ImGui::SeparatorText("Gravity");
+    // --- Transform ---
+    if (ImGui::BeginTabItem("Transform"))
     {
-        bool hasGravity = engine->HasGravityComponent(primary);
-        if (ImGui::Checkbox("Gravity Component", &hasGravity))
+        if (TransformComponent* tf = engine->GetTransform(primary))
         {
-            forEachSelected([&](Entity e)
+            XMFLOAT3 pos = tf->position;
+            if (DragFloat3Full("Position", &pos.x, 0.05f))
             {
-                engine->SetEntityGravityEnabled(e, hasGravity);
-            });
-        }
-
-        if (GravityComponent* gravity = engine->GetGravityComponent(primary))
-        {
-            ImGui::Indent();
-            bool gEnabled = gravity->enabled;
-            if (ImGui::Checkbox("Enabled##Gravity", &gEnabled))
-            {
+                const XMFLOAT3 delta{
+                    pos.x - tf->position.x,
+                    pos.y - tf->position.y,
+                    pos.z - tf->position.z
+                };
                 forEachSelected([&](Entity e)
                 {
-                    if (GravityComponent* g = engine->GetGravityComponent(e))
-                        g->enabled = gEnabled;
-                    engine->NotifyEntityMotionChanged(e);
-                });
-            }
-            float strength = gravity->strength;
-            if (ImGui::DragFloat("Strength", &strength, 0.1f, 0.0f, 50.0f))
-            {
-                forEachSelected([&](Entity e)
-                {
-                    if (GravityComponent* g = engine->GetGravityComponent(e))
-                        g->strength = strength;
-                    engine->NotifyEntityMotionChanged(e);
-                });
-            }
-            XMFLOAT3 vel = gravity->velocity;
-            if (ImGui::DragFloat3("Velocity", &vel.x, 0.1f))
-            {
-                forEachSelected([&](Entity e)
-                {
-                    if (GravityComponent* g = engine->GetGravityComponent(e))
-                        g->velocity = vel;
-                    engine->NotifyEntityMotionChanged(e);
-                });
-            }
-            XMFLOAT3 ang = gravity->angularVelocity;
-            if (ImGui::DragFloat3("Angular Vel", &ang.x, 0.01f))
-            {
-                forEachSelected([&](Entity e)
-                {
-                    if (GravityComponent* g = engine->GetGravityComponent(e))
-                        g->angularVelocity = ang;
-                    engine->NotifyEntityMotionChanged(e);
-                });
-            }
-            ImGui::Unindent();
-        }
-    }
-
-    // --- Collision ---
-    ImGui::SeparatorText("Collision");
-    {
-        bool hasCollision = engine->HasCollisionComponent(primary);
-        if (ImGui::Checkbox("Collision Component", &hasCollision))
-        {
-            forEachSelected([&](Entity e)
-            {
-                engine->SetEntityCollisionEnabled(e, hasCollision);
-            });
-        }
-
-        if (CollisionComponent* collision = engine->GetCollisionComponent(primary))
-        {
-            ImGui::Indent();
-            bool cEnabled = collision->enabled;
-            if (ImGui::Checkbox("Enabled##Collision", &cEnabled))
-            {
-                forEachSelected([&](Entity e)
-                {
-                    if (CollisionComponent* c = engine->GetCollisionComponent(e))
-                        c->enabled = cEnabled;
-                });
-            }
-            bool isStatic = collision->isStatic;
-            if (ImGui::Checkbox("Static", &isStatic))
-            {
-                forEachSelected([&](Entity e)
-                {
-                    if (CollisionComponent* c = engine->GetCollisionComponent(e))
-                        c->isStatic = isStatic;
-                });
-            }
-            float restitution = collision->restitution;
-            if (ImGui::DragFloat("Restitution", &restitution, 0.01f, 0.0f, 1.0f))
-            {
-                forEachSelected([&](Entity e)
-                {
-                    if (CollisionComponent* c = engine->GetCollisionComponent(e))
-                        c->restitution = restitution;
-                });
-            }
-            ImGui::Unindent();
-        }
-    }
-
-    // --- Material / Visible ---
-    RenderableComponent* rend = engine->GetRenderable(primary);
-    if (rend && rend->mesh)
-    {
-        ImGui::SeparatorText("Material (Sub > Main > Init)");
-        ImGui::Text("Mesh: %s", rend->mesh->name.c_str());
-        if (selectedList.size() > 1)
-            ImGui::TextDisabled("Material changes apply to all selected");
-
-        auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
-        std::sort(matNames.begin(), matNames.end());
-
-        const std::string mainMaterialName = engine->GetEntityMainMaterial(primary);
-        int mainIdx = 0;
-        if (!mainMaterialName.empty())
-        {
-            auto it = std::find(matNames.begin(), matNames.end(), mainMaterialName);
-            if (it != matNames.end())
-                mainIdx = 1 + (int)std::distance(matNames.begin(), it);
-        }
-
-        if (ImGui::Combo("Main Material", &mainIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
-        {
-            std::string newMain = (mainIdx == 0) ? "" : matNames[mainIdx - 1];
-            forEachSelected([&](Entity e)
-            {
-                engine->SetEntityMainMaterial(e, newMain);
-            });
-        }
-
-        ImGui::Text("Submesh Overrides");
-        std::vector<std::string> submeshKeys;
-        submeshKeys.reserve(rend->mesh->DrawArgs.size());
-        for (const auto& pair : rend->mesh->DrawArgs)
-            submeshKeys.push_back(pair.first);
-        std::sort(submeshKeys.begin(), submeshKeys.end());
-
-        for (const auto& key : submeshKeys)
-        {
-            const auto& sub = rend->mesh->DrawArgs.at(key);
-            ImGui::PushID(key.c_str());
-            ImGui::Text("%s (Init: %s)", key.c_str(),
-                sub.initMaterialName.empty() ? "Default" : sub.initMaterialName.c_str());
-
-            const std::string currentSub = engine->GetEntitySubMaterial(primary, key);
-
-            int subIdx = 0;
-            if (!currentSub.empty())
-            {
-                auto it = std::find(matNames.begin(), matNames.end(), currentSub);
-                if (it != matNames.end())
-                    subIdx = 1 + (int)std::distance(matNames.begin(), it);
-            }
-
-            if (ImGui::Combo("Sub Material", &subIdx, SubMaterialComboGetter, &matNames, (int)matNames.size() + 1))
-            {
-                std::string newSub = (subIdx == 0) ? "" : matNames[subIdx - 1];
-                forEachSelected([&](Entity e)
-                {
-                    // 같은 서브메시 키가 있는 메시만 적용
-                    if (RenderableComponent* r = engine->GetRenderable(e))
+                    if (TransformComponent* t = engine->GetTransform(e))
                     {
-                        if (r->mesh && r->mesh->DrawArgs.count(key))
-                            engine->SetEntitySubMaterial(e, key, newSub);
+                        t->position.x += delta.x;
+                        t->position.y += delta.y;
+                        t->position.z += delta.z;
+                        t->MarkDirty(e);
                     }
                 });
             }
-            ImGui::PopID();
-        }
 
-        bool visible = rend->visible;
-        if (ImGui::Checkbox("Visible", &visible))
-        {
-            forEachSelected([&](Entity e)
+            XMFLOAT3 rot = tf->rotation;
+            if (DragFloat3Full("Rotation", &rot.x, 0.01f))
             {
-                if (RenderableComponent* r = engine->GetRenderable(e))
-                    r->visible = visible;
-            });
+                const XMFLOAT3 delta{
+                    rot.x - tf->rotation.x,
+                    rot.y - tf->rotation.y,
+                    rot.z - tf->rotation.z
+                };
+                forEachSelected([&](Entity e)
+                {
+                    if (TransformComponent* t = engine->GetTransform(e))
+                    {
+                        t->rotation.x += delta.x;
+                        t->rotation.y += delta.y;
+                        t->rotation.z += delta.z;
+                        t->MarkDirty(e);
+                    }
+                });
+            }
+
+            XMFLOAT3 scl = tf->scale;
+            if (DragFloat3Full("Scale", &scl.x, 0.01f, 0.001f, 100.0f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (TransformComponent* t = engine->GetTransform(e))
+                    {
+                        t->scale = scl;
+                        t->MarkDirty(e);
+                    }
+                });
+            }
         }
+        else
+        {
+            TextLineDisabled("No TransformComponent on primary entity");
+        }
+        ImGui::EndTabItem();
     }
-    else if (!engine->HasGravityComponent(primary) && !engine->HasCollisionComponent(primary))
+
+    // --- Physics (Gravity + Collision) ---
+    if (ImGui::BeginTabItem("Physics"))
     {
         ImGui::Separator();
-        ImGui::TextDisabled("Primary entity has no RenderableComponent");
+        TextLine("Gravity");
+        {
+            bool hasGravity = engine->HasGravityComponent(primary);
+            if (CheckboxWrapped("Gravity Component", &hasGravity))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    engine->SetEntityGravityEnabled(e, hasGravity);
+                });
+            }
+
+            if (GravityComponent* gravity = engine->GetGravityComponent(primary))
+            {
+                bool gEnabled = gravity->enabled;
+                if (CheckboxWrapped("Enabled##Gravity", &gEnabled))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (GravityComponent* g = engine->GetGravityComponent(e))
+                            g->enabled = gEnabled;
+                        engine->NotifyEntityMotionChanged(e);
+                    });
+                }
+                float strength = gravity->strength;
+                if (DragFloatFull("Strength", &strength, 0.1f, 0.0f, 50.0f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (GravityComponent* g = engine->GetGravityComponent(e))
+                            g->strength = strength;
+                        engine->NotifyEntityMotionChanged(e);
+                    });
+                }
+                XMFLOAT3 vel = gravity->velocity;
+                if (DragFloat3Full("Velocity", &vel.x, 0.1f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (GravityComponent* g = engine->GetGravityComponent(e))
+                            g->velocity = vel;
+                        engine->NotifyEntityMotionChanged(e);
+                    });
+                }
+                XMFLOAT3 ang = gravity->angularVelocity;
+                if (DragFloat3Full("Angular Vel", &ang.x, 0.01f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (GravityComponent* g = engine->GetGravityComponent(e))
+                            g->angularVelocity = ang;
+                        engine->NotifyEntityMotionChanged(e);
+                    });
+                }
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        TextLine("Collision");
+        {
+            bool hasCollision = engine->HasCollisionComponent(primary);
+            if (CheckboxWrapped("Collision Component", &hasCollision))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    engine->SetEntityCollisionEnabled(e, hasCollision);
+                });
+            }
+
+            if (CollisionComponent* collision = engine->GetCollisionComponent(primary))
+            {
+                bool cEnabled = collision->enabled;
+                if (CheckboxWrapped("Enabled##Collision", &cEnabled))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (CollisionComponent* c = engine->GetCollisionComponent(e))
+                            c->enabled = cEnabled;
+                    });
+                }
+                bool isStatic = collision->isStatic;
+                if (CheckboxWrapped("Static", &isStatic))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (CollisionComponent* c = engine->GetCollisionComponent(e))
+                            c->isStatic = isStatic;
+                    });
+                }
+                float restitution = collision->restitution;
+                if (DragFloatFull("Restitution", &restitution, 0.01f, 0.0f, 1.0f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (CollisionComponent* c = engine->GetCollisionComponent(e))
+                            c->restitution = restitution;
+                    });
+                }
+            }
+        }
+        ImGui::EndTabItem();
     }
 
+    // --- Material ---
+    if (ImGui::BeginTabItem("Material"))
+    {
+        RenderableComponent* rend = engine->GetRenderable(primary);
+        if (rend && rend->mesh)
+        {
+            TextLine("Mesh: %s", rend->mesh->name.c_str());
+            TextLineDisabled("Priority: Sub > Main > Init");
+            if (selectedList.size() > 1)
+                TextLineDisabled("Material changes apply to all selected");
+
+            auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+            std::sort(matNames.begin(), matNames.end());
+
+            const std::string mainMaterialName = engine->GetEntityMainMaterial(primary);
+            int mainIdx = 0;
+            if (!mainMaterialName.empty())
+            {
+                auto it = std::find(matNames.begin(), matNames.end(), mainMaterialName);
+                if (it != matNames.end())
+                    mainIdx = 1 + (int)std::distance(matNames.begin(), it);
+            }
+
+            if (ComboFull("Main Material", &mainIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+            {
+                std::string newMain = (mainIdx == 0) ? "" : matNames[mainIdx - 1];
+                forEachSelected([&](Entity e)
+                {
+                    engine->SetEntityMainMaterial(e, newMain);
+                });
+            }
+
+            bool visible = rend->visible;
+            if (CheckboxWrapped("Visible", &visible))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (RenderableComponent* r = engine->GetRenderable(e))
+                        r->visible = visible;
+                });
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            TextLine("Submesh Overrides");
+            std::vector<std::string> submeshKeys;
+            submeshKeys.reserve(rend->mesh->DrawArgs.size());
+            for (const auto& pair : rend->mesh->DrawArgs)
+                submeshKeys.push_back(pair.first);
+            std::sort(submeshKeys.begin(), submeshKeys.end());
+
+            for (const auto& key : submeshKeys)
+            {
+                const auto& sub = rend->mesh->DrawArgs.at(key);
+                ImGui::PushID(key.c_str());
+                TextLine("%s (Init: %s)", key.c_str(),
+                    sub.initMaterialName.empty() ? "Default" : sub.initMaterialName.c_str());
+
+                const std::string currentSub = engine->GetEntitySubMaterial(primary, key);
+
+                int subIdx = 0;
+                if (!currentSub.empty())
+                {
+                    auto it = std::find(matNames.begin(), matNames.end(), currentSub);
+                    if (it != matNames.end())
+                        subIdx = 1 + (int)std::distance(matNames.begin(), it);
+                }
+
+                if (ComboFull("Sub Material", &subIdx, SubMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+                {
+                    std::string newSub = (subIdx == 0) ? "" : matNames[subIdx - 1];
+                    forEachSelected([&](Entity e)
+                    {
+                        if (RenderableComponent* r = engine->GetRenderable(e))
+                        {
+                            if (r->mesh && r->mesh->DrawArgs.count(key))
+                                engine->SetEntitySubMaterial(e, key, newSub);
+                        }
+                    });
+                }
+                ImGui::PopID();
+            }
+        }
+        else
+        {
+            TextLineDisabled("Primary entity has no RenderableComponent");
+        }
+        ImGui::EndTabItem();
+    }
+
+    ImGui::EndTabBar();
     ImGui::End();
 }
 
-void ImGuiManager::DrawProjectPanel()
+void ImGuiManager::DrawProjectSpawnContent()
 {
-    ImGui::Begin("Project");
-    ImGui::Text("Spawn Object");
-    ImGui::Separator();
-
     auto meshNames = MeshManager::Get().GetLoadedMeshNames();
     std::sort(meshNames.begin(), meshNames.end());
 
     if (meshNames.empty())
     {
-        ImGui::TextDisabled("No meshes loaded");
+        TextLineDisabled("No meshes loaded");
     }
     else
     {
@@ -1071,7 +1877,7 @@ void ImGuiManager::DrawProjectPanel()
             return (*vec)[idx].c_str();
         };
 
-        if (ImGui::Combo("Mesh", &meshIdx, meshGetter, &meshNames, (int)meshNames.size()))
+        if (ComboFull("Mesh", &meshIdx, meshGetter, &meshNames, (int)meshNames.size()))
             mSelectedMesh = meshNames[meshIdx];
     }
 
@@ -1087,7 +1893,7 @@ void ImGuiManager::DrawProjectPanel()
                 matIdx = 1 + (int)std::distance(matNames.begin(), it);
         }
 
-        if (ImGui::Combo("Main Material", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+        if (ComboFull("Main Material", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
             mSelectedMaterial = (matIdx == 0) ? "" : matNames[matIdx - 1];
     }
     else
@@ -1099,7 +1905,7 @@ void ImGuiManager::DrawProjectPanel()
     if (!canSpawn)
         ImGui::BeginDisabled();
 
-    if (ImGui::Button("Spawn Selected Mesh", ImVec2(-1, 0)))
+    if (ImGui::Button("Spawn Selected Mesh", ImVec2(-FLT_MIN, 0)))
     {
         if (m_Callback && !mSelectedMesh.empty())
             m_Callback->buttonClicked(ButtonAction::SpawnSelectedMesh);
@@ -1111,31 +1917,204 @@ void ImGuiManager::DrawProjectPanel()
     if (!mSelectedMesh.empty())
     {
         const char* spawnMat = mSelectedMaterial.empty() ? "None (Init/Default)" : mSelectedMaterial.c_str();
-        ImGui::Text("Ready: %s / %s", mSelectedMesh.c_str(), spawnMat);
-        ImGui::TextDisabled("Spawns at the Scene crosshair (view center).");
+        TextLine("Ready: %s / %s", mSelectedMesh.c_str(), spawnMat);
+        TextLineDisabled("Spawns at the Scene crosshair (view center).");
     }
 
     ImGui::Separator();
-    ImGui::TextDisabled("Loaded meshes: %zu", meshNames.size());
-    if (ImGui::BeginListBox("##MeshList", ImVec2(-1, 120.0f)))
+    TextLineDisabled("Loaded meshes: %zu", meshNames.size());
+
+    if (ImGui::BeginChild("##MeshList", ImVec2(0, 0), ImGuiChildFlags_Borders, kPanelWindowFlags))
     {
         for (const auto& name : meshNames)
         {
             const bool selected = (name == mSelectedMesh);
-            if (ImGui::Selectable(name.c_str(), selected))
+            if (SelectableFull(name.c_str(), selected))
                 mSelectedMesh = name;
             if (selected)
                 ImGui::SetItemDefaultFocus();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", name.c_str());
         }
-        ImGui::EndListBox();
+    }
+    ImGui::EndChild();
+}
+
+void ImGuiManager::DrawRenderContent(Engine* engine)
+{
+    if (!engine)
+    {
+        TextLineDisabled("Engine not available");
+        return;
     }
 
+    const GpuDrivenFrameStats& st = engine->GetLastFrameStats();
+    const char* pathName = "Basic";
+    if (st.path == RenderPath::Instanced) pathName = "Instanced";
+    else if (st.path == RenderPath::ComputeIndirect) pathName = "GPU-driven";
+
+    ImGui::SeparatorText("Path");
+    TextLine("Path: %s %s", pathName, st.autoPath ? "(Auto)" : "(Manual)");
+    TextLine("Frustum Cull: %s", st.cullEnabled ? "ON" : "OFF");
+    TextLine("Occlusion(HiZ): %s  valid=%s  mips=%u",
+        st.occlusionEnabled ? "ON" : "OFF",
+        st.hizValid ? "Y" : "N",
+        st.hizMips);
+
+    // 좁은 패널에서 버튼이 잘리지 않도록 자동 줄바꿈
+    if (ButtonAutoWrap(st.autoPath ? "Auto Path: ON" : "Auto Path: OFF"))
+        engine->SetAutoRenderPathEnabled(!engine->IsAutoRenderPathEnabled());
+    if (ButtonAutoWrap("Force Instanced"))
+        engine->SetRenderPath(RenderPath::Instanced);
+    if (ButtonAutoWrap("Force GPU-driven"))
+        engine->SetRenderPath(RenderPath::ComputeIndirect);
+    EndButtonAutoWrapRow();
+
+    if (ButtonAutoWrap(st.cullEnabled ? "Disable Frustum Cull" : "Enable Frustum Cull"))
+        engine->SetGpuFrustumCullEnabled(!st.cullEnabled);
+    if (ButtonAutoWrap(st.occlusionEnabled ? "Disable Occlusion" : "Enable Occlusion"))
+        engine->SetGpuOcclusionEnabled(!st.occlusionEnabled);
+    if (ButtonAutoWrap(st.gpuMotionEnabled ? "Disable GPU Motion" : "Enable GPU Motion"))
+        engine->SetGpuMotionEnabled(!st.gpuMotionEnabled);
+    EndButtonAutoWrapRow();
+
+    if (ButtonAutoWrap(st.lodEnabled ? "Disable LOD" : "Enable LOD"))
+        engine->SetLodEnabled(!st.lodEnabled);
+    if (ButtonAutoWrap(engine->IsLodDistanceCullEnabled()
+        ? "Disable DistCull" : "Enable DistCull"))
+        engine->SetLodDistanceCullEnabled(!engine->IsLodDistanceCullEnabled());
+    EndButtonAutoWrapRow();
+
+    {
+        float bias = engine->GetLodBias();
+        if (SliderFloatFull("LOD Bias", &bias, 0.25f, 4.f))
+            engine->SetLodBias(bias);
+        float cullD = engine->GetLodCullDistance();
+        if (SliderFloatFull("Cull Distance", &cullD, 20.f, 1000.f))
+            engine->SetLodCullDistance(cullD);
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Frame Stats");
+    TextLine("Sources: %u  Batches: %u  SubDraws: %u",
+        st.sourceCount, st.batchCount, st.submeshDraws);
+    if (st.path == RenderPath::ComputeIndirect)
+    {
+        if (st.gpuCullReadbackValid)
+        {
+            const float keep = (st.gpuSubmittedInstances > 0)
+                ? (100.f * static_cast<float>(st.gpuVisibleInstances)
+                    / static_cast<float>(st.gpuSubmittedInstances))
+                : 0.f;
+            TextLine("GPU Cull (delayed): visible=%u  culled=%u  submitted=%u  keep=%.1f%%",
+                st.gpuVisibleInstances, st.gpuCulledInstances,
+                st.gpuSubmittedInstances, keep);
+        }
+        else
+        {
+            TextLine("GPU Cull (delayed): (warming up…)");
+        }
+    }
+    TextLine("EI calls: %u  multi-runs: %u", st.eiCalls, st.multiEiRuns);
+    TextLine("Rebuild: %s (%.3f ms)", st.didRebuild ? "Y" : "N", st.rebuildMs);
+    TextLine("Patch: %s  dirtyIn=%u patched=%u pend=%u  %.3f ms",
+        st.skippedPatch ? "SKIP" : (st.usedDirtyList ? "LIST" : "SCAN"),
+        st.dirtyListIn, st.dirtyPatched, st.pendingDirty, st.patchMs);
+    TextLine("Upload src=%s meta=%s defaultCopy=%s  %.3f ms",
+        st.didSourceUpload ? "Y" : "N",
+        st.didMetaUpload ? "Y" : "N",
+        st.usedDefaultHeapCopy ? "Y" : "N",
+        st.uploadMs);
+    TextLine("Compose: %s  %.3f ms", st.didComposeWorld ? "Y" : "N", st.composeMs);
+    TextLine("GPU Motion: %s  run=%s  active=%u  %.3f ms",
+        st.gpuMotionEnabled ? "ON" : "OFF",
+        st.didGpuMotion ? "Y" : "N",
+        st.motionActive,
+        st.motionMs);
+    TextLine("LOD: %s  L0=%u L1=%u L2=%u L3=%u  culled=%u  sw=%u  %.3f ms",
+        st.lodEnabled ? "ON" : "OFF",
+        st.lodLevelCounts[0], st.lodLevelCounts[1],
+        st.lodLevelCounts[2], st.lodLevelCounts[3],
+        st.lodCulled, st.lodSwitches, st.lodMs);
+    TextLine("HiZ build: %s  %.3f ms", st.didBuildHiZ ? "Y" : "N", st.hizMs);
+}
+
+void ImGuiManager::DrawHelpContent()
+{
+    ImGui::Separator();
+    TextLine("Dock / Tabs");
+    BulletLine("Bottom strip: Project / Render / Help as dock tabs");
+    BulletLine("Left strip: Hierarchy / Tools as dock tabs");
+    BulletLine("Click a tab to show only that window");
+    BulletLine("Drag a window title onto another panel to dock as a new tab");
+    BulletLine("View menu: show/hide or re-open closed panels");
+    BulletLine("View > Reset Layout restores the default arrangement");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    TextLine("Workflow");
+    BulletLine("Hierarchy: select entities (Ctrl multi-toggle)");
+    BulletLine("Scene: LMB drag box select, Shift adds");
+    BulletLine("Scene: short LMB click enters mouse look");
+    BulletLine("Inspector: Transform / Physics / Material");
+    BulletLine("Project: pick mesh + material, then Spawn");
+    BulletLine("Tools: 3rd-person manipulate mode");
+    BulletLine("Render: path, cull, LOD, frame stats");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    TextLine("Scene View");
+    BulletLine("Crosshair = spawn position (view center)");
+    BulletLine("RMB pick selects entity under cursor");
+    BulletLine("ESC releases mouse look (does not quit)");
+}
+
+void ImGuiManager::DrawProjectPanel()
+{
+    if (!ImGui::Begin("Project", &mShowProject, kPanelWindowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+    DrawProjectSpawnContent();
+    ImGui::End();
+}
+
+void ImGuiManager::DrawRenderPanel(Engine* engine)
+{
+    if (!ImGui::Begin("Render", &mShowRender, kPanelWindowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+    DrawRenderContent(engine);
+    ImGui::End();
+}
+
+void ImGuiManager::DrawHelpPanel()
+{
+    if (!ImGui::Begin("Help", &mShowHelp, kPanelWindowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+    DrawHelpContent();
     ImGui::End();
 }
 #pragma endregion 
 
 void ImGuiManager::Shutdown()
 {
+    // 종료 직전 UI 설정 + ImGui 도크 레이아웃 저장
+    if (ImGui::GetCurrentContext() != nullptr)
+    {
+        if (ImGuiDockNode* root = ImGui::DockBuilderGetNode(ImGui::GetID("EditorDockSpace")))
+            CaptureDockSplitRatios(root);
+        SaveUiSettings();
+        if (mImGuiIniPath[0] != '\0')
+            ImGui::SaveIniSettingsToDisk(mImGuiIniPath);
+    }
+
     mSceneViewport.Shutdown();
 
     ImGui_ImplDX12_Shutdown();
