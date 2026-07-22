@@ -25,6 +25,14 @@ public:
     void Begin(ID3D12GraphicsCommandList* cmdList, const float clearColor[4]);
     void End(ID3D12GraphicsCommandList* cmdList);
 
+    // Play mode: copy color RT into swapchain backbuffer (same size/format).
+    // backbuffer must not be the same resource; transitions color and backbuffer as needed.
+    // After call: color is COPY_SOURCE, backbuffer is COPY_DEST (caller transitions to PRESENT).
+    void CopyColorTo(
+        ID3D12GraphicsCommandList* cmdList,
+        ID3D12Resource* dest,
+        D3D12_RESOURCE_STATES destStateBefore);
+
     bool IsValid() const { return mColor != nullptr && mWidth > 0 && mHeight > 0; }
     UINT GetWidth() const { return mWidth; }
     UINT GetHeight() const { return mHeight; }

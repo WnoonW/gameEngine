@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl.h>
@@ -86,6 +86,15 @@ public:
 
     UINT GetDesiredSceneWidth() const { return mDesiredSceneWidth; }
     UINT GetDesiredSceneHeight() const { return mDesiredSceneHeight; }
+    void SetDesiredSceneSize(UINT width, UINT height)
+    {
+        mDesiredSceneWidth = width == 0 ? 1u : width;
+        mDesiredSceneHeight = height == 0 ? 1u : height;
+    }
+
+    // true: skip editor dock UI (play / exported game)
+    void SetPlayMode(bool play) { mPlayMode = play; }
+    bool IsPlayMode() const { return mPlayMode; }
 
     // Scene 패널(Image) 클릭/영역 정보 — 카메라 마우스 고정 진입에 사용
     bool ConsumeSceneCaptureClick();
@@ -133,6 +142,7 @@ private:
     DescriptorAllocator* m_DescriptorAllocator = nullptr;
 
     bool mManipulateSelected = false;
+    bool mPlayMode = false;
 
     // View 메뉴로 열고 닫는 패널 (X로 닫으면 꺼짐, View에서 다시 켬)
     bool mShowScene = true;

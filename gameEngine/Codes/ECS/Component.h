@@ -14,15 +14,15 @@ namespace ECS {
 
 } // namespace ECS
 
-// Component.h에 추가
 namespace ECS {
+
+    // Must be declared before GetComponentTypeID (template ODR uses this at first instantiation).
+    inline ComponentTypeID sNextComponentID = 0;
 
     template<typename T>
     ComponentTypeID GetComponentTypeID() {
         static ComponentTypeID id = sNextComponentID++;
         return id;
     }
-
-    inline ComponentTypeID sNextComponentID = 0;
 
 } // namespace ECS

@@ -108,7 +108,28 @@ ComPtr<ID3DBlob> d3dUtil::CompileShader(
 	if(errors != nullptr)
 		OutputDebugStringA((char*)errors->GetBufferPointer());
 
-	ThrowIfFailed(hr);
+	if (FAILED(hr))
+	{
+		// 상대 경로 실패 시 원인을 명확히 (추출 패키지 Resources 누락 등)
+		char cwd[MAX_PATH] = {};
+		GetCurrentDirectoryA(MAX_PATH, cwd);
+		std::wstring msg = L"D3DCompileFromFile failed for:\n";
+		msg += filename;
+		msg += L"\n\nEntry: ";
+		msg += std::wstring(entrypoint.begin(), entrypoint.end());
+		msg += L"\n\nWorking directory:\n";
+		msg += std::wstring(cwd, cwd + strlen(cwd));
+		msg += L"\n\nMake sure Resources\\Shaders exists next to the game,\n"
+			L"or re-export from the editor (File > Export Game).";
+		if (errors)
+		{
+			const char* errA = static_cast<const char*>(errors->GetBufferPointer());
+			msg += L"\n\n";
+			msg += std::wstring(errA, errA + strlen(errA));
+		}
+		MessageBoxW(nullptr, msg.c_str(), L"Shader file error", MB_OK | MB_ICONERROR);
+		ThrowIfFailed(hr);
+	}
 
 	return byteCode;
 }

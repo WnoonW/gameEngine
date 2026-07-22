@@ -79,11 +79,22 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
+  <!-- Shared compile settings: UTF-8 fixes C4819 / false errors from Korean comments -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <!-- false: CD3DX12 temporary helpers need address-of-temporary (C2102 under full conformance) -->
+      <ConformanceMode>false</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)Codes;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;D:\Study\API\imgui-docking\imgui-docking;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <WarningLevel>Level3</WarningLevel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -96,22 +107,20 @@
     <ClCompile>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <LanguageStandard>stdcpp20</LanguageStandard>
-      <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\API\imgui-docking\imgui-docking;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <!-- Keep output Resources in sync with project (shaders/textures/assets) -->
+    <PostBuildEvent>
+      <Command>xcopy /Y /E /I /D "$(ProjectDir)Resources\*" "$(OutDir)Resources\" &gt;nul</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
@@ -128,16 +137,12 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <LanguageStandard>stdcpp20</LanguageStandard>
-      <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Study\MyPrograms\OneMore\gameEngine\gameEngine\Codes;D:\Study\API\imgui-docking\imgui-docking;$(ProjectDir)Codes\Common;$(ProjectDir)Codes\ECS;$(ProjectDir)Codes\Engine;$(ProjectDir)Codes\File_IO;$(ProjectDir)Codes\Managers;$(ProjectDir)Codes\Memory;$(ProjectDir)Codes\Structs;$(ProjectDir)Codes\Systems;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -145,6 +150,9 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /E /I /D "$(ProjectDir)Resources\*" "$(OutDir)Resources\" &gt;nul</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -167,6 +175,8 @@
     <ClCompile Include="Codes\Engine\Engine.cpp" />
     <ClCompile Include="Codes\File_IO\ResourceLoader.cpp" />
     <ClCompile Include="Codes\File_IO\SceneSerializer.cpp" />
+    <ClCompile Include="Codes\File_IO\GameConfig.cpp" />
+    <ClCompile Include="Codes\File_IO\GameExporter.cpp" />
     <ClCompile Include="Codes\Managers\ImGuiManager.cpp" />
     <ClCompile Include="Codes\Managers\SceneViewport.cpp" />
     <ClCompile Include="Codes\Managers\MaterialManager.cpp" />
@@ -204,10 +214,13 @@
     <ClInclude Include="Codes\ECS\ComponentStruct.h" />
     <ClInclude Include="Codes\ECS\Entity.h" />
     <ClInclude Include="Codes\ECS\Registry.h" />
+    <ClInclude Include="Codes\ECS\TransformDirtyTracker.h" />
     <ClInclude Include="Codes\ECS\World.h" />
     <ClInclude Include="Codes\Engine\Engine.h" />
     <ClInclude Include="Codes\File_IO\ResourceLoader.h" />
     <ClInclude Include="Codes\File_IO\SceneSerializer.h" />
+    <ClInclude Include="Codes\File_IO\GameConfig.h" />
+    <ClInclude Include="Codes\File_IO\GameExporter.h" />
     <ClInclude Include="Codes\Managers\ImGuiManager.h" />
     <ClInclude Include="Codes\Managers\SceneViewport.h" />
     <ClInclude Include="Codes\Managers\MaterialManager.h" />

@@ -251,3 +251,28 @@ void SceneViewport::End(ID3D12GraphicsCommandList* cmdList)
         mDepthState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     }
 }
+
+void SceneViewport::CopyColorTo(
+    ID3D12GraphicsCommandList* cmdList,
+    ID3D12Resource* dest,
+    D3D12_RESOURCE_STATES destStateBefore)
+{
+    assert(cmdList);
+    assert(dest);
+    assert(IsValid());
+
+    if (mColorState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            mColor.Get(), mColorState, D3D12_RESOURCE_STATE_COPY_SOURCE));
+        mColorState = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    }
+
+    if (destStateBefore != D3D12_RESOURCE_STATE_COPY_DEST)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            dest, destStateBefore, D3D12_RESOURCE_STATE_COPY_DEST));
+    }
+
+    cmdList->CopyResource(dest, mColor.Get());
+}

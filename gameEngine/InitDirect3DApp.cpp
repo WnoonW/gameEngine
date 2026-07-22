@@ -7,6 +7,8 @@
 #include "d3dApp.h"
 #include "DescriptorAllocator.h"
 #include "ImGuiManager.h"
+#include "GameConfig.h"
+#include "SceneSerializer.h"
 #include "Engine.h"
 #include "Entity.h"
 #include "ComponentStruct.h"
@@ -75,6 +77,9 @@ public:
 	~InitDirect3DApp();
 
 	virtual bool Initialize()override;
+	void SetGameConfig(const GameConfig& cfg);
+	bool IsPlayMode() const { return mPlayMode; }
+
 private:
 	static DescriptorAllocator mGlobalDescriptorAllocator;
 	ImGuiManager mImGuiManager;
@@ -153,7 +158,22 @@ private:
 	// For picking
 	DirectX::XMMATRIX mCurrentView = DirectX::XMMatrixIdentity();
 	DirectX::XMMATRIX mCurrentProj = DirectX::XMMatrixIdentity();
+
+	// Play mode (exported game / --play): no editor UI, full-window 3D
+	bool mPlayMode = false;
+	GameConfig mGameConfig{};
+	std::string mPendingSceneLoad; // absolute or relative path after assets ready
 };
+
+void InitDirect3DApp::SetGameConfig(const GameConfig& cfg)
+{
+	mGameConfig = cfg;
+	mPlayMode = (cfg.mode == GameConfig::Mode::Play);
+	if (!cfg.scenePath.empty())
+		mPendingSceneLoad = GameConfig::JoinPath(GameConfig::GetExeDirectory(), cfg.scenePath);
+	if (!cfg.title.empty())
+		mMainWndCaption = std::wstring(cfg.title.begin(), cfg.title.end());
+}
 
 DescriptorAllocator InitDirect3DApp::mGlobalDescriptorAllocator;
 
@@ -167,7 +187,53 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
     try
     {
+        // Resources 경로 해석:
+        // - VS 디버그: 작업 디렉터리(프로젝트 루트)에 Resources 가 있으면 유지
+        // - 추출본: exe 옆 Resources 로 CWD 이동
+        GameConfig::SetWorkingDirectoryToExe();
+
+        // game.cfg + 커맨드라인
+        GameConfig gameCfg;
+        gameCfg.LoadFromExeDirectory(); // may set mode=play from export package
+        gameCfg.ApplyCommandLine(cmdLine); // --play / --editor
+
+        // 에디터 개발 폴더(editor_ui.cfg 있음)에서는 --play 없이 play 모드 강제하지 않음.
+        // (실수로 Debug 에 game.cfg 가 있어도 F5 디버그가 에디터로 뜨도록)
+        {
+            const DWORD editorMarker = GetFileAttributesA("editor_ui.cfg");
+            const bool hasEditorMarker =
+                (editorMarker != INVALID_FILE_ATTRIBUTES) &&
+                !(editorMarker & FILE_ATTRIBUTE_DIRECTORY);
+            // also check next to exe
+            const std::string exeEditor = GameConfig::JoinPath(GameConfig::GetExeDirectory(), "editor_ui.cfg");
+            const DWORD editorMarkerExe = GetFileAttributesA(exeEditor.c_str());
+            const bool hasEditorMarkerExe =
+                (editorMarkerExe != INVALID_FILE_ATTRIBUTES) &&
+                !(editorMarkerExe & FILE_ATTRIBUTE_DIRECTORY);
+
+            const bool cmdForcePlay =
+                cmdLine && (strstr(cmdLine, "--play") || strstr(cmdLine, "-play"));
+            if ((hasEditorMarker || hasEditorMarkerExe) && !cmdForcePlay)
+                gameCfg.mode = GameConfig::Mode::Editor;
+        }
+
+        // 플레이 모드인데 Resources 가 없으면 즉시 안내
+        if (gameCfg.mode == GameConfig::Mode::Play)
+        {
+            const DWORD attr = GetFileAttributesA("Resources");
+            if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                MessageBoxA(nullptr,
+                    "Resources folder not found.\n\n"
+                    "Run Play.bat from the export folder, or re-export the game\n"
+                    "(File > Export Game) so Resources is copied.",
+                    "Missing Resources", MB_OK | MB_ICONERROR);
+                return 1;
+            }
+        }
+
         InitDirect3DApp theApp(hInstance);
+        theApp.SetGameConfig(gameCfg);
         if(!theApp.Initialize())
             return 0;
 
@@ -176,6 +242,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
     catch(DxException& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
+        return 0;
+    }
+    catch (const std::exception& e)
+    {
+        MessageBoxA(nullptr, e.what(), "Exception", MB_OK | MB_ICONERROR);
         return 0;
     }
 }
@@ -201,7 +272,27 @@ bool InitDirect3DApp::Initialize()
 
 	InitializeCoreSystems();
 	LoadAssets();
-	CreateInitialScene();
+
+	if (mPlayMode && !mPendingSceneLoad.empty())
+	{
+		// 패키지 씬 로드 (실패 시 기본 씬)
+		std::string err;
+		if (!mEngine.LoadSceneFromFile(mPendingSceneLoad, &err))
+		{
+			OutputDebugStringA(("[Play] Load scene failed: " + err + "\n").c_str());
+			CreateInitialScene();
+		}
+		else
+		{
+			// 카메라만 보장
+			if (mMainCamera == INVALID_ENTITY)
+				mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -5.0f });
+		}
+	}
+	else
+	{
+		CreateInitialScene();
+	}
 
 	// Step G: Auto path (N>=32 → ComputeIndirect, else Instanced)
 	// 수동 고정: SetAutoRenderPathEnabled(false) 후 SetRenderPath(...)
@@ -215,12 +306,41 @@ bool InitDirect3DApp::Initialize()
 	mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 	FlushCommandQueue();
 
-	// 커맨드 리스트가 닫힌 뒤에 창 위치/크기 복원 (OnResize 안전)
-	mImGuiManager.ApplyMainWindowPlacement();
-	ProcessPendingResize();
-
-	// 에셋 로딩이 끝난 뒤에야 메인 창 표시 → 로딩 중 빈/기본 창이 안 보임
-	mImGuiManager.PresentMainWindow();
+	if (mPlayMode)
+	{
+		// 플레이 모드: 저장된 에디터 창 배치 무시, 바로 표시
+		mImGuiManager.SetPlayMode(true);
+		ProcessPendingResize();
+		ShowWindow(mhMainWnd, SW_SHOW);
+		UpdateWindow(mhMainWnd);
+		SetForegroundWindow(mhMainWnd);
+		// 표시 후 클라이언트 크기 반영 → 다음 프레임 Scene RT 맞춤
+		RECT cr{};
+		if (GetClientRect(mhMainWnd, &cr))
+		{
+			mClientWidth = (std::max)(1L, cr.right - cr.left);
+			mClientHeight = (std::max)(1L, cr.bottom - cr.top);
+			mPendingResize = true;
+			ProcessPendingResize();
+			mImGuiManager.SetDesiredSceneSize(
+				static_cast<UINT>(mClientWidth),
+				static_cast<UINT>(mClientHeight));
+			mImGuiManager.EnsureSceneViewport([this]() { FlushCommandQueue(); });
+		}
+		if (mGameConfig.mouseLookOnStart)
+		{
+			mMouseLookRequested = true;
+			SetMouseLookActive(true);
+		}
+	}
+	else
+	{
+		// 커맨드 리스트가 닫힌 뒤에 창 위치/크기 복원 (OnResize 안전)
+		mImGuiManager.ApplyMainWindowPlacement();
+		ProcessPendingResize();
+		// 에셋 로딩이 끝난 뒤에야 메인 창 표시 → 로딩 중 빈/기본 창이 안 보임
+		mImGuiManager.PresentMainWindow();
+	}
 
 	UpdateCamera(0.0f);
 	SyncMouseLookState();
@@ -256,9 +376,14 @@ void InitDirect3DApp::RegisterMouseRawInput()
 
 LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	// ESC: 마우스 룩/커서 고정만 해제. 프로그램은 종료하지 않는다.
+	// ESC: 에디터 = 마우스 룩 해제 / 플레이 모드 = 종료
 	if (msg == WM_KEYUP && wParam == VK_ESCAPE)
 	{
+		if (mPlayMode)
+		{
+			PostQuitMessage(0);
+			return 0;
+		}
 		if (mMouseLookRequested || mMouseLookActive)
 		{
 			mMouseLookRequested = false;
@@ -266,6 +391,14 @@ LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 			// 이유: 플래그만 끄면 다음 Sync/ACTIVATE에서 다시 켜질 수 있음.
 			SetMouseLookActive(false);
 		}
+		return 0;
+	}
+
+	// 플레이 모드: 창 아무 곳 LMB = 마우스 룩 재진입
+	if (mPlayMode && msg == WM_LBUTTONDOWN)
+	{
+		mMouseLookRequested = true;
+		SetMouseLookActive(true);
 		return 0;
 	}
 
@@ -315,50 +448,66 @@ LRESULT InitDirect3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 void InitDirect3DApp::Update(const GameTimer& gt)
 {
+	// ImGui 프레임은 플레이 모드에서도 돌린다 (WndProc 핸들러 / GetIO 사용).
+	// UI 패널만 그리지 않는다.
 	mImGuiManager.NewFrame();
-	mImGuiManager.SetupDockspace(&mEngine);
-	mImGuiManager.DrawEditorPanels(&mEngine);
 
-	// Inspector 체크박스 → 앱의 3인칭 조작 모드 동기화
-	mManipulateSelected = mImGuiManager.IsManipulateSelected();
-
-	// Scene 드래그 박스 다중 선택 (Shift = 추가 선택)
+	if (mPlayMode)
 	{
-		float bx0, by0, bx1, by1;
-		bool additive = false;
-		if (mImGuiManager.ConsumeBoxSelection(bx0, by0, bx1, by1, additive))
-		{
-			const SceneViewport& sceneVP = mImGuiManager.GetSceneViewport();
-			const float pickW = sceneVP.IsValid()
-				? static_cast<float>(sceneVP.GetWidth())
-				: static_cast<float>(mImGuiManager.GetDesiredSceneWidth());
-			const float pickH = sceneVP.IsValid()
-				? static_cast<float>(sceneVP.GetHeight())
-				: static_cast<float>(mImGuiManager.GetDesiredSceneHeight());
+		// 전체 창을 씬 해상도로 사용
+		mImGuiManager.SetDesiredSceneSize(
+			static_cast<UINT>((std::max)(1, mClientWidth)),
+			static_cast<UINT>((std::max)(1, mClientHeight)));
 
-			// UI 박스 좌표는 패널 픽셀 기준 → RT 해상도로 스케일
-			const float uiW = static_cast<float>((std::max)(1u, mImGuiManager.GetDesiredSceneWidth()));
-			const float uiH = static_cast<float>((std::max)(1u, mImGuiManager.GetDesiredSceneHeight()));
-			const float sx = pickW / uiW;
-			const float sy = pickH / uiH;
-
-			const size_t n = mEngine.SelectObjectsInRect(
-				bx0 * sx, by0 * sy, bx1 * sx, by1 * sy,
-				pickW, pickH,
-				mCurrentView, mCurrentProj,
-				additive);
-
-			char buf[96];
-			sprintf_s(buf, "[Select] box select count=%zu additive=%d\n", n, additive ? 1 : 0);
-			OutputDebugStringA(buf);
-		}
+		// 플레이: 항상 마우스 룩 (LMB로 재진입)
+		if (!mMouseLookActive && mMouseLookRequested)
+			SyncMouseLookState();
 	}
-
-	// Scene 짧은 좌클릭 → 마우스 룩 (드래그 선택은 위 박스 처리)
-	if (mImGuiManager.ConsumeSceneCaptureClick())
+	else
 	{
-		mMouseLookRequested = true;
-		SyncMouseLookState();
+		mImGuiManager.SetupDockspace(&mEngine);
+		mImGuiManager.DrawEditorPanels(&mEngine);
+
+		// Inspector 체크박스 → 앱의 3인칭 조작 모드 동기화
+		mManipulateSelected = mImGuiManager.IsManipulateSelected();
+
+		// Scene 드래그 박스 다중 선택 (Shift = 추가 선택)
+		{
+			float bx0, by0, bx1, by1;
+			bool additive = false;
+			if (mImGuiManager.ConsumeBoxSelection(bx0, by0, bx1, by1, additive))
+			{
+				const SceneViewport& sceneVP = mImGuiManager.GetSceneViewport();
+				const float pickW = sceneVP.IsValid()
+					? static_cast<float>(sceneVP.GetWidth())
+					: static_cast<float>(mImGuiManager.GetDesiredSceneWidth());
+				const float pickH = sceneVP.IsValid()
+					? static_cast<float>(sceneVP.GetHeight())
+					: static_cast<float>(mImGuiManager.GetDesiredSceneHeight());
+
+				const float uiW = static_cast<float>((std::max)(1u, mImGuiManager.GetDesiredSceneWidth()));
+				const float uiH = static_cast<float>((std::max)(1u, mImGuiManager.GetDesiredSceneHeight()));
+				const float sx = pickW / uiW;
+				const float sy = pickH / uiH;
+
+				const size_t n = mEngine.SelectObjectsInRect(
+					bx0 * sx, by0 * sy, bx1 * sx, by1 * sy,
+					pickW, pickH,
+					mCurrentView, mCurrentProj,
+					additive);
+
+				char buf[96];
+				sprintf_s(buf, "[Select] box select count=%zu additive=%d\n", n, additive ? 1 : 0);
+				OutputDebugStringA(buf);
+			}
+		}
+
+		// Scene 짧은 좌클릭 → 마우스 룩
+		if (mImGuiManager.ConsumeSceneCaptureClick())
+		{
+			mMouseLookRequested = true;
+			SyncMouseLookState();
+		}
 	}
 
 	float dt = gt.DeltaTime();
@@ -368,8 +517,6 @@ void InitDirect3DApp::Update(const GameTimer& gt)
 	UpdateCamera(dt);
 	mEngine.Update(dt);
 
-	// 패널 리사이즈로 Scene 영역이 바뀌면 clip rect도 다시 맞춰야 함.
-	// 이유: ClipCursor가 옛 Scene 박스에 묶여 있으면 커서가 어색하게 막힘.
 	SyncMouseLookState();
 }
 
@@ -516,7 +663,7 @@ void InitDirect3DApp::BeginFrame()
 	// 2. GPU가 이전 프레임 끝났는지 대기
 	if (mFence->GetCompletedValue() < mCurrFrameResource->FenceValue)
 	{
-		HANDLE eventHandle = CreateEventEx(nullptr, FALSE, FALSE, EVENT_ALL_ACCESS);
+		HANDLE eventHandle = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
 
 		ThrowIfFailed(mFence->SetEventOnCompletion(mCurrFrameResource->FenceValue, eventHandle));  // ← 이 줄 추가!!!
 		if (eventHandle != nullptr)
@@ -525,6 +672,14 @@ void InitDirect3DApp::BeginFrame()
 			WaitForSingleObject(eventHandle, INFINITE);
 			CloseHandle(eventHandle);
 		}
+	}
+
+	// 플레이 모드: 씬 RT를 클라이언트 전체 크기로 맞춤 (ImGui 패널 없음)
+	if (mPlayMode)
+	{
+		mImGuiManager.SetDesiredSceneSize(
+			static_cast<UINT>((std::max)(1, mClientWidth)),
+			static_cast<UINT>((std::max)(1, mClientHeight)));
 	}
 
 	// Scene RT 리사이즈는 커맨드 리스트가 열리기 전에 처리 (GPU idle 보장)
@@ -609,12 +764,35 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 		}
 	}
 
-	// === 2) 백버퍼에 ImGui (Scene 패널이 offscreen 결과를 Image로 표시) ===
-	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, nullptr);
-	mCommandList->RSSetViewports(1, &mScreenViewport);
-	mCommandList->RSSetScissorRects(1, &mScissorRect);
+	if (mPlayMode)
+	{
+		// === 2-play) Scene RT → 백버퍼 복사 (크기 불일치 시 복사 스킵) ===
+		if (sceneVP.IsValid()
+			&& sceneVP.GetWidth() == static_cast<UINT>(mClientWidth)
+			&& sceneVP.GetHeight() == static_cast<UINT>(mClientHeight))
+		{
+			sceneVP.CopyColorTo(
+				mCommandList.Get(),
+				CurrentBackBuffer(),
+				D3D12_RESOURCE_STATE_RENDER_TARGET);
+			// EndFrame 은 RENDER_TARGET → PRESENT 전이 가정
+			mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+				CurrentBackBuffer(),
+				D3D12_RESOURCE_STATE_COPY_DEST,
+				D3D12_RESOURCE_STATE_RENDER_TARGET));
+		}
+		// ImGui 프레임 종료 (그리기는 안 함)
+		ImGui::EndFrame();
+	}
+	else
+	{
+		// === 2) 백버퍼에 ImGui (Scene 패널이 offscreen 결과를 Image로 표시) ===
+		mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, nullptr);
+		mCommandList->RSSetViewports(1, &mScreenViewport);
+		mCommandList->RSSetScissorRects(1, &mScissorRect);
 
-	mImGuiManager.Render(mCommandList.Get());
+		mImGuiManager.Render(mCommandList.Get());
+	}
 }
 
 void InitDirect3DApp::EndFrame()
@@ -720,7 +898,11 @@ void InitDirect3DApp::LoadAssets()
 
 	if (!meshResult || !meshResult1 || !primOk)
 	{
-		MessageBoxA(nullptr, "Mesh Creation Failed!", "Error", MB_OK);
+		MessageBoxA(nullptr,
+			"Mesh Creation Failed!\n\n"
+			"Check that the Resources folder is next to the .exe\n"
+			"(Working directory must be the game folder).",
+			"Error", MB_OK | MB_ICONERROR);
 	}
 
 	// Step H: vertex-cluster LOD (forceRebuild once after algorithm change)

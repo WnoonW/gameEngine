@@ -5,6 +5,7 @@
 #include "Entity.h"
 #include "ComponentStruct.h"
 #include "SceneSerializer.h"
+#include "GameExporter.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
@@ -599,6 +600,54 @@ void ImGuiManager::DrawMainMenuBar(Engine* engine)
             }
         }
         ImGui::Separator();
+        if (ImGui::MenuItem("Export Game..."))
+        {
+            if (engine)
+            {
+                char titleBuf[128] = "MyGame";
+                // simple title from last scene name
+                if (!mLastScenePath.empty())
+                {
+                    try
+                    {
+                        const auto stem = std::filesystem::path(mLastScenePath).stem().string();
+                        if (!stem.empty())
+                            strncpy_s(titleBuf, stem.c_str(), _TRUNCATE);
+                    }
+                    catch (...) {}
+                }
+
+                std::string folder = GameExporter::BrowseForFolder(m_Hwnd,
+                    "Select parent folder for the game package");
+                if (!folder.empty())
+                {
+                    // export into <picked>/<title>
+                    std::string exportDir = folder;
+                    try
+                    {
+                        exportDir = (std::filesystem::path(folder) / titleBuf).string();
+                    }
+                    catch (...)
+                    {
+                        exportDir = GameExporter::SuggestExportDirectory(titleBuf);
+                    }
+
+                    const GameExportResult r = GameExporter::Export(m_Hwnd, *engine, exportDir, titleBuf);
+                    mSceneStatus = r.message;
+                    mSceneStatusIsError = !r.ok;
+                    if (r.ok)
+                        MessageBoxA(m_Hwnd, r.message.c_str(), "Export Game", MB_OK | MB_ICONINFORMATION);
+                    else
+                        MessageBoxA(m_Hwnd, r.message.c_str(), "Export Game Failed", MB_OK | MB_ICONERROR);
+                }
+            }
+            else
+            {
+                mSceneStatus = "Engine not available";
+                mSceneStatusIsError = true;
+            }
+        }
+        ImGui::Separator();
         if (!mLastScenePath.empty())
             ImGui::TextDisabled("%s", mLastScenePath.c_str());
         else
@@ -1174,6 +1223,9 @@ void ImGuiManager::AutosaveUiSettingsIfNeeded()
 
 void ImGuiManager::SetupDockspace(Engine* engine)
 {
+    if (mPlayMode)
+        return;
+
     DrawMainMenuBar(engine);
 
     ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1236,6 +1288,9 @@ void ImGuiManager::SetupDockspace(Engine* engine)
 
 void ImGuiManager::DrawEditorPanels(Engine* engine)
 {
+    if (mPlayMode)
+        return;
+
     const bool prevScene = mShowScene;
     const bool prevHierarchy = mShowHierarchy;
     const bool prevInspector = mShowInspector;
