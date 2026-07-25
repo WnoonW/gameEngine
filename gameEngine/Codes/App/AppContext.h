@@ -9,7 +9,25 @@
 class Engine;
 class ImGuiManager;
 
-// Non-owning handles into the host app (InitDirect3DApp).
+// Editor-only play session control (A: standalone Game.exe, B: in-editor PlayMode).
+// Implemented by AppHost; null in product Game.exe.
+class IEditorHost
+{
+public:
+    virtual ~IEditorHost() = default;
+
+    // B: switch EditorMode -> PlayMode (same process). Snapshot + restore on stop.
+    virtual bool PlayInEditor() = 0;
+    virtual void StopInEditorPlay() = 0;
+    virtual bool IsInEditorPlaying() const = 0;
+
+    // A: save scene and launch Game.exe as a child process.
+    virtual bool PlayStandalone() = 0;
+    virtual void StopStandalone() = 0;
+    virtual bool IsStandaloneRunning() const = 0;
+};
+
+// Non-owning handles into the host app.
 // Mode controllers read/write camera & client size through this.
 struct AppContext
 {
@@ -35,4 +53,7 @@ struct AppContext
     ECS::Entity* mainCamera = nullptr;
 
     const GameConfig* gameConfig = nullptr;
+
+    // Non-owning; set by AppHost in editor builds.
+    IEditorHost* editorHost = nullptr;
 };

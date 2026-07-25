@@ -40,6 +40,11 @@ public:
     // ImGui toolbar / panel actions
     void buttonClicked(ButtonAction action) override;
 
+    void SetCameraPose(float x, float y, float z, float pitch, float yaw)
+    {
+        mCamX = x; mCamY = y; mCamZ = z; mPhi = pitch; mTheta = yaw;
+    }
+
 private:
     void UpdateCamera(AppContext& ctx, float dt);
     void InitializeOrbitFromSelection(AppContext& ctx);

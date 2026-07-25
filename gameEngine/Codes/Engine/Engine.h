@@ -73,9 +73,10 @@ public:
         D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthSrvGpu,
         UINT width, UINT height);
 
-    // 엔티티 생성 (이름 기반)
+    // 엔티티 생성 (이름 기반).
+    // materialName empty = Main Material None (no override).
     Entity CreateRenderableEntity(const std::string& meshName,
-        const std::string& materialName,
+        const std::string& materialName = {},
         XMFLOAT3 position = { 0.0f, 0.0f, 0.0f });
 
     // ECS CameraComponent + TransformComponent 로부터 View/Proj 계산

@@ -6,6 +6,7 @@
 #include "ComponentStruct.h"
 #include "SceneSerializer.h"
 #include "GameExporter.h"
+#include "AppContext.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
@@ -424,7 +425,7 @@ namespace
     }
 
     if (!mSelectedMesh.empty()) {
-        const char* spawnMat = mSelectedMaterial.empty() ? "None (Init)" : mSelectedMaterial.c_str();
+        const char* spawnMat = mSelectedMaterial.empty() ? "None" : mSelectedMaterial.c_str();
         ImGui::Text("Spawn: %s / %s", mSelectedMesh.c_str(), spawnMat);
     }
 
@@ -923,6 +924,71 @@ void ImGuiManager::DrawMainMenuBar(Engine* engine)
             ImGui::TextDisabled("%s", mLastScenePath.c_str());
         else
             ImGui::TextDisabled("No scene file yet");
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Play"))
+    {
+        const bool hasHost = (mEditorHost != nullptr);
+        const bool inEditorPlay = hasHost && mEditorHost->IsInEditorPlaying();
+        const bool standaloneRun = hasHost && mEditorHost->IsStandaloneRunning();
+
+        if (!hasHost)
+            ImGui::TextDisabled("Play session unavailable");
+
+        // B: same process
+        if (ImGui::MenuItem("Play In Editor", "F5", false, hasHost && !inEditorPlay && !standaloneRun))
+        {
+            if (mEditorHost && mEditorHost->PlayInEditor())
+            {
+                mSceneStatus = "Play In Editor starting… ESC to stop (restores snapshot)";
+                mSceneStatusIsError = false;
+            }
+            else if (mEditorHost)
+            {
+                mSceneStatus = "Play In Editor failed";
+                mSceneStatusIsError = true;
+            }
+        }
+        if (ImGui::MenuItem("Stop In Editor", "Esc", false, hasHost && inEditorPlay))
+        {
+            if (mEditorHost)
+            {
+                mEditorHost->StopInEditorPlay();
+                mSceneStatus = "Stopping in-editor play...";
+                mSceneStatusIsError = false;
+            }
+        }
+
+        ImGui::Separator();
+
+        // A: Game.exe child
+        if (ImGui::MenuItem("Play Standalone (Game.exe)", "Ctrl+F5", false, hasHost && !inEditorPlay))
+        {
+            if (mEditorHost && mEditorHost->PlayStandalone())
+            {
+                mSceneStatus = "Standalone Game.exe launched (scene snapshot saved)";
+                mSceneStatusIsError = false;
+            }
+            else if (mEditorHost)
+            {
+                mSceneStatus = "Play Standalone failed (is Game.exe built?)";
+                mSceneStatusIsError = true;
+            }
+        }
+        if (ImGui::MenuItem("Stop Standalone", nullptr, false, hasHost && standaloneRun))
+        {
+            if (mEditorHost)
+            {
+                mEditorHost->StopStandalone();
+                mSceneStatus = "Standalone Game.exe stopped";
+                mSceneStatusIsError = false;
+            }
+        }
+
+        ImGui::Separator();
+        ImGui::TextDisabled("In Editor = B (same process)");
+        ImGui::TextDisabled("Standalone = A (real Game.exe)");
         ImGui::EndMenu();
     }
 
@@ -2468,6 +2534,8 @@ void ImGuiManager::DrawHelpContent()
     BulletLine("Project: pick mesh + material, then Spawn");
     BulletLine("Tools: 3rd-person manipulate mode");
     BulletLine("Render: path, cull, LOD, frame stats");
+    BulletLine("Play menu: Play In Editor (F5) / Standalone Game.exe (Ctrl+F5)");
+    BulletLine("In-editor play: ESC stops and restores the scene snapshot");
 
     ImGui::Spacing();
     ImGui::Separator();

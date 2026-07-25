@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 std::string GameConfig::GetExeDirectory()
 {
@@ -148,36 +149,48 @@ void GameConfig::ApplyCommandLine(const char* cmdLine)
     if (!cmdLine || !*cmdLine)
         return;
 
-    std::string cmd = cmdLine;
-    // crude tokenize
-    std::istringstream iss(cmd);
-    std::string token;
-    while (iss >> token)
+    // Tokenize preserving quoted paths: --scene "Scenes/my scene.scene"
+    std::vector<std::string> tokens;
     {
+        const char* p = cmdLine;
+        while (*p)
+        {
+            while (*p == ' ' || *p == '\t')
+                ++p;
+            if (!*p)
+                break;
+            if (*p == '"')
+            {
+                ++p;
+                std::string t;
+                while (*p && *p != '"')
+                    t.push_back(*p++);
+                if (*p == '"')
+                    ++p;
+                tokens.push_back(std::move(t));
+            }
+            else
+            {
+                std::string t;
+                while (*p && *p != ' ' && *p != '\t')
+                    t.push_back(*p++);
+                tokens.push_back(std::move(t));
+            }
+        }
+    }
+
+    for (size_t i = 0; i < tokens.size(); ++i)
+    {
+        const std::string& token = tokens[i];
         if (token == "--play" || token == "-play")
             mode = Mode::Play;
         else if (token == "--editor" || token == "-editor")
             mode = Mode::Editor;
         else if (token == "--scene" || token == "-scene")
         {
-            std::string path;
-            if (iss >> path)
+            if (i + 1 < tokens.size())
             {
-                // strip quotes
-                if (!path.empty() && path.front() == '"')
-                {
-                    path.erase(path.begin());
-                    while (!path.empty() && path.back() != '"')
-                    {
-                        std::string more;
-                        if (!(iss >> more))
-                            break;
-                        path += " " + more;
-                    }
-                    if (!path.empty() && path.back() == '"')
-                        path.pop_back();
-                }
-                scenePath = path;
+                scenePath = tokens[++i];
                 mode = Mode::Play;
             }
         }

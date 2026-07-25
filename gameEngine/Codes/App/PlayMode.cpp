@@ -105,11 +105,17 @@ void PlayMode::OnResize(AppContext& /*ctx*/)
         mMouseLook.RefreshPlacement();
 }
 
-bool PlayMode::OnMsg(AppContext& /*ctx*/, HWND /*hwnd*/, UINT msg, WPARAM wParam, LPARAM lParam)
+bool PlayMode::OnMsg(AppContext& ctx, HWND /*hwnd*/, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    // ESC: quit game
+    // ESC: product Game.exe quits; in-editor session requests Stop (deferred on host).
     if (msg == WM_KEYUP && wParam == VK_ESCAPE)
     {
+        if (mEmbeddedInEditor)
+        {
+            if (ctx.editorHost)
+                ctx.editorHost->StopInEditorPlay();
+            return true;
+        }
         PostQuitMessage(0);
         return true;
     }

@@ -4,15 +4,18 @@
 #include "AppHost.h"
 #include <DirectXColors.h>
 #include <cmath>
+#include <cctype>
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <filesystem>
 #include "MeshManager.h"
 #include "MaterialManager.h"
 #include "DefaultAssets.h"
 #include "EditorMode.h"
 #include "PlayMode.h"
 #include "FlyCameraMath.h"
+#include "SceneSerializer.h"
 #include "d3dx12.h"
 
 using namespace DirectX;
@@ -24,7 +27,16 @@ void AppHost::SetGameConfig(const GameConfig& cfg)
 	mGameConfig = cfg;
 	mPlayMode = (cfg.mode == GameConfig::Mode::Play);
 	if (!cfg.scenePath.empty())
-		mPendingSceneLoad = GameConfig::JoinPath(GameConfig::GetExeDirectory(), cfg.scenePath);
+	{
+		// Absolute path (drive letter or UNC) — use as-is; else relative to exe dir.
+		const bool absWin =
+			(cfg.scenePath.size() >= 2 && std::isalpha(static_cast<unsigned char>(cfg.scenePath[0])) && cfg.scenePath[1] == ':')
+			|| (cfg.scenePath.size() >= 2 && cfg.scenePath[0] == '\\' && cfg.scenePath[1] == '\\');
+		if (absWin)
+			mPendingSceneLoad = cfg.scenePath;
+		else
+			mPendingSceneLoad = GameConfig::JoinPath(GameConfig::GetExeDirectory(), cfg.scenePath);
+	}
 	if (!cfg.title.empty())
 		mMainWndCaption = std::wstring(cfg.title.begin(), cfg.title.end());
 }
@@ -55,6 +67,258 @@ void AppHost::BuildAppContext()
 	mCtx.currentProj = &mCurrentProj;
 	mCtx.mainCamera = &mMainCamera;
 	mCtx.gameConfig = &mGameConfig;
+	// Editor session hooks only when this process is the editor product.
+	mCtx.editorHost = mPlayMode ? nullptr : static_cast<IEditorHost*>(this);
+}
+
+std::string AppHost::MakeScenesTempPath(const char* fileName)
+{
+	return GameConfig::JoinPath(SceneSerializer::DefaultScenesDirectory(), fileName);
+}
+
+void AppHost::CaptureModeCamera()
+{
+	if (!mMode)
+		return;
+	mMode->GetCameraPose(mSnapCamX, mSnapCamY, mSnapCamZ, mSnapCamPitch, mSnapCamYaw);
+}
+
+bool AppHost::SavePlaySnapshot(const std::string& absolutePath, std::string* outError)
+{
+	std::error_code ec;
+	std::filesystem::create_directories(std::filesystem::path(absolutePath).parent_path(), ec);
+	if (!mEngine.SaveSceneToFile(absolutePath, "play_snapshot"))
+	{
+		if (outError)
+			*outError = "Failed to save scene snapshot: " + absolutePath;
+		return false;
+	}
+	return true;
+}
+
+bool AppHost::RestorePlaySnapshot(const std::string& absolutePath, std::string* outError)
+{
+	if (!mEngine.LoadSceneFromFile(absolutePath, outError))
+		return false;
+	if (mMainCamera == INVALID_ENTITY)
+		mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -5.0f });
+	return true;
+}
+
+void AppHost::CloseStandaloneProcess(bool terminate)
+{
+	if (!mStandaloneProcess)
+		return;
+	if (terminate && WaitForSingleObject(mStandaloneProcess, 0) == WAIT_TIMEOUT)
+		TerminateProcess(mStandaloneProcess, 0);
+	CloseHandle(mStandaloneProcess);
+	mStandaloneProcess = nullptr;
+}
+
+bool AppHost::IsStandaloneRunning() const
+{
+	if (!mStandaloneProcess)
+		return false;
+	const DWORD wait = WaitForSingleObject(mStandaloneProcess, 0);
+	return wait == WAIT_TIMEOUT;
+}
+
+bool AppHost::PlayStandalone()
+{
+	if (mPlayMode)
+		return false;
+	if (mInEditorPlaying)
+	{
+		MessageBoxA(mhMainWnd,
+			"Stop in-editor Play (ESC) before launching standalone Game.exe.",
+			"Play Standalone", MB_OK | MB_ICONINFORMATION);
+		return false;
+	}
+
+	// Reap finished child
+	if (mStandaloneProcess && !IsStandaloneRunning())
+		CloseStandaloneProcess(false);
+
+	if (IsStandaloneRunning())
+	{
+		// Bring existing game window to front is hard without hwnd; relaunch after stop.
+		const int r = MessageBoxA(mhMainWnd,
+			"Game.exe is already running.\n\nStop it and launch again?",
+			"Play Standalone", MB_YESNO | MB_ICONQUESTION);
+		if (r != IDYES)
+			return false;
+		CloseStandaloneProcess(true);
+	}
+
+	const std::string absScene = MakeScenesTempPath("_play_standalone.scene");
+	const std::string relScene = "Scenes/_play_standalone.scene";
+	std::string err;
+	if (!SavePlaySnapshot(absScene, &err))
+	{
+		MessageBoxA(mhMainWnd, err.c_str(), "Play Standalone Failed", MB_OK | MB_ICONERROR);
+		return false;
+	}
+
+	const std::string gameExe = GameConfig::JoinPath(GameConfig::GetExeDirectory(), "Game.exe");
+	const DWORD attr = GetFileAttributesA(gameExe.c_str());
+	if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY))
+	{
+		MessageBoxA(mhMainWnd,
+			"Game.exe not found next to the editor.\n\n"
+			"Build the Game project (same configuration as Editor),\n"
+			"so bin\\x64\\<Config>\\Game.exe exists.",
+			"Play Standalone Failed", MB_OK | MB_ICONERROR);
+		return false;
+	}
+
+	// Command line: first token is exe path (CreateProcess requirement when lpApplicationName is null).
+	std::string cmdLine = "\"" + gameExe + "\" --scene \"" + relScene + "\"";
+	std::vector<char> cmdBuf(cmdLine.begin(), cmdLine.end());
+	cmdBuf.push_back('\0');
+
+	STARTUPINFOA si{};
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi{};
+
+	// Inherit editor working directory (Resources resolution).
+	const BOOL ok = CreateProcessA(
+		nullptr,
+		cmdBuf.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		0,
+		nullptr,
+		nullptr,
+		&si,
+		&pi);
+	if (!ok)
+	{
+		char buf[256];
+		sprintf_s(buf, "CreateProcess failed (error %lu).", GetLastError());
+		MessageBoxA(mhMainWnd, buf, "Play Standalone Failed", MB_OK | MB_ICONERROR);
+		return false;
+	}
+
+	CloseHandle(pi.hThread);
+	mStandaloneProcess = pi.hProcess;
+	OutputDebugStringA(("[Editor] Play Standalone: " + cmdLine + "\n").c_str());
+	return true;
+}
+
+void AppHost::StopStandalone()
+{
+	CloseStandaloneProcess(true);
+}
+
+bool AppHost::PlayInEditor()
+{
+	if (mPlayMode)
+		return false;
+	// Already playing or start already queued (menu is inside EditorMode::OnUpdate —
+	// must NOT destroy mMode until after OnUpdate returns).
+	if (mInEditorPlaying || mPendingStartInEditorPlay)
+		return true;
+
+	if (IsStandaloneRunning())
+	{
+		MessageBoxA(mhMainWnd,
+			"Standalone Game.exe is running.\nStop it first (Play menu → Stop Standalone).",
+			"Play In Editor", MB_OK | MB_ICONINFORMATION);
+		return false;
+	}
+
+	mInEditorSnapshotPath = MakeScenesTempPath("_editor_play_snapshot.scene");
+	std::string err;
+	if (!SavePlaySnapshot(mInEditorSnapshotPath, &err))
+	{
+		MessageBoxA(mhMainWnd, err.c_str(), "Play In Editor Failed", MB_OK | MB_ICONERROR);
+		return false;
+	}
+
+	CaptureModeCamera();
+	mPendingStopInEditorPlay = false;
+	mPendingStartInEditorPlay = true;
+	OutputDebugStringA("[Editor] Play In Editor queued (applies after frame update).\n");
+	return true;
+}
+
+void AppHost::StopInEditorPlay()
+{
+	// Cancel a start that has not applied yet.
+	if (mPendingStartInEditorPlay && !mInEditorPlaying)
+	{
+		mPendingStartInEditorPlay = false;
+		return;
+	}
+	// May be called from PlayMode::OnMsg — defer mode swap until after Update/Msg.
+	if (!mInEditorPlaying)
+		return;
+	mPendingStopInEditorPlay = true;
+}
+
+void AppHost::ApplyDeferredSessionActions()
+{
+	// Prefer stop over start if both somehow queued.
+	if (mPendingStopInEditorPlay)
+	{
+		mPendingStopInEditorPlay = false;
+		mPendingStartInEditorPlay = false;
+		if (mInEditorPlaying)
+		{
+			if (mMode)
+			{
+				mMode->OnDestroy(mCtx);
+				mMode.reset();
+			}
+
+			std::string err;
+			if (!RestorePlaySnapshot(mInEditorSnapshotPath, &err))
+			{
+				OutputDebugStringA(("[Editor] Snapshot restore failed: " + err + "\n").c_str());
+				if (mMainCamera == INVALID_ENTITY)
+					mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -5.0f });
+			}
+
+			auto editor = std::make_unique<EditorMode>();
+			editor->SetCameraPose(mSnapCamX, mSnapCamY, mSnapCamZ, mSnapCamPitch, mSnapCamYaw);
+			mMode = std::move(editor);
+			mInEditorPlaying = false;
+
+			if (auto* ed = dynamic_cast<EditorMode*>(mMode.get()))
+				mImGuiManager.SetCallback(ed);
+
+			if (mMode)
+				mMode->OnAfterInit(mCtx);
+
+			OutputDebugStringA("[Editor] Play In Editor stopped; scene snapshot restored.\n");
+		}
+	}
+
+	if (mPendingStartInEditorPlay)
+	{
+		mPendingStartInEditorPlay = false;
+		if (mPlayMode || mInEditorPlaying)
+			return;
+
+		if (mMode)
+		{
+			mMode->OnDestroy(mCtx);
+			mMode.reset();
+		}
+		mImGuiManager.SetCallback(nullptr);
+
+		auto play = std::make_unique<PlayMode>();
+		play->SetEmbeddedInEditor(true);
+		play->SetCameraPose(mSnapCamX, mSnapCamY, mSnapCamZ, mSnapCamPitch, mSnapCamYaw);
+		mMode = std::move(play);
+		mInEditorPlaying = true;
+
+		if (mMode)
+			mMode->OnAfterInit(mCtx);
+
+		OutputDebugStringA("[Editor] Play In Editor started (ESC = Stop).\n");
+	}
 }
 
 void AppHost::CreateModeController()
@@ -139,6 +403,7 @@ bool AppHost::Initialize()
 		// Route ImGui toolbar actions to EditorMode.
 		if (auto* editor = dynamic_cast<EditorMode*>(mMode.get()))
 			mImGuiManager.SetCallback(editor);
+		mImGuiManager.SetEditorHost(static_cast<IEditorHost*>(this));
 	}
 
 	if (mMode)
@@ -194,6 +459,13 @@ void AppHost::Update(const GameTimer& gt)
 
 	if (mMode)
 		mMode->OnUpdate(mCtx, dt);
+
+	// B: ESC during embedded play requests stop mid-frame — apply after mode update.
+	ApplyDeferredSessionActions();
+
+	// Reap standalone child when it exits (no zombie handle).
+	if (mStandaloneProcess && !IsStandaloneRunning())
+		CloseStandaloneProcess(false);
 
 	mEngine.Update(dt);
 }
@@ -346,7 +618,8 @@ void AppHost::LoadAssets()
 void AppHost::CreateInitialScene()
 {
 	mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -5.0f });
-	mEngine.CreateRenderableEntity("bibian", "Test", { 0.0f, 0.0f, 0.0f });
+	// Main material left empty (None) unless the user assigns one.
+	mEngine.CreateRenderableEntity("bibian", "", { 0.0f, 0.0f, 0.0f });
 }
 
 void AppHost::OnMouseDown(WPARAM btnState, int x, int y)
@@ -375,6 +648,17 @@ void AppHost::OnMouseWheel(short wheelDelta, int x, int y)
 
 void AppHost::OnKeyDown(WPARAM key)
 {
+	// Editor shortcuts: F5 = Play In Editor, Ctrl+F5 = Play Standalone
+	if (!mPlayMode && key == VK_F5)
+	{
+		const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+		if (ctrl)
+			PlayStandalone();
+		else if (!mInEditorPlaying)
+			PlayInEditor();
+		return;
+	}
+
 	if (mMode)
 		mMode->OnKeyDown(mCtx, key);
 }
@@ -387,9 +671,14 @@ void AppHost::OnKeyUp(WPARAM key)
 
 void AppHost::OnDestroy()
 {
+	CloseStandaloneProcess(true);
+
 	if (mMode)
 		mMode->OnDestroy(mCtx);
 	mMode.reset();
+	mInEditorPlaying = false;
+	mPendingStartInEditorPlay = false;
+	mPendingStopInEditorPlay = false;
 
 	FlushCommandQueue();
 

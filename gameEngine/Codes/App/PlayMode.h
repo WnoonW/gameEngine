@@ -5,11 +5,21 @@
 #include <DirectXMath.h>
 
 // Exported game / --play: no editor UI, full-window 3D, freefly only.
+// When embedded in the editor (B), ESC requests Stop instead of quitting the process.
 class PlayMode : public IAppMode
 {
 public:
     PlayMode() = default;
     ~PlayMode() override = default;
+
+    // true: in-editor session (ESC -> StopInEditorPlay). false: product Game.exe (ESC -> quit).
+    void SetEmbeddedInEditor(bool embedded) { mEmbeddedInEditor = embedded; }
+    bool IsEmbeddedInEditor() const { return mEmbeddedInEditor; }
+
+    void SetCameraPose(float x, float y, float z, float pitch, float yaw)
+    {
+        mCamX = x; mCamY = y; mCamZ = z; mPhi = pitch; mTheta = yaw;
+    }
 
     void OnAfterInit(AppContext& ctx) override;
     void OnUpdate(AppContext& ctx, float dt) override;
@@ -40,6 +50,7 @@ private:
 
     MouseLookCapture mMouseLook;
     bool mMouseLookRequested = true;
+    bool mEmbeddedInEditor = false;
     float mPendingMouseDx = 0.0f;
     float mPendingMouseDy = 0.0f;
     float mMouseSensitivity = 0.12f;

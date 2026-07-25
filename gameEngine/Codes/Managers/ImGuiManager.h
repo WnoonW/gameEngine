@@ -38,6 +38,7 @@ public:
 
 
 class Engine;
+class IEditorHost;
 
 class ImGuiManager
 {
@@ -99,6 +100,9 @@ public:
     // Rebind toolbar callbacks (e.g. EditorMode after host init).
     void SetCallback(IFunctionCallback* callback) { m_Callback = callback; }
 
+    // Editor Play menu (A/B session control). Null in product Game.exe.
+    void SetEditorHost(IEditorHost* host) { mEditorHost = host; }
+
     // Scene 패널(Image) 클릭/영역 정보 — 카메라 마우스 고정 진입에 사용
     bool ConsumeSceneCaptureClick();
     bool IsSceneHovered() const { return mSceneHovered; }
@@ -151,6 +155,7 @@ private:
     ID3D12Device* m_Device = nullptr;
     HWND m_Hwnd = nullptr;
     IFunctionCallback* m_Callback = nullptr;
+    IEditorHost* mEditorHost = nullptr;
     DescriptorAllocator* m_DescriptorAllocator = nullptr;
 
     bool mManipulateSelected = false;

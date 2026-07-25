@@ -296,7 +296,7 @@ void EditorMode::OnKeyDown(AppContext& ctx, WPARAM wParam)
             0.0f,
             radius * std::sin(angle)
         };
-        ctx.engine->CreateRenderableEntity("bibian", "Test", pos);
+        ctx.engine->CreateRenderableEntity("bibian", "", pos);
         ++mSpiralIndex;
     }
 }
@@ -486,7 +486,7 @@ void EditorMode::buttonClicked(ButtonAction action)
 
     if (action == ButtonAction::SpawnTestObject)
     {
-        ctx.engine->CreateRenderableEntity("bibian", "Test", { 0, 1, 0 });
+        ctx.engine->CreateRenderableEntity("bibian", "", { 0, 1, 0 });
     }
     else if (action == ButtonAction::ToggleManipulateSelected)
     {

@@ -593,9 +593,9 @@ Entity Engine::CreateRenderableEntity(const std::string& meshName,
         mWorld.AddComponent(entity, std::move(lod));
     }
 
-    // 스폰 시 선택한 Main Material 적용 (비어 있으면 메시 init / Default 사용)
-    if (!materialName.empty())
-        SetEntityMainMaterial(entity, materialName);
+    // Main material: empty string = None (no main override; draw uses mesh init / Default).
+    // Callers that want a specific material must pass it explicitly (not a hidden default like "Test").
+    SetEntityMainMaterial(entity, materialName);
 
     NotifyRenderableListChanged();
     return entity;
