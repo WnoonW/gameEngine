@@ -96,6 +96,9 @@ public:
     void SetPlayMode(bool play) { mPlayMode = play; }
     bool IsPlayMode() const { return mPlayMode; }
 
+    // Rebind toolbar callbacks (e.g. EditorMode after host init).
+    void SetCallback(IFunctionCallback* callback) { m_Callback = callback; }
+
     // Scene 패널(Image) 클릭/영역 정보 — 카메라 마우스 고정 진입에 사용
     bool ConsumeSceneCaptureClick();
     bool IsSceneHovered() const { return mSceneHovered; }
@@ -125,6 +128,15 @@ private:
     void DrawRenderContent(Engine* engine);
     void DrawHelpContent();
     void DrawToolsContent();
+
+    // ImGui file/folder picker (no Win32 common dialog / shell browser — avoids VS Output noise)
+    enum class PathDialogMode { None, SaveScene, LoadScene, ExportFolder };
+    void OpenPathDialog(PathDialogMode mode);
+    void RefreshPathDialogListing();
+    void DrawPathDialog(Engine* engine);
+    static std::string JoinPathDialog(const std::string& dir, const std::string& name);
+    static std::string ParentPathDialog(const std::string& dir);
+    static std::string DefaultScenesDirForDialog();
 
     // UI 설정 저장/불러오기 (exe 옆 editor_ui.cfg + imgui.ini)
     void ResolveConfigPaths();
@@ -192,6 +204,15 @@ private:
     std::string mLastScenePath;
     std::string mSceneStatus;
     bool mSceneStatusIsError = false;
+
+    PathDialogMode mPathDialogMode = PathDialogMode::None;
+    std::string mPathDialogDir;
+    std::string mPathDialogFileName; // save filename / selected file
+    char mPathDialogExportTitle[128] = "MyGame";
+    std::vector<std::string> mPathDialogDirs;
+    std::vector<std::string> mPathDialogFiles;
+    int mPathDialogSelected = -1; // index into combined list (-1 none)
+    bool mPathDialogOpenPopup = false;
 
     SceneViewport mSceneViewport;
     UINT mDesiredSceneWidth = 1;

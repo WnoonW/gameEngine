@@ -1,0 +1,40 @@
+# Build outputs
+bin/
+obj/
+x64/
+**/x64/
+*.exe
+*.pdb
+*.ilk
+*.iobj
+*.ipdb
+*.lib
+*.exp
+*.idb
+*.obj
+*.log
+*.tlog
+*.lastbuildstate
+*.recipe
+*.FileListAbsolute.txt
+
+# VS / user
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+
+# Runtime / local config next to exe
+**/imgui.ini
+**/editor_ui.cfg
+**/GameExport/
+
+# NuGet (keep packages.config; restore packages if needed)
+# packages/  # uncomment if packages are restored on each machine
+
+# OS
+Thumbs.db
+Desktop.ini

@@ -298,22 +298,12 @@ bool MeshManager::UploadAndRegisterMesh(const std::string& name, Mesh& mMesh,
 	mMesh.indexBuffer = d3dUtil::CreateDefaultBuffer(device, cmdList, allIndices.data(), ibByteSize, mMesh.indexUploadHeap);
 
 #ifdef _DEBUG
-	OutputDebugStringW(L"\n========================================\n");
-	OutputDebugStringW((L"[MeshManager] Loaded: " + std::wstring(name.begin(), name.end()) + L"\n").c_str());
-	OutputDebugStringW((L"  Total SubMeshes: " + std::to_wstring(mMesh.cpuModel.submeshes.size()) + L"\n").c_str());
-
-	for (size_t i = 0; i < mMesh.cpuModel.submeshes.size(); ++i)
 	{
-		const SubMesh& sub = mMesh.cpuModel.submeshes[i];
-
-		int len = MultiByteToWideChar(CP_UTF8, 0, sub.materialName.c_str(), -1, nullptr, 0);
-		std::wstring wMaterialName(len, L'\0');
-		MultiByteToWideChar(CP_UTF8, 0, sub.materialName.c_str(), -1, &wMaterialName[0], len);
-
-		std::wstring msg = L"  [" + std::to_wstring(i) + L"] initMaterialName = [" + wMaterialName + L"]\n";
-		OutputDebugStringW(msg.c_str());
+		char buf[256];
+		sprintf_s(buf, "[MeshManager] Loaded: %s (submeshes=%zu)\n",
+			name.c_str(), mMesh.cpuModel.submeshes.size());
+		OutputDebugStringA(buf);
 	}
-	OutputDebugStringW(L"\n========================================\n\n");
 #endif
 
 	for (size_t i = 0; i < offsets.size(); ++i)

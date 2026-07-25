@@ -32,9 +32,6 @@ public:
         const std::string& exportDir,
         const std::string& gameTitle);
 
-    // Folder picker (SHBrowseForFolder). Empty if cancelled.
-    static std::string BrowseForFolder(HWND owner, const char* title);
-
     // Suggest default export path: <exeDir>/GameExport/<title>
     static std::string SuggestExportDirectory(const std::string& gameTitle);
 };

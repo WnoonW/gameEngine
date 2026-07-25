@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="App"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000001}</UniqueIdentifier></Filter>
+    <Filter Include="Common"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000002}</UniqueIdentifier></Filter>
+    <Filter Include="ECS"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000003}</UniqueIdentifier></Filter>
+    <Filter Include="Engine"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000004}</UniqueIdentifier></Filter>
+    <Filter Include="File_IO"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000005}</UniqueIdentifier></Filter>
+    <Filter Include="Managers"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000006}</UniqueIdentifier></Filter>
+    <Filter Include="Memory"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000007}</UniqueIdentifier></Filter>
+    <Filter Include="Systems"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000008}</UniqueIdentifier></Filter>
+    <Filter Include="ImGui"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000009}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Codes\App\AppHost.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="..\Codes\App\DefaultAssets.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="..\Codes\App\EditorMode.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="..\Codes\App\PlayMode.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="..\Codes\App\MouseLookCapture.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Common\d3dApp.cpp"><Filter>Common</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Common\d3dUtil.cpp"><Filter>Common</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Common\DDSTextureLoader.cpp"><Filter>Common</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Common\GameTimer.cpp"><Filter>Common</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Common\GeometryGenerator.cpp"><Filter>Common</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Common\MathHelper.cpp"><Filter>Common</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Engine\Engine.cpp"><Filter>Engine</Filter></ClCompile>
+    <ClCompile Include="..\Codes\File_IO\ResourceLoader.cpp"><Filter>File_IO</Filter></ClCompile>
+    <ClCompile Include="..\Codes\File_IO\SceneSerializer.cpp"><Filter>File_IO</Filter></ClCompile>
+    <ClCompile Include="..\Codes\File_IO\GameConfig.cpp"><Filter>File_IO</Filter></ClCompile>
+    <ClCompile Include="..\Codes\File_IO\GameExporter.cpp"><Filter>File_IO</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\ImGuiManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\SceneViewport.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\MaterialManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\MeshManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\PipelineStateManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\ResourceManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\RootSignatureManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Managers\ShaderManager.cpp"><Filter>Managers</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Memory\DescriptorAllocator.cpp"><Filter>Memory</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Systems\RenderSystem.cpp"><Filter>Systems</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Systems\BoundsSystem.cpp"><Filter>Systems</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Systems\GravitySystem.cpp"><Filter>Systems</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Systems\CollisionSystem.cpp"><Filter>Systems</Filter></ClCompile>
+    <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\imgui.cpp"><Filter>ImGui</Filter></ClCompile>
+    <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\imgui_draw.cpp"><Filter>ImGui</Filter></ClCompile>
+    <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\imgui_tables.cpp"><Filter>ImGui</Filter></ClCompile>
+    <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\imgui_widgets.cpp"><Filter>ImGui</Filter></ClCompile>
+    <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\backends\imgui_impl_dx12.cpp"><Filter>ImGui</Filter></ClCompile>
+    <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\backends\imgui_impl_win32.cpp"><Filter>ImGui</Filter></ClCompile>
+  </ItemGroup>
+</Project>

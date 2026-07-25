@@ -1,13 +1,10 @@
 #include "SceneSerializer.h"
 #include <Windows.h>
-#include <commdlg.h>
 #include <fstream>
 #include <sstream>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
-
-#pragma comment(lib, "comdlg32.lib")
 
 namespace
 {
@@ -49,13 +46,6 @@ namespace
         if (slash)
             *(slash + 1) = '\0';
         return modulePath;
-    }
-
-    std::string DefaultScenesDir()
-    {
-        std::string dir = ExeDir() + "Scenes";
-        CreateDirectoryA(dir.c_str(), nullptr);
-        return dir;
     }
 }
 
@@ -245,44 +235,9 @@ bool SceneSerializer::LoadFromFile(const std::string& path, SceneFileData& outSc
     return true;
 }
 
-std::string SceneSerializer::ShowSaveDialog(HWND owner, const std::string& defaultName)
+std::string SceneSerializer::DefaultScenesDirectory()
 {
-    char file[MAX_PATH] = {};
-    strncpy_s(file, defaultName.c_str(), _TRUNCATE);
-
-    const std::string initDir = DefaultScenesDir();
-
-    OPENFILENAMEA ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = owner;
-    ofn.lpstrFilter = "Scene Files (*.scene)\0*.scene\0All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrInitialDir = initDir.c_str();
-    ofn.lpstrDefExt = "scene";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-
-    if (!GetSaveFileNameA(&ofn))
-        return {};
-    return file;
-}
-
-std::string SceneSerializer::ShowOpenDialog(HWND owner)
-{
-    char file[MAX_PATH] = {};
-    const std::string initDir = DefaultScenesDir();
-
-    OPENFILENAMEA ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = owner;
-    ofn.lpstrFilter = "Scene Files (*.scene)\0*.scene\0All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrInitialDir = initDir.c_str();
-    ofn.lpstrDefExt = "scene";
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-
-    if (!GetOpenFileNameA(&ofn))
-        return {};
-    return file;
+    std::string dir = ExeDir() + "Scenes";
+    CreateDirectoryA(dir.c_str(), nullptr);
+    return dir;
 }

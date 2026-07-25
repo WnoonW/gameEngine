@@ -49,9 +49,6 @@ public:
     // Read SceneFileData from path. Returns false on I/O or parse error.
     static bool LoadFromFile(const std::string& path, SceneFileData& outScene, std::string* outError = nullptr);
 
-    // Win32 save dialog. Returns empty if cancelled.
-    static std::string ShowSaveDialog(HWND owner, const std::string& defaultName = "scene.scene");
-
-    // Win32 open dialog. Returns empty if cancelled.
-    static std::string ShowOpenDialog(HWND owner);
+    // Default Scenes directory next to the exe (created if missing).
+    static std::string DefaultScenesDirectory();
 };

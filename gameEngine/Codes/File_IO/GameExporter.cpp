@@ -2,29 +2,21 @@
 #include "GameConfig.h"
 #include "Engine.h"
 #include "SceneSerializer.h"
-#include <shlobj.h>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
-
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "ole32.lib")
 
 namespace fs = std::filesystem;
 
 namespace
 {
-    // Runtime이 반드시 필요로 하는 셰이더 (Debug 출력 폴더에 옛 파일만 있으면 추출본이 깨짐)
+    // Shaders actually loaded by Engine/RenderSystem (do not list obsolete stubs)
     const char* kRequiredShaders[] = {
         "build_indirect_commands.hlsl",
         "compose_world.hlsl",
         "update_motion.hlsl",
         "hiz_build.hlsl",
-        "object.hlsl",
         "object_cb.hlsl",
-        "texture.hlsl",
-        "color.hlsl",
-        "instancing.hlsl",
         "object_instanced.hlsl",
     };
 
@@ -214,34 +206,6 @@ std::string GameExporter::SuggestExportDirectory(const std::string& gameTitle)
         SanitizeFolderName(gameTitle));
 }
 
-std::string GameExporter::BrowseForFolder(HWND owner, const char* title)
-{
-    // SHBrowseForFolder 는 COM 필요
-    const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    const bool needUninit = SUCCEEDED(co) || co == S_FALSE;
-
-    char display[MAX_PATH] = {};
-    BROWSEINFOA bi{};
-    bi.hwndOwner = owner;
-    bi.pszDisplayName = display;
-    bi.lpszTitle = title ? title : "Select export folder";
-    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-
-    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderA(&bi);
-    std::string result;
-    if (pidl)
-    {
-        char path[MAX_PATH] = {};
-        if (SHGetPathFromIDListA(pidl, path))
-            result = path;
-        CoTaskMemFree(pidl);
-    }
-
-    if (needUninit)
-        CoUninitialize();
-    return result;
-}
-
 GameExportResult GameExporter::Export(
     HWND owner,
     Engine& engine,
@@ -314,16 +278,50 @@ GameExportResult GameExporter::Export(
         }
     }
 
-    // 3) Copy this executable
+    // 3) Copy Game.exe (play product) — never ship Editor.exe
     char modulePath[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
-    const fs::path exeSrc = modulePath;
-    const fs::path exeDst = fs::path(exportDir) / exeSrc.filename();
-    fs::copy_file(exeSrc, exeDst, fs::copy_options::overwrite_existing, ec);
+    const fs::path editorExe = modulePath;
+    const fs::path exeDirPath = exeDir;
+
+    // Prefer Game.exe next to Editor.exe (shared OutDir: bin/x64/Config/)
+    fs::path gameExeSrc = exeDirPath / "Game.exe";
+    if (!FileExists(gameExeSrc))
+    {
+        // Fallback: same stem path variants / sibling Debug-Release
+        const fs::path alt = editorExe.parent_path() / "Game.exe";
+        if (FileExists(alt))
+            gameExeSrc = alt;
+    }
+    if (!FileExists(gameExeSrc))
+    {
+        result.message =
+            "Game.exe not found next to the editor.\n\n"
+            "Build the Game project (OneMore.sln → Game) so Game.exe\n"
+            "is produced in the same output folder as Editor.exe:\n"
+            + exeDir + "\n\n"
+            "Export packages the play-only Game.exe, not the editor.";
+        return result;
+    }
+
+    const fs::path exeDst = fs::path(exportDir) / "Game.exe";
+    fs::copy_file(gameExeSrc, exeDst, fs::copy_options::overwrite_existing, ec);
     if (ec)
     {
-        result.message = "Failed to copy executable: " + ec.message();
+        result.message = "Failed to copy Game.exe: " + ec.message();
         return result;
+    }
+
+    // Optional: copy PDB for crash debugging (ignore failure)
+    {
+        fs::path pdb = gameExeSrc;
+        pdb.replace_extension(".pdb");
+        if (FileExists(pdb))
+        {
+            std::error_code pec;
+            fs::copy_file(pdb, fs::path(exportDir) / "Game.pdb",
+                fs::copy_options::overwrite_existing, pec);
+        }
     }
 
     // 4) game.cfg (player mode)
@@ -338,13 +336,12 @@ GameExportResult GameExporter::Export(
         return result;
     }
 
-    // 5) Play.bat launcher (cd to this folder, run with --play; pause on failure)
+    // 5) Play.bat launcher (runs Game.exe only)
     {
         const std::string batPath = GameConfig::JoinPath(exportDir, "Play.bat");
         std::ofstream bat(batPath, std::ios::trunc);
         if (bat)
         {
-            const std::string exeName = exeSrc.filename().string();
             bat << "@echo off\r\n";
             bat << "cd /d \"%~dp0\"\r\n";
             bat << "echo Working dir: %CD%\r\n";
@@ -353,13 +350,12 @@ GameExportResult GameExporter::Export(
             bat << "  pause\r\n";
             bat << "  exit /b 1\r\n";
             bat << ")\r\n";
-            bat << "if not exist \"game.cfg\" (\r\n";
-            bat << "  echo ERROR: game.cfg missing.\r\n";
+            bat << "if not exist \"Game.exe\" (\r\n";
+            bat << "  echo ERROR: Game.exe missing.\r\n";
             bat << "  pause\r\n";
             bat << "  exit /b 1\r\n";
             bat << ")\r\n";
-            // Do not use "start" — it can drop the working directory in some cases.
-            bat << "\"" << exeName << "\" --play\r\n";
+            bat << "\"Game.exe\"\r\n";
             bat << "set ERR=%ERRORLEVEL%\r\n";
             bat << "if not %ERR%==0 (\r\n";
             bat << "  echo.\r\n";
@@ -378,15 +374,15 @@ GameExportResult GameExporter::Export(
             readme << cfg.title << "\n";
             readme << "====================\n\n";
             readme << "How to play:\n";
-            readme << "  1. Double-click Play.bat  (or run the .exe with --play)\n";
+            readme << "  1. Double-click Play.bat  (or run Game.exe)\n";
             readme << "  2. Mouse look: LMB click (or auto on start)\n";
-            readme << "  3. Move: WASD, Space/Shift, Q/E\n";
-            readme << "  4. ESC: release mouse / quit\n\n";
+            readme << "  3. Move: WASD, Space/Shift\n";
+            readme << "  4. ESC: quit\n\n";
             readme << "Contents:\n";
             readme << "  game.cfg          - player settings\n";
             readme << "  Scenes/game.scene - exported level\n";
             readme << "  Resources/        - meshes, textures, shaders\n";
-            readme << "  " << exeSrc.filename().string() << " - game runtime\n";
+            readme << "  Game.exe          - play-only runtime (no editor)\n";
         }
     }
 

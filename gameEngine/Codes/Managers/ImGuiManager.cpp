@@ -537,46 +537,217 @@ namespace
 #pragma region docking UI
 // ==================== DockSpace + 메인 메뉴 ====================
 
-void ImGuiManager::DrawMainMenuBar(Engine* engine)
+std::string ImGuiManager::DefaultScenesDirForDialog()
 {
-    if (!ImGui::BeginMainMenuBar())
-        return;
+    return SceneSerializer::DefaultScenesDirectory();
+}
 
-    if (ImGui::BeginMenu("File"))
+std::string ImGuiManager::JoinPathDialog(const std::string& dir, const std::string& name)
+{
+    if (dir.empty())
+        return name;
+    try
     {
-        if (ImGui::MenuItem("Save Scene...", "Ctrl+S"))
+        return (std::filesystem::path(dir) / name).string();
+    }
+    catch (...)
+    {
+        std::string d = dir;
+        if (!d.empty() && d.back() != '\\' && d.back() != '/')
+            d.push_back('\\');
+        return d + name;
+    }
+}
+
+std::string ImGuiManager::ParentPathDialog(const std::string& dir)
+{
+    try
+    {
+        std::filesystem::path p(dir);
+        if (p.has_parent_path() && p.parent_path() != p)
+            return p.parent_path().string();
+    }
+    catch (...) {}
+    return dir;
+}
+
+void ImGuiManager::OpenPathDialog(PathDialogMode mode)
+{
+    mPathDialogMode = mode;
+    mPathDialogSelected = -1;
+    mPathDialogOpenPopup = true;
+
+    if (mode == PathDialogMode::ExportFolder)
+    {
+        // Start at GameExport parent (exe dir) so user can pick where packages go
+        try
         {
-            if (engine)
+            mPathDialogDir = std::filesystem::path(GameExporter::SuggestExportDirectory("x")).parent_path().string();
+            std::error_code ec;
+            std::filesystem::create_directories(mPathDialogDir, ec);
+        }
+        catch (...)
+        {
+            mPathDialogDir = DefaultScenesDirForDialog();
+        }
+
+        if (!mLastScenePath.empty())
+        {
+            try
             {
-                std::string path = SceneSerializer::ShowSaveDialog(m_Hwnd,
-                    mLastScenePath.empty() ? "scene.scene" : std::filesystem::path(mLastScenePath).filename().string());
-                if (!path.empty())
-                {
-                    if (engine->SaveSceneToFile(path))
-                    {
-                        mLastScenePath = path;
-                        mSceneStatus = "Scene saved: " + path;
-                        mSceneStatusIsError = false;
-                    }
-                    else
-                    {
-                        mSceneStatus = "Failed to save scene: " + path;
-                        mSceneStatusIsError = true;
-                    }
-                }
+                const auto stem = std::filesystem::path(mLastScenePath).stem().string();
+                if (!stem.empty())
+                    strncpy_s(mPathDialogExportTitle, stem.c_str(), _TRUNCATE);
             }
-            else
+            catch (...) {}
+        }
+        mPathDialogFileName.clear();
+    }
+    else
+    {
+        if (!mLastScenePath.empty())
+        {
+            try
             {
-                mSceneStatus = "Engine not available";
-                mSceneStatusIsError = true;
+                const auto p = std::filesystem::path(mLastScenePath);
+                mPathDialogDir = p.has_parent_path() ? p.parent_path().string() : DefaultScenesDirForDialog();
+                mPathDialogFileName = p.filename().string();
+            }
+            catch (...)
+            {
+                mPathDialogDir = DefaultScenesDirForDialog();
+                mPathDialogFileName = "scene.scene";
             }
         }
-        if (ImGui::MenuItem("Load Scene...", "Ctrl+O"))
+        else
         {
-            if (engine)
+            mPathDialogDir = DefaultScenesDirForDialog();
+            mPathDialogFileName = "scene.scene";
+        }
+        if (mode == PathDialogMode::LoadScene)
+            mPathDialogFileName.clear();
+    }
+
+    RefreshPathDialogListing();
+}
+
+void ImGuiManager::RefreshPathDialogListing()
+{
+    mPathDialogDirs.clear();
+    mPathDialogFiles.clear();
+    mPathDialogSelected = -1;
+
+    if (mPathDialogDir.empty())
+        return;
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(mPathDialogDir, ec))
+        return;
+
+    try
+    {
+        for (const auto& entry : std::filesystem::directory_iterator(mPathDialogDir, ec))
+        {
+            if (ec)
+                break;
+            std::error_code e2;
+            if (entry.is_directory(e2))
             {
-                std::string path = SceneSerializer::ShowOpenDialog(m_Hwnd);
-                if (!path.empty())
+                mPathDialogDirs.push_back(entry.path().filename().string());
+            }
+            else if (entry.is_regular_file(e2) && mPathDialogMode != PathDialogMode::ExportFolder)
+            {
+                const auto ext = entry.path().extension().string();
+                if (_stricmp(ext.c_str(), ".scene") == 0)
+                    mPathDialogFiles.push_back(entry.path().filename().string());
+            }
+        }
+    }
+    catch (...) {}
+
+    std::sort(mPathDialogDirs.begin(), mPathDialogDirs.end());
+    std::sort(mPathDialogFiles.begin(), mPathDialogFiles.end());
+}
+
+void ImGuiManager::DrawPathDialog(Engine* engine)
+{
+    if (mPathDialogMode == PathDialogMode::None)
+        return;
+
+    if (mPathDialogOpenPopup)
+    {
+        ImGui::OpenPopup("##PathDialog");
+        mPathDialogOpenPopup = false;
+    }
+
+    const char* title = "Path";
+    switch (mPathDialogMode)
+    {
+    case PathDialogMode::SaveScene: title = "Save Scene"; break;
+    case PathDialogMode::LoadScene: title = "Load Scene"; break;
+    case PathDialogMode::ExportFolder: title = "Export Game — Parent Folder"; break;
+    default: break;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(520, 420), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("##PathDialog", nullptr, ImGuiWindowFlags_NoResize))
+    {
+        // Escape / click-out closed the popup; clear mode once it is gone.
+        if (!ImGui::IsPopupOpen("##PathDialog"))
+            mPathDialogMode = PathDialogMode::None;
+        return;
+    }
+
+    ImGui::TextUnformatted(title);
+    ImGui::Separator();
+    ImGui::TextWrapped("%s", mPathDialogDir.c_str());
+
+    if (ImGui::Button("Up"))
+    {
+        mPathDialogDir = ParentPathDialog(mPathDialogDir);
+        RefreshPathDialogListing();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Refresh"))
+        RefreshPathDialogListing();
+    ImGui::SameLine();
+    if (ImGui::Button("Scenes"))
+    {
+        mPathDialogDir = DefaultScenesDirForDialog();
+        RefreshPathDialogListing();
+    }
+
+    ImGui::BeginChild("##PathList", ImVec2(0, 240), true);
+    int row = 0;
+    for (const auto& d : mPathDialogDirs)
+    {
+        const bool selected = (mPathDialogSelected == row);
+        if (ImGui::Selectable(("[D] " + d).c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick))
+        {
+            mPathDialogSelected = row;
+            if (ImGui::IsMouseDoubleClicked(0))
+            {
+                mPathDialogDir = JoinPathDialog(mPathDialogDir, d);
+                RefreshPathDialogListing();
+                ImGui::EndChild();
+                ImGui::EndPopup();
+                return;
+            }
+        }
+        ++row;
+    }
+    for (const auto& f : mPathDialogFiles)
+    {
+        const bool selected = (mPathDialogSelected == row);
+        if (ImGui::Selectable(f.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick))
+        {
+            mPathDialogSelected = row;
+            mPathDialogFileName = f;
+            if (ImGui::IsMouseDoubleClicked(0) && mPathDialogMode == PathDialogMode::LoadScene)
+            {
+                // confirm load on double-click
+                const std::string path = JoinPathDialog(mPathDialogDir, f);
+                if (engine)
                 {
                     std::string err;
                     if (engine->LoadSceneFromFile(path, &err))
@@ -592,7 +763,144 @@ void ImGuiManager::DrawMainMenuBar(Engine* engine)
                         mSceneStatusIsError = true;
                     }
                 }
+                mPathDialogMode = PathDialogMode::None;
+                ImGui::CloseCurrentPopup();
+                ImGui::EndChild();
+                ImGui::EndPopup();
+                return;
             }
+        }
+        ++row;
+    }
+    ImGui::EndChild();
+
+    if (mPathDialogMode == PathDialogMode::SaveScene)
+    {
+        char nameBuf[260] = {};
+        strncpy_s(nameBuf, mPathDialogFileName.c_str(), _TRUNCATE);
+        if (ImGui::InputText("File name", nameBuf, sizeof(nameBuf)))
+            mPathDialogFileName = nameBuf;
+    }
+    else if (mPathDialogMode == PathDialogMode::LoadScene)
+    {
+        ImGui::Text("Selected: %s", mPathDialogFileName.empty() ? "(none)" : mPathDialogFileName.c_str());
+    }
+    else if (mPathDialogMode == PathDialogMode::ExportFolder)
+    {
+        ImGui::InputText("Game title", mPathDialogExportTitle, sizeof(mPathDialogExportTitle));
+        ImGui::TextDisabled("Package will be written to: <folder>\\%s", mPathDialogExportTitle);
+    }
+
+    ImGui::Separator();
+    const bool canOk =
+        (mPathDialogMode == PathDialogMode::SaveScene && !mPathDialogFileName.empty()) ||
+        (mPathDialogMode == PathDialogMode::LoadScene && !mPathDialogFileName.empty()) ||
+        (mPathDialogMode == PathDialogMode::ExportFolder);
+
+    if (!canOk)
+        ImGui::BeginDisabled();
+    if (ImGui::Button("OK", ImVec2(120, 0)))
+    {
+        if (engine)
+        {
+            if (mPathDialogMode == PathDialogMode::SaveScene)
+            {
+                std::string file = mPathDialogFileName;
+                if (file.find('.') == std::string::npos)
+                    file += ".scene";
+                const std::string path = JoinPathDialog(mPathDialogDir, file);
+                if (engine->SaveSceneToFile(path))
+                {
+                    mLastScenePath = path;
+                    mSceneStatus = "Scene saved: " + path;
+                    mSceneStatusIsError = false;
+                }
+                else
+                {
+                    mSceneStatus = "Failed to save scene: " + path;
+                    mSceneStatusIsError = true;
+                }
+            }
+            else if (mPathDialogMode == PathDialogMode::LoadScene)
+            {
+                const std::string path = JoinPathDialog(mPathDialogDir, mPathDialogFileName);
+                std::string err;
+                if (engine->LoadSceneFromFile(path, &err))
+                {
+                    mLastScenePath = path;
+                    mSceneStatus = "Scene loaded: " + path
+                        + " (" + std::to_string(engine->GetRenderableObjectCount()) + " objects)";
+                    mSceneStatusIsError = false;
+                }
+                else
+                {
+                    mSceneStatus = "Failed to load: " + (err.empty() ? path : err);
+                    mSceneStatusIsError = true;
+                }
+            }
+            else if (mPathDialogMode == PathDialogMode::ExportFolder)
+            {
+                std::string exportDir = mPathDialogDir;
+                try
+                {
+                    exportDir = (std::filesystem::path(mPathDialogDir) / mPathDialogExportTitle).string();
+                }
+                catch (...)
+                {
+                    exportDir = GameExporter::SuggestExportDirectory(mPathDialogExportTitle);
+                }
+
+                const GameExportResult r = GameExporter::Export(m_Hwnd, *engine, exportDir, mPathDialogExportTitle);
+                mSceneStatus = r.message;
+                mSceneStatusIsError = !r.ok;
+                if (r.ok)
+                    MessageBoxA(m_Hwnd, r.message.c_str(), "Export Game", MB_OK | MB_ICONINFORMATION);
+                else
+                    MessageBoxA(m_Hwnd, r.message.c_str(), "Export Game Failed", MB_OK | MB_ICONERROR);
+            }
+        }
+        else
+        {
+            mSceneStatus = "Engine not available";
+            mSceneStatusIsError = true;
+        }
+        mPathDialogMode = PathDialogMode::None;
+        ImGui::CloseCurrentPopup();
+    }
+    if (!canOk)
+        ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+    {
+        mPathDialogMode = PathDialogMode::None;
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+void ImGuiManager::DrawMainMenuBar(Engine* engine)
+{
+    if (!ImGui::BeginMainMenuBar())
+        return;
+
+    if (ImGui::BeginMenu("File"))
+    {
+        if (ImGui::MenuItem("Save Scene...", "Ctrl+S"))
+        {
+            if (engine)
+                OpenPathDialog(PathDialogMode::SaveScene);
+            else
+            {
+                mSceneStatus = "Engine not available";
+                mSceneStatusIsError = true;
+            }
+        }
+        if (ImGui::MenuItem("Load Scene...", "Ctrl+O"))
+        {
+            if (engine)
+                OpenPathDialog(PathDialogMode::LoadScene);
             else
             {
                 mSceneStatus = "Engine not available";
@@ -603,44 +911,7 @@ void ImGuiManager::DrawMainMenuBar(Engine* engine)
         if (ImGui::MenuItem("Export Game..."))
         {
             if (engine)
-            {
-                char titleBuf[128] = "MyGame";
-                // simple title from last scene name
-                if (!mLastScenePath.empty())
-                {
-                    try
-                    {
-                        const auto stem = std::filesystem::path(mLastScenePath).stem().string();
-                        if (!stem.empty())
-                            strncpy_s(titleBuf, stem.c_str(), _TRUNCATE);
-                    }
-                    catch (...) {}
-                }
-
-                std::string folder = GameExporter::BrowseForFolder(m_Hwnd,
-                    "Select parent folder for the game package");
-                if (!folder.empty())
-                {
-                    // export into <picked>/<title>
-                    std::string exportDir = folder;
-                    try
-                    {
-                        exportDir = (std::filesystem::path(folder) / titleBuf).string();
-                    }
-                    catch (...)
-                    {
-                        exportDir = GameExporter::SuggestExportDirectory(titleBuf);
-                    }
-
-                    const GameExportResult r = GameExporter::Export(m_Hwnd, *engine, exportDir, titleBuf);
-                    mSceneStatus = r.message;
-                    mSceneStatusIsError = !r.ok;
-                    if (r.ok)
-                        MessageBoxA(m_Hwnd, r.message.c_str(), "Export Game", MB_OK | MB_ICONINFORMATION);
-                    else
-                        MessageBoxA(m_Hwnd, r.message.c_str(), "Export Game Failed", MB_OK | MB_ICONERROR);
-                }
-            }
+                OpenPathDialog(PathDialogMode::ExportFolder);
             else
             {
                 mSceneStatus = "Engine not available";
@@ -1227,6 +1498,7 @@ void ImGuiManager::SetupDockspace(Engine* engine)
         return;
 
     DrawMainMenuBar(engine);
+    DrawPathDialog(engine);
 
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImVec2 workPos = viewport->WorkPos;
