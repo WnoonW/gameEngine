@@ -25,6 +25,76 @@ namespace
         using namespace std::chrono;
         return duration<float, std::milli>(high_resolution_clock::now() - t0).count();
     }
+
+    // Scene panel / play view render at 4x MSAA (must match SceneViewport::kMsaaCount).
+    constexpr UINT kSceneSampleCount = 4;
+
+    ID3D12PipelineState* GetScenePso(
+        const PSOKey& key,
+        ID3D12RootSignature* rs)
+    {
+        return PipelineStateManager::Get().GetOrCreatePSO(
+            key, rs, nullptr, false, kSceneSampleCount);
+    }
+
+    PSOKey MakeOpaquePsoKey(const char* shaderName)
+    {
+        PSOKey key{};
+        key.shaderName = shaderName;
+        key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        key.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        // Write stencil=1 under solid geometry so outline only appears on silhouette
+        // (not at every submesh boundary).
+        key.depthStencilDesc.StencilEnable = TRUE;
+        key.depthStencilDesc.StencilReadMask = 0xFF;
+        key.depthStencilDesc.StencilWriteMask = 0xFF;
+        key.depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        key.depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_REPLACE;
+        key.depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+        key.depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+        key.depthStencilDesc.BackFace = key.depthStencilDesc.FrontFace;
+        return key;
+    }
+
+    // Inverted hull: expand along normals, draw back faces only where stencil != solid.
+    PSOKey MakeOutlinePsoKey(const char* shaderName)
+    {
+        PSOKey key{};
+        key.shaderName = shaderName;
+        key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        key.rasterizerDesc.CullMode = D3D12_CULL_MODE_FRONT;
+        key.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        key.depthStencilDesc.DepthEnable = TRUE;
+        key.depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        key.depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        key.depthStencilDesc.StencilEnable = TRUE;
+        key.depthStencilDesc.StencilReadMask = 0xFF;
+        key.depthStencilDesc.StencilWriteMask = 0x00;
+        key.depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_NOT_EQUAL;
+        key.depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+        key.depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+        key.depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+        key.depthStencilDesc.BackFace = key.depthStencilDesc.FrontFace;
+        return key;
+    }
+
+    // Whole-mesh outline (indices already bake baseVertex). Avoids per-submesh rings.
+    void DrawMeshOutlineIndexed(
+        ID3D12GraphicsCommandList* cmdList,
+        Mesh* mesh,
+        UINT instanceCount)
+    {
+        if (!mesh || !mesh->indexBuffer || mesh->indexCount == 0 || instanceCount == 0)
+            return;
+        auto vbv = mesh->VertexBufferView();
+        auto ibv = mesh->IndexBufferView();
+        cmdList->IASetVertexBuffers(0, 1, &vbv);
+        cmdList->IASetIndexBuffer(&ibv);
+        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmdList->DrawIndexedInstanced(mesh->indexCount, instanceCount, 0, 0, 0);
+    }
 }
 
 namespace
@@ -62,7 +132,7 @@ namespace
         const float sr11 = sx * r11, sr12 = sx * r12, sr13 = sx * r13;
         const float sr21 = sy * r21, sr22 = sy * r22, sr23 = sy * r23;
         const float sr31 = sz * r31, sr32 = sz * r32, sr33 = sz * r33;
-        // (S*R)*T — translation only affects row3: t * (S*R) added... 
+        // (S*R)*T ??translation only affects row3: t * (S*R) added... 
         // Row-vector: T has translation in row3; (S*R)*T keeps upper 3x3, row3 = t * upper + e4
         // DirectXMath multiply A*B: row i of result = row i of A dotted with columns of B.
         // For A=S*R (no translation) and B=T (identity + translation in row3):
@@ -73,7 +143,7 @@ namespace
         //
         // DXMath matrices are row-major; XMMatrixTranslation puts tx,ty,tz in _41,_42,_43 (row3).
         // XMMatrixMultiply(A,B): for each row i: result.r[i] = A.r[i] * B (vector-matrix).
-        // So (S*R)*T: rows 0-2 of S*R multiplied by T → same rows 0-2 (T only changes via w component)
+        // So (S*R)*T: rows 0-2 of S*R multiplied by T ??same rows 0-2 (T only changes via w component)
         // Since rows 0-2 have w=0: unchanged 3x3.
         // row3 of S*R is (0,0,0,1); (0,0,0,1)*T = row3 of T = (tx,ty,tz,1).
         // So W upper 3x3 = S*R, translation = (px,py,pz). Correct.
@@ -212,7 +282,7 @@ namespace
                 continue;
 
             cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
-            // Step E: heap Index → GPU handle (table of 1)
+            // Step E: heap Index ??GPU handle (table of 1)
             if (material->mTextureHandle.Index != UINT_MAX)
             {
                 cmdList->SetGraphicsRootDescriptorTable(2, material->mTextureHandle.GPU);
@@ -299,7 +369,7 @@ namespace
         out.pad3 = out.pad4 = 0.f;
     }
 
-    // Path3 draw source: world = GetWorldMatrix (Path2/Basic과 바이트 동일)
+    // Path3 draw source: world = GetWorldMatrix (Path2/Basic�?바이???�일)
     void FillSourceFromEntity(
         GpuInstanceSource& out,
         TransformComponent& tf,
@@ -353,7 +423,7 @@ void RenderSystem::SetRenderPath(RenderPath path)
         return;
     }
 
-    // 수동 지정 시 Auto 해제
+    // ?�동 지????Auto ?�제
     mAutoRenderPath = false;
 
     const char* name = "Unknown";
@@ -392,14 +462,14 @@ void RenderSystem::UpdateAutoRenderPath(World& world)
             ++n;
         });
 
-    // Step G thresholds (기능 유지 + 대량 씬에서 Path3)
-    //  < 32  : Instanced (오버헤드 적음, 안정)
-    //  >= 32 : ComputeIndirect (가능하면)
+    // Step G thresholds (기능 ?��? + ?�???�에??Path3)
+    //  < 32  : Instanced (?�버?�드 ?�음, ?�정)
+    //  >= 32 : ComputeIndirect (가?�하�?
     RenderPath chosen = RenderPath::Instanced;
     if (n >= 32 && mComputeIndirectReady)
         chosen = RenderPath::ComputeIndirect;
     else if (n > 0 && n < 4)
-        chosen = RenderPath::Instanced; // Basic은 디버그용으로만 수동 사용
+        chosen = RenderPath::Instanced; // Basic?� ?�버그용?�로�??�동 ?�용
 
     if (chosen != mRenderPath)
     {
@@ -590,6 +660,7 @@ void RenderSystem::DestroyGpuResources()
 void RenderSystem::Shutdown()
 {
     DestroyHiZResources(mSrvAlloc);
+    DestroyShadowMap(mSrvAlloc);
     DestroyGpuResources();
     mCullCompactPSO.Reset();
     mBuildCommandsPSO.Reset();
@@ -613,6 +684,201 @@ void RenderSystem::Shutdown()
     mDummyHiZTexture.Reset();
     mSrvAlloc = nullptr;
     mDevice = nullptr;
+}
+
+void RenderSystem::EnsureShadowMap(DescriptorAllocator* alloc)
+{
+    if (mShadowMap || !mDevice || !alloc)
+        return;
+
+    mSrvAlloc = alloc;
+    if (mShadowSrv.Index == UINT_MAX)
+        mShadowSrv = alloc->Allocate();
+
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = kShadowMapSize;
+    desc.Height = kShadowMapSize;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R32_TYPELESS;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE clear{};
+    clear.Format = DXGI_FORMAT_D32_FLOAT;
+    clear.DepthStencil.Depth = 1.0f;
+    clear.DepthStencil.Stencil = 0;
+
+    ThrowIfFailed(mDevice->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &clear,
+        IID_PPV_ARGS(&mShadowMap)));
+    mShadowState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
+    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    ThrowIfFailed(mDevice->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&mShadowDsvHeap)));
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    mDevice->CreateDepthStencilView(
+        mShadowMap.Get(), &dsvDesc, mShadowDsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    mDevice->CreateShaderResourceView(mShadowMap.Get(), &srvDesc, mShadowSrv.CPU);
+}
+
+void RenderSystem::DestroyShadowMap(DescriptorAllocator* alloc)
+{
+    if (alloc && mShadowSrv.Index != UINT_MAX)
+    {
+        alloc->Free(mShadowSrv);
+        mShadowSrv = {};
+    }
+    mShadowMap.Reset();
+    mShadowDsvHeap.Reset();
+    mShadowState = D3D12_RESOURCE_STATE_COMMON;
+}
+
+void RenderSystem::BindShadowMapSrv(ID3D12GraphicsCommandList* cmdList) const
+{
+    if (!cmdList || mShadowSrv.Index == UINT_MAX)
+        return;
+    cmdList->SetGraphicsRootDescriptorTable(4, mShadowSrv.GPU);
+}
+
+void RenderSystem::RenderShadowMap(
+    World& world,
+    ID3D12GraphicsCommandList* cmdList,
+    FrameResource* currentFrameResource,
+    DescriptorAllocator* descriptorAllocator,
+    int /*currentFrameIndex*/,
+    const XMMATRIX& /*viewMatrix*/,
+    const XMMATRIX& /*projMatrix*/)
+{
+    if (!cmdList || !currentFrameResource || !descriptorAllocator)
+        return;
+
+    EnsureShadowMap(descriptorAllocator);
+    if (!mShadowMap || !mShadowDsvHeap)
+        return;
+
+    ID3D12RootSignature* shadowRS =
+        RootSignatureManager::Get().GetRootSignature(RootSignatureType::Shadow);
+    if (!shadowRS || !currentFrameResource->PassCB)
+        return;
+
+    if (mShadowState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            mShadowMap.Get(), mShadowState, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+        mShadowState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    }
+
+    D3D12_VIEWPORT vp{};
+    vp.Width = static_cast<float>(kShadowMapSize);
+    vp.Height = static_cast<float>(kShadowMapSize);
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    D3D12_RECT sc{ 0, 0, static_cast<LONG>(kShadowMapSize), static_cast<LONG>(kShadowMapSize) };
+    cmdList->RSSetViewports(1, &vp);
+    cmdList->RSSetScissorRects(1, &sc);
+
+    auto dsv = mShadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+    cmdList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+    cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+    // Always produce a valid SRV for t2; skip casters when disabled.
+    if (!mShadowsEnabled)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            mShadowMap.Get(),
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+        mShadowState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        return;
+    }
+
+    cmdList->SetGraphicsRootSignature(shadowRS);
+    cmdList->SetGraphicsRootConstantBufferView(
+        1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
+    if (mDummyInstanceBuffer)
+        cmdList->SetGraphicsRootShaderResourceView(2, mDummyInstanceBuffer->GetGPUVirtualAddress());
+
+    PSOKey depthKey{};
+    depthKey.shaderName = "object_depth";
+    depthKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    depthKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    depthKey.rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
+    depthKey.rasterizerDesc.DepthBias = 100000;
+    depthKey.rasterizerDesc.DepthBiasClamp = 0.0f;
+    depthKey.rasterizerDesc.SlopeScaledDepthBias = 1.5f;
+    depthKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    depthKey.depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    depthKey.topologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+
+    ID3D12PipelineState* depthPso =
+        PipelineStateManager::Get().GetOrCreatePSO(depthKey, shadowRS, nullptr, true);
+    if (!depthPso)
+        return;
+    cmdList->SetPipelineState(depthPso);
+
+    // Simple caster pass: every renderable (whole mesh once)
+    world.ForEach<TransformComponent, RenderableComponent>(
+        [&](Entity e, TransformComponent& tf, RenderableComponent& rend)
+        {
+            if (!rend.visible || !rend.mesh || rend.mesh->indexCount == 0)
+                return;
+            if (const auto* lod = world.GetComponent<LodComponent>(e); lod && lod->culled)
+                return;
+            if (rend.objectCBIndex >= kMaxSceneObjects)
+                return;
+
+            if (tf.dirtyFrames > 0)
+            {
+                ObjectConstants objConst{};
+                XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
+                currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
+                // do not consume dirtyFrames here ??color pass may still need them
+            }
+            else
+            {
+                // Ensure CB has something sensible
+                ObjectConstants objConst{};
+                XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
+                currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
+            }
+
+            auto objectCB = currentFrameResource->ObjectCB->Resource();
+            const UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+            const D3D12_GPU_VIRTUAL_ADDRESS objCBAddress =
+                objectCB->GetGPUVirtualAddress() + (UINT64)rend.objectCBIndex * objCBByteSize;
+            cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
+
+            auto vbv = rend.mesh->VertexBufferView();
+            auto ibv = rend.mesh->IndexBufferView();
+            cmdList->IASetVertexBuffers(0, 1, &vbv);
+            cmdList->IASetIndexBuffer(&ibv);
+            cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            cmdList->DrawIndexedInstanced(rend.mesh->indexCount, 1, 0, 0, 0);
+        });
+
+    cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+        mShadowMap.Get(),
+        D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+    mShadowState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 }
 
 void RenderSystem::EnsureGpuResources(ID3D12Device* device)
@@ -781,7 +1047,7 @@ void RenderSystem::EnsureGpuResources(ID3D12Device* device)
         f.submeshDefaultState = D3D12_RESOURCE_STATE_COMMON;
     }
 
-    // 배치 카운터 일괄 제로
+    // 배치 카운???�괄 ?�로
     ThrowIfFailed(device->CreateCommittedResource(
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
         D3D12_HEAP_FLAG_NONE,
@@ -895,7 +1161,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         Material* mainMat = entries[i].mainMat;
         const size_t groupBegin = i;
 
-        // 같은 (mesh, material) 그룹 범위 확정
+        // 같�? (mesh, material) 그룹 범위 ?�정
         while (i < entries.size()
             && entries[i].mesh == mesh
             && entries[i].mainMat == mainMat)
@@ -909,7 +1175,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
         if (groupCount == 0 || !mesh)
             continue;
 
-        // 서브메시/머티리얼 먼저 해석 — 유효할 때만 소스 커밋
+        // ?�브메시/머티리얼 먼�? ?�석 ???�효???�만 ?�스 커밋
         std::vector<GpuSubmeshDesc> localSubs;
         std::vector<UINT> localMatIndices;
         for (auto& pair : mesh->DrawArgs)
@@ -926,7 +1192,7 @@ void RenderSystem::RebuildGpuDrivenScene(World& world)
             sd.indexCount = sub.IndexCount;
             sd.startIndexLocation = sub.StartIndexLocation;
             sd.baseVertexLocation = sub.BaseVertexLocation;
-            sd.batchId = 0; // 아래에서 채움
+            sd.batchId = 0; // ?�래?�서 채�?
             localSubs.push_back(sd);
             localMatIndices.push_back(material->mTextureHandle.Index);
         }
@@ -1015,7 +1281,7 @@ bool RenderSystem::PatchOneGpuEntity(
 
     const bool gpuOwnsMotion = mGpuMotionEnabled && mUpdateMotionPSO
         && (mMotionCpu[slot].flags & 1u) != 0;
-    // Gravity 미러 dirty: CPU/bounds만 갱신, GPU TRS·velocity 덮어쓰지 않음
+    // Gravity 미러 dirty: CPU/bounds�?갱신, GPU TRS·velocity ??��?��? ?�음
     const bool skipGpuTrs = gpuOwnsMotion && tf->suppressGpuUpload;
 
     BoundsComponent* bounds = world.GetComponent<BoundsComponent>(e);
@@ -1026,8 +1292,7 @@ bool RenderSystem::PatchOneGpuEntity(
     {
         FillTransformFromEntity(mTransformCpu[slot], *tf, *rend, bounds, batchId);
         FillSourceFromEntity(mSourceCpu[slot], *tf, *rend, bounds, batchId);
-        // 에디터 이동·충돌 보정: motion도 CPU 상태로 재시드
-        FillMotionFromEntity(mMotionCpu[slot], gravity);
+        // ?�디???�동·충돌 보정: motion??CPU ?�태�??�시??        FillMotionFromEntity(mMotionCpu[slot], gravity);
         motionPatched = true;
         anyPatched = true;
     }
@@ -1082,7 +1347,7 @@ void RenderSystem::PatchGpuDrivenTransforms(World& world, FrameResource* frameRe
         return;
     }
 
-    // MarkDirty() without entity → generation only: full scan once
+    // MarkDirty() without entity ??generation only: full scan once
     if (genChanged && mPendingTransformDirty.empty())
     {
         world.ForEach<TransformComponent, RenderableComponent>(
@@ -1155,7 +1420,7 @@ bool RenderSystem::UploadGpuDrivenFrameData(
         }
     };
 
-    // Step F1: TRS staging → DEFAULT (compose / motion input)
+    // Step F1: TRS staging ??DEFAULT (compose / motion input)
     if (frame.uploadedTransformVersion != mTransformContentVersion && frame.transformMapped)
     {
         const UINT64 bytes = sizeof(GpuTransform) * mTransformCpu.size();
@@ -1181,7 +1446,7 @@ bool RenderSystem::UploadGpuDrivenFrameData(
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
-    // Step F2: motion seed → DEFAULT (only on version change; GPU owns velocity after)
+    // Step F2: motion seed ??DEFAULT (only on version change; GPU owns velocity after)
     if (frame.uploadedMotionVersion != mMotionContentVersion && frame.motionMapped && frame.motionDefault)
     {
         const UINT64 bytes = sizeof(GpuMotion) * mMotionCpu.size();
@@ -1311,7 +1576,7 @@ void RenderSystem::SyncGpuMotionFromWorld(World& world)
         const bool wantOn = (want.flags & 1u) != 0;
         const bool curOn = (cur.flags & 1u) != 0;
 
-        // Enable/disable/strength/ω change → reseed from ECS
+        // Enable/disable/strength/? change ??reseed from ECS
         // Stay-on with same params: GPU owns integrated velocity (do not overwrite)
         const bool paramChanged = wantOn && curOn
             && (want.gravity != cur.gravity
@@ -1395,7 +1660,7 @@ bool RenderSystem::DispatchUpdateMotion(
     const float dt = (mFrameDeltaTime > 0.f && mFrameDeltaTime < 0.25f)
         ? mFrameDeltaTime
         : (1.f / 60.f);
-    // Root constants: uint, uint, float, uint — pack float as bits
+    // Root constants: uint, uint, float, uint ??pack float as bits
     UINT constants[4];
     constants[0] = numInstances;
     constants[1] = kMaxInstancesPerDraw;
@@ -1466,7 +1731,7 @@ void RenderSystem::DispatchComposeWorld(
     ID3D12RootSignature* composeRS =
         RootSignatureManager::Get().GetRootSignature(RootSignatureType::ComposeWorld);
 
-    // GPU path: TRS (transformDefault) → CS_ComposeWorld → sourceDefault
+    // GPU path: TRS (transformDefault) ??CS_ComposeWorld ??sourceDefault
     if (mComposeWorldPSO && composeRS && frame.transformDefault)
     {
         transition(frame.transformDefault.Get(), frame.transformDefaultState,
@@ -1491,7 +1756,7 @@ void RenderSystem::DispatchComposeWorld(
 
         cmdList->Dispatch((numInstances + 63u) / 64u, 1, 1);
 
-        // UAV write → SRV read (cull)
+        // UAV write ??SRV read (cull)
         {
             D3D12_RESOURCE_BARRIER b[2];
             b[0] = CD3DX12_RESOURCE_BARRIER::UAV(frame.sourceDefault.Get());
@@ -1582,7 +1847,7 @@ void RenderSystem::ResolveGpuCullReadback(FrameGpuResources& frame)
     mLastStats.gpuSubmittedInstances = submitted;
     mLastStats.gpuCulledInstances = (submitted > visible) ? (submitted - visible) : 0;
     // Keep pending true so we keep showing last good until next copy overwrites
-    // Actually after read, next Schedule will overwrite — pending stays true after schedule
+    // Actually after read, next Schedule will overwrite ??pending stays true after schedule
 }
 
 void RenderSystem::ScheduleGpuCullReadback(
@@ -1739,7 +2004,7 @@ void RenderSystem::render(ECS::World& world,
     // Step H: distance LOD before path selection / batching
     UpdateEntityLods(world, viewMatrix);
 
-    // Step G: 매 프레임 자동 경로 (수동 SetRenderPath 시 auto off)
+    // Step G: �??�레???�동 경로 (?�동 SetRenderPath ??auto off)
     UpdateAutoRenderPath(world);
 
     switch (mRenderPath)
@@ -1795,19 +2060,16 @@ void RenderSystem::renderBasic(ECS::World& world,
     ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetHeap() };
     cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-    PSOKey key{};
-    key.shaderName = "object_cb";
-    key.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    key.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    key.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    const PSOKey key = MakeOpaquePsoKey("object_cb");
 
     ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
-    ID3D12PipelineState* pso = PipelineStateManager::Get().GetOrCreatePSO(key, sceneRS);
+    ID3D12PipelineState* pso = GetScenePso(key, sceneRS);
 
     if (sceneRS)
         cmdList->SetGraphicsRootSignature(sceneRS);
     if (pso)
         cmdList->SetPipelineState(pso);
+    cmdList->OMSetStencilRef(1);
 
     if (mDummyInstanceBuffer)
         cmdList->SetGraphicsRootShaderResourceView(3, mDummyInstanceBuffer->GetGPUVirtualAddress());
@@ -1817,6 +2079,7 @@ void RenderSystem::renderBasic(ECS::World& world,
         cmdList->SetGraphicsRootConstantBufferView(
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
+    BindShadowMapSrv(cmdList);
 
     UINT lastMat = UINT_MAX;
     world.ForEach<TransformComponent, RenderableComponent>(
@@ -1862,6 +2125,47 @@ void RenderSystem::renderBasic(ECS::World& world,
                     sub.BaseVertexLocation, 0);
             }
         });
+
+    // Toon outline: whole mesh once + stencil silhouette (not per-submesh)
+    if (mOutlinePassEnabled)
+    {
+        const PSOKey outlineKey = MakeOutlinePsoKey("object_cb_outline");
+        ID3D12PipelineState* outlinePso =
+            GetScenePso(outlineKey, sceneRS);
+        if (outlinePso)
+        {
+            cmdList->SetPipelineState(outlinePso);
+            cmdList->OMSetStencilRef(1);
+            lastMat = UINT_MAX;
+            world.ForEach<TransformComponent, RenderableComponent>(
+                [&](Entity e, TransformComponent& /*tf*/, RenderableComponent& rend)
+                {
+                    if (!rend.visible || !rend.mesh) return;
+                    if (const auto* lod = world.GetComponent<LodComponent>(e); lod && lod->culled)
+                        return;
+                    if (rend.objectCBIndex >= kMaxSceneObjects) return;
+
+                    auto objectCB = currentFrameResource->ObjectCB->Resource();
+                    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+                    D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() +
+                        (UINT64)rend.objectCBIndex * objCBByteSize;
+                    cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
+
+                    // Root signature still expects a texture table
+                    for (auto& pair : rend.mesh->DrawArgs)
+                    {
+                        Material* material = MaterialManager::Get().ResolveForDraw(
+                            e, pair.first, pair.second.initMaterial);
+                        if (!material || !material->HasValidTexture())
+                            continue;
+                        BindMaterialByIndex(cmdList, descriptorAllocator,
+                            material->mTextureHandle.Index, lastMat);
+                        break;
+                    }
+                    DrawMeshOutlineIndexed(cmdList, rend.mesh, 1);
+                });
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1880,22 +2184,20 @@ void RenderSystem::DrawInstancedBatches(
         return;
 
     cmdList->SetGraphicsRootSignature(sceneRS);
+    cmdList->OMSetStencilRef(1);
     if (currentFrameResource && currentFrameResource->PassCB)
     {
         cmdList->SetGraphicsRootConstantBufferView(
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
+    BindShadowMapSrv(cmdList);
 
     UINT lastMat = UINT_MAX;
 
     if (!overrideEntities.empty())
     {
-        PSOKey basicKey{};
-        basicKey.shaderName = "object_cb";
-        basicKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        basicKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        basicKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        if (ID3D12PipelineState* basicPso = PipelineStateManager::Get().GetOrCreatePSO(basicKey, sceneRS))
+        const PSOKey basicKey = MakeOpaquePsoKey("object_cb");
+        if (ID3D12PipelineState* basicPso = GetScenePso(basicKey, sceneRS))
             cmdList->SetPipelineState(basicPso);
         if (mDummyInstanceBuffer)
             cmdList->SetGraphicsRootShaderResourceView(3, mDummyInstanceBuffer->GetGPUVirtualAddress());
@@ -1907,18 +2209,14 @@ void RenderSystem::DrawInstancedBatches(
             if (tf && rend)
                 DrawEntityWithResolvedMaterials(cmdList, currentFrameResource, e, *tf, *rend);
         }
-        lastMat = UINT_MAX; // PSO/path switch — force rebind
+        lastMat = UINT_MAX; // PSO/path switch ??force rebind
     }
 
     if (mCachedInstancedBatches.empty())
         return;
 
-    PSOKey gfxKey{};
-    gfxKey.shaderName = "object_instanced";
-    gfxKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    gfxKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    gfxKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    ID3D12PipelineState* gfxPSO = PipelineStateManager::Get().GetOrCreatePSO(gfxKey, sceneRS);
+    const PSOKey gfxKey = MakeOpaquePsoKey("object_instanced");
+    ID3D12PipelineState* gfxPSO = GetScenePso(gfxKey, sceneRS);
     if (!gfxPSO)
     {
         static bool sLogged = false;
@@ -1932,10 +2230,22 @@ void RenderSystem::DrawInstancedBatches(
     }
 
     cmdList->SetPipelineState(gfxPSO);
+    cmdList->OMSetStencilRef(1);
     lastMat = UINT_MAX;
 
     BYTE* upload = frame.requestMapped;
     UINT uploadCursor = 0;
+
+    // Record batch layout so outline can re-issue draws without re-upload.
+    struct InstDrawRec
+    {
+        Mesh* mesh = nullptr;
+        UINT instanceCount = 0;
+        UINT64 byteOffset = 0;
+        Material* mainMaterial = nullptr;
+    };
+    std::vector<InstDrawRec> drawRecs;
+    drawRecs.reserve(mCachedInstancedBatches.size());
 
     for (const CachedInstancedBatch& batch : mCachedInstancedBatches)
     {
@@ -1982,7 +2292,41 @@ void RenderSystem::DrawInstancedBatches(
                 sub.BaseVertexLocation, 0);
         }
 
+        drawRecs.push_back(InstDrawRec{ mesh, n, byteOffset, batch.mainMaterial });
         uploadCursor += n;
+    }
+
+    if (mOutlinePassEnabled && !drawRecs.empty())
+    {
+        const PSOKey outlineKey = MakeOutlinePsoKey("object_instanced_outline");
+        ID3D12PipelineState* outlinePso =
+            GetScenePso(outlineKey, sceneRS);
+        if (outlinePso)
+        {
+            cmdList->SetPipelineState(outlinePso);
+            cmdList->OMSetStencilRef(1);
+            lastMat = UINT_MAX;
+            for (const InstDrawRec& rec : drawRecs)
+            {
+                if (!rec.mesh || rec.instanceCount == 0)
+                    continue;
+                const D3D12_GPU_VIRTUAL_ADDRESS instVA =
+                    frame.requestUpload->GetGPUVirtualAddress() + rec.byteOffset;
+                cmdList->SetGraphicsRootShaderResourceView(3, instVA);
+
+                // Bind any valid texture for root sig, then whole-mesh outline once
+                for (auto& pair : rec.mesh->DrawArgs)
+                {
+                    Material* material = ResolveBatchMaterial(rec.mainMaterial, pair.second);
+                    if (!material || !material->HasValidTexture())
+                        continue;
+                    BindMaterialByIndex(cmdList, descriptorAllocator,
+                        material->mTextureHandle.Index, lastMat);
+                    break;
+                }
+                DrawMeshOutlineIndexed(cmdList, rec.mesh, rec.instanceCount);
+            }
+        }
     }
 }
 
@@ -2013,7 +2357,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
         return;
     }
 
-    // Step B: dirty generation + pending 없으면 캐시 재사용 (ForEach 스킵)
+    // Step B: dirty generation + pending ?�으�?캐시 ?�사??(ForEach ?�킵)
     {
         auto incoming = TransformDirtyTracker::TakeEntities();
         if (!incoming.empty())
@@ -2072,7 +2416,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
                 XMStoreFloat4x4(&objConst.World, XMMatrixTranspose(tf.GetWorldMatrix()));
                 currentFrameResource->ObjectCB->CopyData(static_cast<int>(rend.objectCBIndex), objConst);
                 --tf.dirtyFrames;
-                // multi-frame ObjectCB: 남은 dirty는 다음 프레임에도 캐시 무효
+                // multi-frame ObjectCB: ?��? dirty???�음 ?�레?�에??캐시 무효
                 if (tf.dirtyFrames > 0)
                     mPendingTransformDirty.push_back(e);
             }
@@ -2114,7 +2458,7 @@ void RenderSystem::renderInstanced(ECS::World& world,
 }
 
 // ---------------------------------------------------------------------------
-// Path 3: GPU-driven — persistent source + global cull/compact + EI
+// Path 3: GPU-driven ??persistent source + global cull/compact + EI
 // ---------------------------------------------------------------------------
 void RenderSystem::renderComputeIndirect(ECS::World& world,
     ID3D12GraphicsCommandList* cmdList,
@@ -2146,17 +2490,17 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     mLastStats.eiCalls = 0;
     mLastStats.multiEiRuns = 0;
 
-    // Step I: previous use of this frame slot finished → map cull counters
+    // Step I: previous use of this frame slot finished ??map cull counters
     ResolveGpuCullReadback(frame);
 
-    // 1) CPU: 구조 변경 시 배치 재빌드 + dirty 슬롯 패치
+    // 1) CPU: 구조 변�???배치 ?�빌??+ dirty ?�롯 ?�치
     if (mGpuStructureDirty)
     {
         const auto t0 = std::chrono::high_resolution_clock::now();
         RebuildGpuDrivenScene(world);
         mLastStats.didRebuild = true;
         mLastStats.rebuildMs = ElapsedMs(t0);
-        // 소스 미러는 최신. multi-frame ObjectCB용 dirtyFrames만 pending 유지.
+        // ?�스 미러??최신. multi-frame ObjectCB??dirtyFrames�?pending ?��?.
         TransformDirtyTracker::ClearEntities();
         mPendingTransformDirty.clear();
         for (const auto& kv : mEntityToGpuSlot)
@@ -2170,15 +2514,15 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         mLastProcessedDirtyGen = TransformDirtyTracker::Generation();
     }
     PatchGpuDrivenTransforms(world, currentFrameResource);
-    // Gravity toggle / Enabled checkbox — reseed motion without scene rebuild
+    // Gravity toggle / Enabled checkbox ??reseed motion without scene rebuild
     SyncGpuMotionFromWorld(world);
 
     mLastStats.sourceCount = static_cast<uint32_t>(mSourceCpu.size());
     mLastStats.batchCount = static_cast<uint32_t>(mBatchDescsCpu.size());
     mLastStats.submeshDraws = static_cast<uint32_t>(mSubmeshDescsCpu.size());
 
-    // TRS 업로드 직전: motion 오브젝트 포함 전 슬롯을 CPU 미러로 맞춤
-    // (일부 슬롯 full dirty 시 다른 낙하 오브젝트가 오래된 seed로 리셋되는 것 방지)
+    // TRS ?�로??직전: motion ?�브?�트 ?�함 ???�롯??CPU 미러�?맞춤
+    // (?��? ?�롯 full dirty ???�른 ?�하 ?�브?�트가 ?�래??seed�?리셋?�는 �?방�?)
     {
         const int frameIdx = ((currentFrameIndex % (int)kIndirectFrameCount) + (int)kIndirectFrameCount)
             % (int)kIndirectFrameCount;
@@ -2187,7 +2531,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
             PullGpuTransformsFromWorld(world);
     }
 
-    // Sub-override는 Basic으로
+    // Sub-override??Basic?�로
     ID3D12RootSignature* sceneRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::Scene);
     if (sceneRS && !mGpuOverrideEntities.empty())
     {
@@ -2197,12 +2541,8 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
             cmdList->SetGraphicsRootConstantBufferView(
                 1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
         }
-        PSOKey basicKey{};
-        basicKey.shaderName = "object_cb";
-        basicKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        basicKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        basicKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        if (ID3D12PipelineState* basicPso = PipelineStateManager::Get().GetOrCreatePSO(basicKey, sceneRS))
+        const PSOKey basicKey = MakeOpaquePsoKey("object_cb");
+        if (ID3D12PipelineState* basicPso = GetScenePso(basicKey, sceneRS))
             cmdList->SetPipelineState(basicPso);
         if (mDummyInstanceBuffer)
             cmdList->SetGraphicsRootShaderResourceView(3, mDummyInstanceBuffer->GetGPUVirtualAddress());
@@ -2221,24 +2561,24 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 
     const bool didTrsUpload = UploadGpuDrivenFrameData(cmdList, frame);
 
-    // Step F2 motion → F1 compose → cull
-    // TRS 업로드 프레임은 motion 스킵 (CPU 미러와 동일 시점 유지)
+    // Step F2 motion ??F1 compose ??cull
+    // TRS ?�로???�레?��? motion ?�킵 (CPU 미러?� ?�일 ?�점 ?��?)
     const UINT numXforms = static_cast<UINT>((std::min)(
         (std::min)(mTransformCpu.size(), mSourceCpu.size()),
         static_cast<size_t>(kMaxInstancesPerDraw)));
     if (!didTrsUpload && DispatchUpdateMotion(cmdList, frame, numXforms))
     {
-        // GPU changed TRS — force compose this frame slot
+        // GPU changed TRS ??force compose this frame slot
         frame.composedTransformVersion = 0;
     }
     else if (didTrsUpload)
     {
-        // Uploaded TRS already current — force compose
+        // Uploaded TRS already current ??force compose
         frame.composedTransformVersion = 0;
     }
     DispatchComposeWorld(cmdList, frame, numXforms);
 
-    // 2) Frame CB (카메라/컬링/오클루전 — 매 프레임)
+    // 2) Frame CB (카메??컬링/?�클루전 ??�??�레??
     const XMMATRIX viewProj = XMMatrixMultiply(viewMatrix, projMatrix);
     mLastViewProj = viewProj;
     mLastRtWidth = (mHiZWidth > 0) ? mHiZWidth : 1;
@@ -2269,12 +2609,8 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
     ID3D12RootSignature* buildRS = RootSignatureManager::Get().GetRootSignature(RootSignatureType::IndirectBuild);
     ID3D12CommandSignature* cmdSig = RootSignatureManager::Get().GetSceneCommandSignature();
 
-    PSOKey gfxKey{};
-    gfxKey.shaderName = "object_instanced";
-    gfxKey.blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    gfxKey.rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    gfxKey.depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    ID3D12PipelineState* gfxPSO = PipelineStateManager::Get().GetOrCreatePSO(gfxKey, sceneRS);
+    const PSOKey gfxKey = MakeOpaquePsoKey("object_instanced");
+    ID3D12PipelineState* gfxPSO = GetScenePso(gfxKey, sceneRS);
 
     if (!buildRS || !sceneRS || !gfxPSO || !cmdSig || !mCullCompactPSO || !mBuildCommandsPSO)
     {
@@ -2291,7 +2627,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         return;
     }
 
-    // 3) 카운터 제로 (배치 전체 1회)
+    // 3) 카운???�로 (배치 ?�체 1??
     {
         if (frame.countState != D3D12_RESOURCE_STATE_COPY_DEST)
         {
@@ -2306,7 +2642,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
             counterBytes);
     }
 
-    // UAV 전환
+    // UAV ?�환
     {
         D3D12_RESOURCE_BARRIER b[3];
         UINT nb = 0;
@@ -2325,14 +2661,14 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         if (nb) cmdList->ResourceBarrier(nb, b);
     }
 
-    // 4) 전역 CullCompact 1회 (DEFAULT 힙 source/batch/submesh + HiZ t3)
+    // 4) ?�역 CullCompact 1??(DEFAULT ??source/batch/submesh + HiZ t3)
     cmdList->SetComputeRootSignature(buildRS);
     cmdList->SetComputeRootConstantBufferView(0, frame.frameCBUpload->GetGPUVirtualAddress());
     cmdList->SetComputeRootShaderResourceView(1, frame.sourceDefault->GetGPUVirtualAddress());
     cmdList->SetComputeRootShaderResourceView(2, frame.batchDefault->GetGPUVirtualAddress());
     cmdList->SetComputeRootShaderResourceView(3, frame.submeshDefault->GetGPUVirtualAddress());
 
-    // Hi-Z: 링에서 "충분히 오래된" 슬롯만 샘플 (in-flight 쓰기와 분리)
+    // Hi-Z: 링에??"충분???�래?? ?�롯�??�플 (in-flight ?�기?� 분리)
     EnsureDummyHiZSrv(descriptorAllocator);
     D3D12_GPU_DESCRIPTOR_HANDLE hizGpu = GetHiZSampleSrvGpu();
     if (hizGpu.ptr == 0)
@@ -2365,8 +2701,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         cmdList->ResourceBarrier(2, uav);
     }
 
-    // 5) 전역 BuildCommands 1회
-    cmdList->SetPipelineState(mBuildCommandsPSO.Get());
+    // 5) ?�역 BuildCommands 1??    cmdList->SetPipelineState(mBuildCommandsPSO.Get());
     const UINT numSubs = static_cast<UINT>((std::min)(
         mSubmeshDescsCpu.size(), static_cast<size_t>(kMaxGpuSubmeshDraws)));
     if (numSubs == 0)
@@ -2388,20 +2723,22 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         frame.instanceState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     }
 
-    // 5b) Step I: batch visible counts → READBACK (resolved next time this slot is used)
+    // 5b) Step I: batch visible counts ??READBACK (resolved next time this slot is used)
     ScheduleGpuCullReadback(
         cmdList, frame,
         static_cast<UINT>(mBatchDescsCpu.size()),
         numXforms);
 
-    // 6) Step E: material heap Index로 테이블 바인딩 (동일 인덱스면 스킵)
+    // 6) Step E: material heap Index�??�이�?바인??(?�일 ?�덱?�면 ?�킵)
     cmdList->SetGraphicsRootSignature(sceneRS);
     cmdList->SetPipelineState(gfxPSO);
+    cmdList->OMSetStencilRef(1);
     if (currentFrameResource && currentFrameResource->PassCB)
     {
         cmdList->SetGraphicsRootConstantBufferView(
             1, currentFrameResource->PassCB->Resource()->GetGPUVirtualAddress());
     }
+    BindShadowMapSrv(cmdList);
 
     UINT lastMat = UINT_MAX;
     for (const GpuCpuBatch& batch : mGpuCpuBatches)
@@ -2420,7 +2757,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        // 같은 머티리얼 연속 구간 → ExecuteIndirect MaxCommandCount > 1
+        // 같�? 머티리얼 ?�속 구간 ??ExecuteIndirect MaxCommandCount > 1
         UINT si = 0;
         while (si < batch.submeshCount)
         {
@@ -2454,6 +2791,37 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
                 ++mLastStats.multiEiRuns;
         }
     }
+
+    // Toon outline: whole mesh + stencil (not per-submesh EI)
+    if (mOutlinePassEnabled)
+    {
+        const PSOKey outlineKey = MakeOutlinePsoKey("object_instanced_outline");
+        ID3D12PipelineState* outlinePso =
+            GetScenePso(outlineKey, sceneRS);
+        if (outlinePso)
+        {
+            cmdList->SetPipelineState(outlinePso);
+            cmdList->OMSetStencilRef(1);
+            lastMat = UINT_MAX;
+            for (const GpuCpuBatch& batch : mGpuCpuBatches)
+            {
+                if (!batch.mesh || batch.instanceCount == 0)
+                    continue;
+
+                const D3D12_GPU_VIRTUAL_ADDRESS instVA =
+                    frame.instanceBuffer->GetGPUVirtualAddress()
+                    + (UINT64)batch.firstInstance * sizeof(InstanceWorld);
+                cmdList->SetGraphicsRootShaderResourceView(3, instVA);
+
+                if (!batch.materialIndices.empty())
+                {
+                    BindMaterialByIndex(cmdList, descriptorAllocator,
+                        batch.materialIndices[0], lastMat);
+                }
+                DrawMeshOutlineIndexed(cmdList, batch.mesh, batch.instanceCount);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2461,8 +2829,7 @@ void RenderSystem::renderComputeIndirect(ECS::World& world,
 // ---------------------------------------------------------------------------
 bool RenderSystem::IsHiZSampleReady() const
 {
-    // GPU가 최대 (kHiZRingSize-1) 프레임 뒤처질 수 있으므로
-    // 링을 한 바퀴 채운 뒤에만 샘플 허용
+    // GPU가 최�? (kHiZRingSize-1) ?�레???�처�????�으므�?    // 링을 ??바�?채운 ?�에�??�플 ?�용
     return mHiZBuildCount >= kHiZRingSize
         && mHiZRing[0].texture != nullptr;
 }
@@ -2475,8 +2842,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE RenderSystem::GetHiZSampleSrvGpu() const
             return mDummyHiZSrv.GPU;
         return {};
     }
-    // mHiZWriteSlot = 다음에 쓸 칸
-    // 마지막 기록 = writeSlot-1, 안전한 샘플 = writeSlot+1 (= 2프레임 전, ring=3)
+    // mHiZWriteSlot = ?�음????�?    // 마�?�?기록 = writeSlot-1, ?�전???�플 = writeSlot+1 (= 2?�레???? ring=3)
     const UINT readSlot = (mHiZWriteSlot + 1u) % kHiZRingSize;
     return mHiZRing[readSlot].srv.GPU;
 }
@@ -2690,7 +3056,7 @@ void RenderSystem::BuildHiZ(
     cmdList->SetDescriptorHeaps(1, heaps);
     cmdList->SetComputeRootSignature(hizRS);
 
-    // 이 슬롯만 쓰기 — 샘플 중인 다른 슬롯과 분리
+    // ???�롯�??�기 ???�플 중인 ?�른 ?�롯�?분리
     if (slot.state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
     {
         cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(

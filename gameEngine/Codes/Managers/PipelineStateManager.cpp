@@ -45,12 +45,24 @@ void PipelineStateManager::Shutdown()
 ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
     const PSOKey& key,
     ID3D12RootSignature* rootSignature,
-    ID3D12Device* device)
+    ID3D12Device* device,
+    bool depthOnly,
+    UINT sampleCount)
 {
     if (device == nullptr)
         device = mDevice;
 
-    auto it = mPSOCache.find(key);
+    if (sampleCount == 0)
+        sampleCount = 1;
+
+    // Separate cache entries for depth-only / MSAA variants
+    PSOKey cacheKey = key;
+    if (depthOnly)
+        cacheKey.shaderName = key.shaderName + "#depthOnly";
+    if (sampleCount > 1)
+        cacheKey.shaderName += "#msaa" + std::to_string(sampleCount);
+
+    auto it = mPSOCache.find(cacheKey);
     if (it != mPSOCache.end())
         return it->second.Get();
 
@@ -61,10 +73,20 @@ ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
     psoDesc.RasterizerState = key.rasterizerDesc;
     psoDesc.DepthStencilState = key.depthStencilDesc;
     psoDesc.PrimitiveTopologyType = key.topologyType;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-    psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    psoDesc.SampleDesc.Count = 1;
+    if (depthOnly)
+    {
+        psoDesc.NumRenderTargets = 0;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
+        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        sampleCount = 1; // shadow map is single-sample
+    }
+    else
+    {
+        psoDesc.NumRenderTargets = 1;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    }
+    psoDesc.SampleDesc.Count = sampleCount;
     psoDesc.SampleDesc.Quality = 0;
     psoDesc.SampleMask = UINT_MAX;
 
@@ -73,17 +95,19 @@ ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
     std::wstring shaderPath = L"Resources\\Shaders\\" + wShaderName + L".hlsl";
 
     auto vsBlob = ShaderManager::Get().GetVertexShader(shaderPath);
-    auto psBlob = ShaderManager::Get().GetPixelShader(shaderPath);
+    ComPtr<ID3DBlob> psBlob;
+    if (!depthOnly)
+        psBlob = ShaderManager::Get().GetPixelShader(shaderPath);
 
-    // ==================== 중요: null 체크 ====================
-    if (!vsBlob || !psBlob)
+    if (!vsBlob || (!depthOnly && !psBlob))
     {
         OutputDebugStringA(("Shader Compile Failed: " + key.shaderName + "\n").c_str());
-        return nullptr;   // 또는 throw
+        return nullptr;
     }
 
     psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
-    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    if (psBlob)
+        psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
 
     // Input Layout
     static const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
@@ -103,6 +127,6 @@ ID3D12PipelineState* PipelineStateManager::GetOrCreatePSO(
         return nullptr;
     }
 
-    mPSOCache[key] = pso;
+    mPSOCache[cacheKey] = pso;
     return pso.Get();
 }

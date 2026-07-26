@@ -20,7 +20,22 @@ struct PassConstants
     float               TotalTime = 0.0f;
     float               DeltaTime = 0.0f;
     DirectX::XMFLOAT4   AmbientLight = { 0.25f, 0.25f, 0.35f, 1.0f };
+    // Lights[0] = primary directional (Direction = ray travel dir, Strength = RGB intensity)
     Light               Lights[MaxLights];
+
+    // Graphics style (must match HLSL cbPass tail)
+    // 0 = Realistic (smooth Lambert + Blinn), 1 = Toon (banded NdotL)
+    int                 GraphicsStyle = 0;
+    float               ToonBands = 3.0f;
+    float               OutlineWidth = 0.025f; // object-space expand for inverted-hull outline
+    float               SpecularPower = 32.0f;
+
+    // Shadow (row-vector HLSL: mul(pos, LightViewProj) with transposed CPU store)
+    DirectX::XMFLOAT4X4 LightViewProj = MathHelper::Identity4x4();
+    float               ShadowBias = 0.003f;
+    float               ShadowEnabled = 1.0f;
+    float               ShadowSoftness = 1.0f; // unused (hard shadows for now)
+    float               cbPassPadShadow = 0.0f;
 };
 
 struct ObjectConstants

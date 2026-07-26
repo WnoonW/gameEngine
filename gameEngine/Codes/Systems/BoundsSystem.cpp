@@ -81,6 +81,13 @@ void BoundsSystem::Update(World& world)
                     (objMax.y - objMin.y) * 0.5f,
                     (objMax.z - objMin.z) * 0.5f
                 };
+
+                // Thin meshes (grid / plane / paper-thin props): AABB half-extent ~0
+                // makes collision and ground resolve unreliable. Enforce a minimum shell.
+                constexpr float kMinHalfExtent = 0.05f;
+                bounds.worldBounds.Extents.x = (std::max)(bounds.worldBounds.Extents.x, kMinHalfExtent);
+                bounds.worldBounds.Extents.y = (std::max)(bounds.worldBounds.Extents.y, kMinHalfExtent);
+                bounds.worldBounds.Extents.z = (std::max)(bounds.worldBounds.Extents.z, kMinHalfExtent);
             }
             else
             {

@@ -33,6 +33,7 @@ private:
     ~RootSignatureManager() = default;
 
     void CreateSceneRootSignature();
+    void CreateShadowRootSignature();
     void CreateIndirectBuildRootSignature();
     void CreateHiZBuildRootSignature();
     void CreateComposeWorldRootSignature();

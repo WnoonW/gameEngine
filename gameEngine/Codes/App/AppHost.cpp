@@ -541,14 +541,20 @@ void AppHost::Draw(const GameTimer& gt)
 			Colors::LightSteelBlue.f[2],
 			Colors::LightSteelBlue.f[3]
 		};
-		sceneVP.Begin(mCommandList.Get(), sceneClear);
 
+		// PassCB (incl. light VP) before shadow + color
 		mEngine.FillPassCB(mCurrFrameResource, view, proj,
 			static_cast<float>(sceneVP.GetWidth()),
 			static_cast<float>(sceneVP.GetHeight()),
 			aspect,
 			gt.TotalTime(),
 			gt.DeltaTime());
+
+		// Directional shadow map (depth-only; no Scene RT bound yet)
+		mEngine.RenderShadowMap(
+			mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
+
+		sceneVP.Begin(mCommandList.Get(), sceneClear);
 
 		mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
 

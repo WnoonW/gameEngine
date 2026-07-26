@@ -32,6 +32,13 @@ enum class RenderPath
     Indirect = Instanced,
 };
 
+// Scene lighting / shading look (PassCB gGraphicsStyle)
+enum class GraphicsStyle
+{
+    Realistic = 0, // smooth Lambert + soft Blinn
+    Toon = 1,      // banded NdotL (+ optional inverted-hull outline)
+};
+
 // Step A: 프레임 단위 CPU 통계 (ImGui / 디버그)
 struct GpuDrivenFrameStats
 {
@@ -117,6 +124,23 @@ public:
     float GetLodBias() const { return mLodBias; }
     void SetLodCullDistance(float d) { mLodCullDistance = (d > 1.f) ? d : 1.f; }
     float GetLodCullDistance() const { return mLodCullDistance; }
+
+    // Toon inverted-hull second pass (ignored when style is Realistic)
+    void SetOutlinePassEnabled(bool enabled) { mOutlinePassEnabled = enabled; }
+    bool IsOutlinePassEnabled() const { return mOutlinePassEnabled; }
+
+    void SetShadowsEnabled(bool enabled) { mShadowsEnabled = enabled; }
+    bool IsShadowsEnabled() const { return mShadowsEnabled; }
+
+    // Directional shadow map depth pass (before Scene RT is bound).
+    void RenderShadowMap(
+        World& world,
+        ID3D12GraphicsCommandList* cmdList,
+        FrameResource* currentFrameResource,
+        DescriptorAllocator* descriptorAllocator,
+        int currentFrameIndex,
+        const DirectX::XMMATRIX& viewMatrix,
+        const DirectX::XMMATRIX& projMatrix);
 
     void InvalidateDrawCache();
 
@@ -282,6 +306,17 @@ private:
     bool mGpuMotionEnabled = true; // Step F2 default ON for Path3
     bool mLodEnabled = true;       // Step H default ON
     bool mLodDistanceCull = true;
+    bool mOutlinePassEnabled = false; // Toon inverted-hull second pass
+    bool mShadowsEnabled = true;
+    static constexpr UINT kShadowMapSize = 2048;
+    Microsoft::WRL::ComPtr<ID3D12Resource> mShadowMap;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mShadowDsvHeap;
+    DescriptorAllocator::DescriptorHandle mShadowSrv{};
+    D3D12_RESOURCE_STATES mShadowState = D3D12_RESOURCE_STATE_COMMON;
+
+    void EnsureShadowMap(DescriptorAllocator* alloc);
+    void DestroyShadowMap(DescriptorAllocator* alloc);
+    void BindShadowMapSrv(ID3D12GraphicsCommandList* cmdList) const;
     float mLodBias = 1.f;
     float mLodCullDistance = 250.f; // global override if > 0 applied as max with component
     float mFrameDeltaTime = 1.f / 60.f;

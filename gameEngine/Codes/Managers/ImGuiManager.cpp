@@ -2427,6 +2427,67 @@ void ImGuiManager::DrawRenderContent(Engine* engine)
     if (st.path == RenderPath::Instanced) pathName = "Instanced";
     else if (st.path == RenderPath::ComputeIndirect) pathName = "GPU-driven";
 
+    ImGui::SeparatorText("Graphics Style");
+    {
+        int style = (engine->GetGraphicsStyle() == GraphicsStyle::Toon) ? 1 : 0;
+        const char* styles[] = { "Realistic", "Toon" };
+        if (ImGui::Combo("Style", &style, styles, 2))
+            engine->SetGraphicsStyle(style == 1 ? GraphicsStyle::Toon : GraphicsStyle::Realistic);
+
+        if (engine->GetGraphicsStyle() == GraphicsStyle::Toon)
+        {
+            float bands = engine->GetToonBands();
+            if (SliderFloatFull("Toon Bands", &bands, 1.0f, 8.0f))
+                engine->SetToonBands(bands);
+            bool outline = engine->IsToonOutlineEnabled();
+            if (CheckboxWrapped("Outline", &outline))
+                engine->SetToonOutlineEnabled(outline);
+            if (outline)
+            {
+                float ow = engine->GetOutlineWidth();
+                if (SliderFloatFull("Outline Width", &ow, 0.005f, 0.08f))
+                    engine->SetOutlineWidth(ow);
+            }
+        }
+        else
+        {
+            float spec = engine->GetSpecularPower();
+            if (SliderFloatFull("Specular Power", &spec, 4.0f, 128.0f))
+                engine->SetSpecularPower(spec);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Lighting");
+    {
+        XMFLOAT3 amb = engine->GetAmbientLight();
+        float a[3] = { amb.x, amb.y, amb.z };
+        if (ImGui::ColorEdit3("Ambient", a))
+            engine->SetAmbientLight({ a[0], a[1], a[2] });
+
+        XMFLOAT3 sun = engine->GetSunStrength();
+        float s[3] = { sun.x, sun.y, sun.z };
+        if (ImGui::ColorEdit3("Sun Color", s))
+            engine->SetSunStrength({ s[0], s[1], s[2] });
+
+        XMFLOAT3 dir = engine->GetSunDirection();
+        float d[3] = { dir.x, dir.y, dir.z };
+        if (ImGui::DragFloat3("Sun Dir", d, 0.01f, -1.0f, 1.0f))
+            engine->SetSunDirection({ d[0], d[1], d[2] });
+        TextLineDisabled("Sun Dir = light travel direction (down ≈ 0,-1,0)");
+
+        bool shadows = engine->IsShadowsEnabled();
+        if (CheckboxWrapped("Shadows", &shadows))
+            engine->SetShadowsEnabled(shadows);
+        if (shadows)
+        {
+            float bias = engine->GetShadowBias();
+            if (SliderFloatFull("Shadow Bias", &bias, 0.0005f, 0.02f))
+                engine->SetShadowBias(bias);
+        }
+    }
+
+    ImGui::Spacing();
     ImGui::SeparatorText("Path");
     TextLine("Path: %s %s", pathName, st.autoPath ? "(Auto)" : "(Manual)");
     TextLine("Frustum Cull: %s", st.cullEnabled ? "ON" : "OFF");

@@ -62,6 +62,37 @@ public:
     float GetLodCullDistance() const;
     const GpuDrivenFrameStats& GetLastFrameStats() const;
 
+    // --- Graphics style / lighting (PassCB) ---
+    void SetGraphicsStyle(GraphicsStyle style);
+    GraphicsStyle GetGraphicsStyle() const { return mGraphicsStyle; }
+    void SetToonBands(float bands);
+    float GetToonBands() const { return mToonBands; }
+    void SetToonOutlineEnabled(bool enabled);
+    bool IsToonOutlineEnabled() const { return mToonOutlineEnabled; }
+    void SetOutlineWidth(float w);
+    float GetOutlineWidth() const { return mOutlineWidth; }
+    void SetSunDirection(DirectX::XMFLOAT3 dir);
+    DirectX::XMFLOAT3 GetSunDirection() const { return mSunDirection; }
+    void SetSunStrength(DirectX::XMFLOAT3 rgb);
+    DirectX::XMFLOAT3 GetSunStrength() const { return mSunStrength; }
+    void SetAmbientLight(DirectX::XMFLOAT3 rgb);
+    DirectX::XMFLOAT3 GetAmbientLight() const { return mAmbientRgb; }
+    void SetSpecularPower(float p);
+    float GetSpecularPower() const { return mSpecularPower; }
+
+    void SetShadowsEnabled(bool enabled);
+    bool IsShadowsEnabled() const { return mShadowsEnabled; }
+    void SetShadowBias(float bias);
+    float GetShadowBias() const { return mShadowBias; }
+
+    // Depth-only pass into the directional shadow map (call before Scene RT Begin).
+    void RenderShadowMap(
+        ID3D12GraphicsCommandList* cmdList,
+        FrameResource* currentFrameResource,
+        int currentFrameIndex,
+        const DirectX::XMMATRIX& viewMatrix,
+        const DirectX::XMMATRIX& projMatrix);
+
     // Scene RT 리사이즈 후 GPU idle 상태에서 Hi-Z 재할당
     void PrepareHiZForSceneSize(UINT width, UINT height);
 
@@ -182,4 +213,17 @@ private:
 
     std::vector<Entity> mRenderableListCache;
     bool mRenderableListDirty = true;
+
+    void SyncOutlinePassFlag();
+
+    GraphicsStyle mGraphicsStyle = GraphicsStyle::Realistic;
+    float mToonBands = 3.0f;
+    bool mToonOutlineEnabled = true;
+    float mOutlineWidth = 0.025f;
+    float mSpecularPower = 32.0f;
+    DirectX::XMFLOAT3 mSunDirection = { 0.35f, -1.0f, 0.25f };
+    DirectX::XMFLOAT3 mSunStrength = { 1.0f, 0.96f, 0.90f };
+    DirectX::XMFLOAT3 mAmbientRgb = { 0.22f, 0.24f, 0.30f };
+    bool mShadowsEnabled = true;
+    float mShadowBias = 0.003f;
 };

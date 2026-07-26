@@ -36,11 +36,15 @@ public:
     void Initialize(ID3D12Device* device);
     void Shutdown();
 
-    // PSO를 가져오거나 없으면 생성
+    // PSO를 가져오거나 없으면 생성.
+    // depthOnly: compile VS only, no pixel shader (shadow map casters).
+    // sampleCount: must match bound RT/DS (SceneViewport uses 4).
     ID3D12PipelineState* GetOrCreatePSO(
         const PSOKey& key,
         ID3D12RootSignature* rootSignature,
-        ID3D12Device* device = nullptr);   // device가 nullptr이면 내부 mDevice 사용
+        ID3D12Device* device = nullptr,
+        bool depthOnly = false,
+        UINT sampleCount = 1);
 
 private:
     PipelineStateManager() = default;

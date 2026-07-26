@@ -46,7 +46,9 @@ namespace
         overlapX = std::min(aMax.x, bMax.x) - std::max(aMin.x, bMin.x);
         overlapY = std::min(aMax.y, bMax.y) - std::max(aMin.y, bMin.y);
         overlapZ = std::min(aMax.z, bMax.z) - std::max(aMin.z, bMin.z);
-        return overlapX > 0.0f && overlapY > 0.0f && overlapZ > 0.0f;
+        // After min half-extent inflation, require a tiny positive volume (float noise safe).
+        constexpr float kMinOverlap = 1e-5f;
+        return overlapX > kMinOverlap && overlapY > kMinOverlap && overlapZ > kMinOverlap;
     }
 
     void ApplyAxisMove(ColliderEntry& entry, int axis, float move)

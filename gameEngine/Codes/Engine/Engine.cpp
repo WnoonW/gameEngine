@@ -742,9 +742,125 @@ void Engine::FillPassCB(FrameResource* currentFrame,
     pc.TotalTime = totalTime;
     pc.DeltaTime = deltaTime;
 
-    pc.AmbientLight = { 0.25f, 0.25f, 0.35f, 1.0f };
+    pc.AmbientLight = { mAmbientRgb.x, mAmbientRgb.y, mAmbientRgb.z, 1.0f };
+
+    // Primary directional light (Lights[0])
+    XMFLOAT3 sunDir = mSunDirection;
+    {
+        XMVECTOR d = XMLoadFloat3(&sunDir);
+        d = XMVector3Normalize(d);
+        if (XMVectorGetX(XMVector3LengthSq(d)) < 1e-8f)
+            d = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
+        XMStoreFloat3(&sunDir, d);
+    }
+    pc.Lights[0].Direction = sunDir;
+    pc.Lights[0].Strength = mSunStrength;
+
+    pc.GraphicsStyle = (mGraphicsStyle == GraphicsStyle::Toon) ? 1 : 0;
+    pc.ToonBands = mToonBands;
+    pc.OutlineWidth = mOutlineWidth;
+    pc.SpecularPower = mSpecularPower;
+
+    // Directional shadow ortho around scene origin, looking along sun ray travel dir
+    {
+        XMVECTOR dir = XMVector3Normalize(XMLoadFloat3(&sunDir));
+        if (XMVectorGetX(XMVector3LengthSq(dir)) < 1e-8f)
+            dir = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
+
+        XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+        if (fabsf(XMVectorGetX(XMVector3Dot(dir, up))) > 0.95f)
+            up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+
+        // Center cascade near camera eye for better local density
+        XMVECTOR focus = XMLoadFloat3(&eyePos);
+        const float cascadeHalf = 35.0f;
+        const float cascadeDist = 50.0f;
+        XMVECTOR lightPos = XMVectorSubtract(focus, XMVectorScale(dir, cascadeDist));
+        XMMATRIX lightView = XMMatrixLookAtLH(lightPos, focus, up);
+        XMMATRIX lightProj = XMMatrixOrthographicLH(
+            cascadeHalf * 2.0f, cascadeHalf * 2.0f, 1.0f, cascadeDist * 2.0f);
+        XMMATRIX lightVP = XMMatrixMultiply(lightView, lightProj);
+        XMStoreFloat4x4(&pc.LightViewProj, XMMatrixTranspose(lightVP));
+    }
+    pc.ShadowBias = mShadowBias;
+    pc.ShadowEnabled = mShadowsEnabled ? 1.0f : 0.0f;
+    pc.ShadowSoftness = 1.0f;
 
     currentFrame->PassCB->CopyData(0, pc);
+}
+
+void Engine::SetShadowsEnabled(bool enabled)
+{
+    mShadowsEnabled = enabled;
+    mRenderSystem.SetShadowsEnabled(enabled);
+}
+
+void Engine::SetShadowBias(float bias)
+{
+    mShadowBias = MathHelper::Clamp(bias, 0.0001f, 0.05f);
+}
+
+void Engine::RenderShadowMap(
+    ID3D12GraphicsCommandList* cmdList,
+    FrameResource* currentFrameResource,
+    int currentFrameIndex,
+    const XMMATRIX& viewMatrix,
+    const XMMATRIX& projMatrix)
+{
+    if (!mDescriptorAllocator)
+        return;
+    mRenderSystem.RenderShadowMap(
+        mWorld, cmdList, currentFrameResource, mDescriptorAllocator,
+        currentFrameIndex, viewMatrix, projMatrix);
+}
+
+void Engine::SyncOutlinePassFlag()
+{
+    const bool outline =
+        (mGraphicsStyle == GraphicsStyle::Toon) && mToonOutlineEnabled;
+    mRenderSystem.SetOutlinePassEnabled(outline);
+}
+
+void Engine::SetGraphicsStyle(GraphicsStyle style)
+{
+    mGraphicsStyle = style;
+    SyncOutlinePassFlag();
+}
+
+void Engine::SetToonBands(float bands)
+{
+    mToonBands = MathHelper::Clamp(bands, 1.0f, 8.0f);
+}
+
+void Engine::SetToonOutlineEnabled(bool enabled)
+{
+    mToonOutlineEnabled = enabled;
+    SyncOutlinePassFlag();
+}
+
+void Engine::SetOutlineWidth(float w)
+{
+    mOutlineWidth = MathHelper::Clamp(w, 0.001f, 0.2f);
+}
+
+void Engine::SetSunDirection(XMFLOAT3 dir)
+{
+    mSunDirection = dir;
+}
+
+void Engine::SetSunStrength(XMFLOAT3 rgb)
+{
+    mSunStrength = rgb;
+}
+
+void Engine::SetAmbientLight(XMFLOAT3 rgb)
+{
+    mAmbientRgb = rgb;
+}
+
+void Engine::SetSpecularPower(float p)
+{
+    mSpecularPower = MathHelper::Clamp(p, 1.0f, 256.0f);
 }
 
 Entity Engine::CreateMainCamera(XMFLOAT3 position, float fov, float nearZ, float farZ)

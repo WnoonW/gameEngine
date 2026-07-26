@@ -17,6 +17,7 @@ void RootSignatureManager::Initialize(ID3D12Device* device)
     mDevice = device;
 
     CreateSceneRootSignature();
+    CreateShadowRootSignature();
     CreateIndirectBuildRootSignature();
     CreateHiZBuildRootSignature();
     CreateComposeWorldRootSignature();
@@ -47,10 +48,8 @@ ID3D12CommandSignature* RootSignatureManager::GetSceneCommandSignature()
 
 void RootSignatureManager::CreateSceneRootSignature()
 {
-    // b0 ObjectCB | b1 PassCB | table t0 (1 texture) | root SRV t1 instances
-    // Step E: CPU stores material heap Index and binds table via heapStart+Index*stride
-    // (full-heap 8192 array sampling caused DEVICE_HUNG on invalid slots)
-    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
+    // b0 ObjectCB | b1 PassCB | table t0 albedo | root SRV t1 instances | table t2 shadow
+    CD3DX12_ROOT_PARAMETER slotRootParameter[5];
 
     slotRootParameter[0].InitAsConstantBufferView(0);
     slotRootParameter[1].InitAsConstantBufferView(1);
@@ -62,19 +61,37 @@ void RootSignatureManager::CreateSceneRootSignature()
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+    D3D12_DESCRIPTOR_RANGE shadowRange = {};
+    shadowRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    shadowRange.NumDescriptors = 1;
+    shadowRange.BaseShaderRegister = 2; // t2
+    shadowRange.RegisterSpace = 0;
+    shadowRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
     slotRootParameter[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
     slotRootParameter[3].InitAsShaderResourceView(1); // t1 instance worlds
+    slotRootParameter[4].InitAsDescriptorTable(1, &shadowRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
+    CD3DX12_STATIC_SAMPLER_DESC samplers[2];
+    samplers[0] = CD3DX12_STATIC_SAMPLER_DESC(
         0,
         D3D12_FILTER_MIN_MAG_MIP_LINEAR,
         D3D12_TEXTURE_ADDRESS_MODE_WRAP,
         D3D12_TEXTURE_ADDRESS_MODE_WRAP,
         D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    samplers[1] = CD3DX12_STATIC_SAMPLER_DESC(
+        1, // s1 comparison shadow
+        D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+        D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+        D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+        0.0f, 16,
+        D3D12_COMPARISON_FUNC_LESS_EQUAL,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        4, slotRootParameter,
-        1, &samplerDesc,
+        5, slotRootParameter,
+        2, samplers,
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     ComPtr<ID3DBlob> serializedRootSig;
@@ -99,6 +116,38 @@ void RootSignatureManager::CreateSceneRootSignature()
         IID_PPV_ARGS(&rootSig)));
 
     mRootSignatures[RootSignatureType::Scene] = rootSig;
+}
+
+void RootSignatureManager::CreateShadowRootSignature()
+{
+    // Depth-only casters: b0 ObjectCB | b1 PassCB | t1 instances (optional)
+    CD3DX12_ROOT_PARAMETER params[3];
+    params[0].InitAsConstantBufferView(0);
+    params[1].InitAsConstantBufferView(1);
+    params[2].InitAsShaderResourceView(1);
+
+    CD3DX12_ROOT_SIGNATURE_DESC desc(
+        3, params,
+        0, nullptr,
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    ComPtr<ID3DBlob> serialized;
+    ComPtr<ID3DBlob> error;
+    HRESULT hr = D3D12SerializeRootSignature(
+        &desc, D3D_ROOT_SIGNATURE_VERSION_1,
+        serialized.GetAddressOf(), error.GetAddressOf());
+    if (error)
+        OutputDebugStringA((char*)error->GetBufferPointer());
+    ThrowIfFailed(hr);
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    ThrowIfFailed(mDevice->CreateRootSignature(
+        0,
+        serialized->GetBufferPointer(),
+        serialized->GetBufferSize(),
+        IID_PPV_ARGS(&rootSig)));
+
+    mRootSignatures[RootSignatureType::Shadow] = rootSig;
 }
 
 void RootSignatureManager::CreateIndirectBuildRootSignature()

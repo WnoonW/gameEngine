@@ -1,5 +1,7 @@
 #include "SceneViewport.h"
 #include "d3dUtil.h"
+#include "d3dx12.h"
+#include <cstring>
 
 void SceneViewport::Initialize(
     ID3D12Device* device,
@@ -52,8 +54,6 @@ void SceneViewport::Shutdown()
     mDsvHeap.Reset();
     mDevice = nullptr;
     mSrvAllocator = nullptr;
-    mWidth = 0;
-    mHeight = 0;
 }
 
 bool SceneViewport::Resize(UINT width, UINT height)
@@ -61,7 +61,7 @@ bool SceneViewport::Resize(UINT width, UINT height)
     width = (width == 0) ? 1 : width;
     height = (height == 0) ? 1 : height;
 
-    if (mColor && mWidth == width && mHeight == height)
+    if (mColorResolved && mWidth == width && mHeight == height)
         return false;
 
     DestroySizeDependentResources();
@@ -71,12 +71,14 @@ bool SceneViewport::Resize(UINT width, UINT height)
 
 void SceneViewport::DestroySizeDependentResources()
 {
-    mColor.Reset();
-    mDepth.Reset();
+    mColorMsaa.Reset();
+    mDepthMsaa.Reset();
+    mColorResolved.Reset();
     mWidth = 0;
     mHeight = 0;
-    mColorState = D3D12_RESOURCE_STATE_COMMON;
-    mDepthState = D3D12_RESOURCE_STATE_COMMON;
+    mColorMsaaState = D3D12_RESOURCE_STATE_COMMON;
+    mDepthMsaaState = D3D12_RESOURCE_STATE_COMMON;
+    mColorResolvedState = D3D12_RESOURCE_STATE_COMMON;
 }
 
 void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
@@ -90,98 +92,113 @@ void SceneViewport::CreateSizeDependentResources(UINT width, UINT height)
     mWidth = width;
     mHeight = height;
 
-    // ---- Color (RT + SRV) ----
-    D3D12_RESOURCE_DESC colorDesc{};
-    colorDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    colorDesc.Alignment = 0;
-    colorDesc.Width = width;
-    colorDesc.Height = height;
-    colorDesc.DepthOrArraySize = 1;
-    colorDesc.MipLevels = 1;
-    colorDesc.Format = mColorFormat;
-    colorDesc.SampleDesc.Count = 1;
-    colorDesc.SampleDesc.Quality = 0;
-    colorDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    colorDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    const float clearRgb[4] = {
+        0.690196097f, 0.768627524f, 0.870588303f, 1.0f
+    };
 
-    D3D12_CLEAR_VALUE colorClear{};
-    colorClear.Format = mColorFormat;
-    colorClear.Color[0] = 0.690196097f;
-    colorClear.Color[1] = 0.768627524f;
-    colorClear.Color[2] = 0.870588303f;
-    colorClear.Color[3] = 1.0f;
+    // ---- MSAA color (render target) ----
+    {
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = width;
+        desc.Height = height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = mColorFormat;
+        desc.SampleDesc.Count = kMsaaCount;
+        desc.SampleDesc.Quality = 0;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-    ThrowIfFailed(mDevice->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-        D3D12_HEAP_FLAG_NONE,
-        &colorDesc,
-        D3D12_RESOURCE_STATE_COMMON,
-        &colorClear,
-        IID_PPV_ARGS(&mColor)));
-    mColorState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_CLEAR_VALUE clear{};
+        clear.Format = mColorFormat;
+        memcpy(clear.Color, clearRgb, sizeof(clearRgb));
 
-    mDevice->CreateRenderTargetView(
-        mColor.Get(),
-        nullptr,
-        mRtvHeap->GetCPUDescriptorHandleForHeapStart());
+        ThrowIfFailed(mDevice->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            &clear,
+            IID_PPV_ARGS(&mColorMsaa)));
+        mColorMsaaState = D3D12_RESOURCE_STATE_COMMON;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-    srvDesc.Format = mColorFormat;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    srvDesc.Texture2D.MipLevels = 1;
-    srvDesc.Texture2D.PlaneSlice = 0;
-    srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-    mDevice->CreateShaderResourceView(mColor.Get(), &srvDesc, mSrv.CPU);
+        D3D12_RENDER_TARGET_VIEW_DESC rtv{};
+        rtv.Format = mColorFormat;
+        rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+        mDevice->CreateRenderTargetView(
+            mColorMsaa.Get(), &rtv, mRtvHeap->GetCPUDescriptorHandleForHeapStart());
+    }
 
-    // ---- Depth (typeless: DSV + depth SRV for Hi-Z) ----
-    D3D12_RESOURCE_DESC depthDesc{};
-    depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    depthDesc.Alignment = 0;
-    depthDesc.Width = width;
-    depthDesc.Height = height;
-    depthDesc.DepthOrArraySize = 1;
-    depthDesc.MipLevels = 1;
-    depthDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-    depthDesc.SampleDesc.Count = 1;
-    depthDesc.SampleDesc.Quality = 0;
-    depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    // ---- Resolved color (ImGui SRV / copy source) ----
+    {
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = width;
+        desc.Height = height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = mColorFormat;
+        desc.SampleDesc.Count = 1;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET; // not required for resolve dest but OK
 
-    D3D12_CLEAR_VALUE depthClear{};
-    depthClear.Format = mDepthFormat; // D24_UNORM_S8_UINT
-    depthClear.DepthStencil.Depth = 1.0f;
-    depthClear.DepthStencil.Stencil = 0;
+        ThrowIfFailed(mDevice->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&mColorResolved)));
+        mColorResolvedState = D3D12_RESOURCE_STATE_COMMON;
 
-    ThrowIfFailed(mDevice->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-        D3D12_HEAP_FLAG_NONE,
-        &depthDesc,
-        D3D12_RESOURCE_STATE_COMMON,
-        &depthClear,
-        IID_PPV_ARGS(&mDepth)));
-    mDepthState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = mColorFormat;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = 1;
+        mDevice->CreateShaderResourceView(mColorResolved.Get(), &srvDesc, mSrv.CPU);
+    }
 
-    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
-    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    dsvDesc.Format = mDepthFormat;
-    dsvDesc.Texture2D.MipSlice = 0;
-    mDevice->CreateDepthStencilView(
-        mDepth.Get(),
-        &dsvDesc,
-        mDsvHeap->GetCPUDescriptorHandleForHeapStart());
+    // ---- MSAA depth (DSV + Texture2DMS SRV for Hi-Z sample 0) ----
+    {
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = width;
+        desc.Height = height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+        desc.SampleDesc.Count = kMsaaCount;
+        desc.SampleDesc.Quality = 0;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC depthSrv{};
-    depthSrv.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-    depthSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    depthSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    depthSrv.Texture2D.MostDetailedMip = 0;
-    depthSrv.Texture2D.MipLevels = 1;
-    depthSrv.Texture2D.PlaneSlice = 0;
-    depthSrv.Texture2D.ResourceMinLODClamp = 0.0f;
-    mDevice->CreateShaderResourceView(mDepth.Get(), &depthSrv, mDepthSrv.CPU);
+        D3D12_CLEAR_VALUE clear{};
+        clear.Format = mDepthFormat;
+        clear.DepthStencil.Depth = 1.0f;
+        clear.DepthStencil.Stencil = 0;
+
+        ThrowIfFailed(mDevice->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            &clear,
+            IID_PPV_ARGS(&mDepthMsaa)));
+        mDepthMsaaState = D3D12_RESOURCE_STATE_COMMON;
+
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS;
+        dsvDesc.Format = mDepthFormat;
+        mDevice->CreateDepthStencilView(
+            mDepthMsaa.Get(), &dsvDesc, mDsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC depthSrv{};
+        depthSrv.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+        depthSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+        depthSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        mDevice->CreateShaderResourceView(mDepthMsaa.Get(), &depthSrv, mDepthSrv.CPU);
+    }
 }
 
 void SceneViewport::Begin(ID3D12GraphicsCommandList* cmdList, const float clearColor[4])
@@ -189,22 +206,17 @@ void SceneViewport::Begin(ID3D12GraphicsCommandList* cmdList, const float clearC
     assert(cmdList);
     assert(IsValid());
 
-    if (mColorState != D3D12_RESOURCE_STATE_RENDER_TARGET)
+    if (mColorMsaaState != D3D12_RESOURCE_STATE_RENDER_TARGET)
     {
         cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            mColor.Get(),
-            mColorState,
-            D3D12_RESOURCE_STATE_RENDER_TARGET));
-        mColorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            mColorMsaa.Get(), mColorMsaaState, D3D12_RESOURCE_STATE_RENDER_TARGET));
+        mColorMsaaState = D3D12_RESOURCE_STATE_RENDER_TARGET;
     }
-
-    if (mDepthState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+    if (mDepthMsaaState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
     {
         cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            mDepth.Get(),
-            mDepthState,
-            D3D12_RESOURCE_STATE_DEPTH_WRITE));
-        mDepthState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            mDepthMsaa.Get(), mDepthMsaaState, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+        mDepthMsaaState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
     }
 
     const D3D12_CPU_DESCRIPTOR_HANDLE rtv = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -215,8 +227,6 @@ void SceneViewport::Begin(ID3D12GraphicsCommandList* cmdList, const float clearC
     cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
     D3D12_VIEWPORT vp{};
-    vp.TopLeftX = 0.0f;
-    vp.TopLeftY = 0.0f;
     vp.Width = static_cast<float>(mWidth);
     vp.Height = static_cast<float>(mHeight);
     vp.MinDepth = 0.0f;
@@ -232,23 +242,40 @@ void SceneViewport::End(ID3D12GraphicsCommandList* cmdList)
     assert(cmdList);
     assert(IsValid());
 
-    if (mColorState != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+    // Resolve MSAA color → non-MSAA for ImGui / CopyColorTo
+    if (mColorMsaaState != D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
     {
         cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            mColor.Get(),
-            mColorState,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
-        mColorState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            mColorMsaa.Get(), mColorMsaaState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE));
+        mColorMsaaState = D3D12_RESOURCE_STATE_RESOLVE_SOURCE;
+    }
+    if (mColorResolvedState != D3D12_RESOURCE_STATE_RESOLVE_DEST)
+    {
+        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            mColorResolved.Get(), mColorResolvedState, D3D12_RESOURCE_STATE_RESOLVE_DEST));
+        mColorResolvedState = D3D12_RESOURCE_STATE_RESOLVE_DEST;
     }
 
-    // Depth → CS/PS readable for Hi-Z build (next cull uses previous Hi-Z)
-    if (mDepthState != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+    cmdList->ResolveSubresource(
+        mColorResolved.Get(), 0,
+        mColorMsaa.Get(), 0,
+        mColorFormat);
+
+    // Resolved color → PS for ImGui
+    cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+        mColorResolved.Get(),
+        D3D12_RESOURCE_STATE_RESOLVE_DEST,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+    mColorResolvedState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+    // Depth MSAA → CS readable for Hi-Z (Texture2DMS)
+    if (mDepthMsaaState != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
     {
         cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            mDepth.Get(),
-            mDepthState,
+            mDepthMsaa.Get(),
+            mDepthMsaaState,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-        mDepthState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        mDepthMsaaState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     }
 }
 
@@ -261,11 +288,14 @@ void SceneViewport::CopyColorTo(
     assert(dest);
     assert(IsValid());
 
-    if (mColorState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+    // End() leaves resolved color in PIXEL_SHADER_RESOURCE
+    if (mColorResolvedState != D3D12_RESOURCE_STATE_COPY_SOURCE)
     {
         cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            mColor.Get(), mColorState, D3D12_RESOURCE_STATE_COPY_SOURCE));
-        mColorState = D3D12_RESOURCE_STATE_COPY_SOURCE;
+            mColorResolved.Get(),
+            mColorResolvedState,
+            D3D12_RESOURCE_STATE_COPY_SOURCE));
+        mColorResolvedState = D3D12_RESOURCE_STATE_COPY_SOURCE;
     }
 
     if (destStateBefore != D3D12_RESOURCE_STATE_COPY_DEST)
@@ -274,5 +304,5 @@ void SceneViewport::CopyColorTo(
             dest, destStateBefore, D3D12_RESOURCE_STATE_COPY_DEST));
     }
 
-    cmdList->CopyResource(dest, mColor.Get());
+    cmdList->CopyResource(dest, mColorResolved.Get());
 }

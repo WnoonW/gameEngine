@@ -468,6 +468,25 @@ bool MeshManager::CreateClusteredLod(
 	if (!src || src->cpuModel.submeshes.empty())
 		return false;
 
+	// Count source triangles — clustering hard-edged low-poly (box/cube, ~12 tris)
+	// pulls split-face verts inward per normal bin and opens edge cracks that look
+	// like "transparent corners" when LOD switches in the distance.
+	size_t srcTris = 0;
+	for (const auto& sub : src->cpuModel.submeshes)
+		srcTris += sub.indices.size() / 3;
+
+	// Simple meshes: do not generate a clustered LOD (keep base mesh only).
+	constexpr size_t kMinTrisForClusterLod = 64;
+	if (srcTris < kMinTrisForClusterLod)
+	{
+		char buf[256];
+		sprintf_s(buf,
+			"[MeshManager] LOD skip %s -> %s (src tris=%zu < %zu; avoids open edges)\n",
+			srcName.c_str(), dstName.c_str(), srcTris, kMinTrisForClusterLod);
+		OutputDebugStringA(buf);
+		return true;
+	}
+
 	XMFLOAT3 bmin{}, bmax{};
 	ComputeModelAabb(src->cpuModel, bmin, bmax);
 	const float ex = (std::max)(bmax.x - bmin.x, 1e-4f);
@@ -475,9 +494,9 @@ bool MeshManager::CreateClusteredLod(
 	const float ez = (std::max)(bmax.z - bmin.z, 1e-4f);
 	const float maxExtent = (std::max)(ex, (std::max)(ey, ez));
 	const float cellSize = maxExtent / static_cast<float>(gridCells);
-	// Outward inflate ~ fraction of cell — helps thin limbs keep bulk after merge
-	const float inflate = cellSize * 0.18f;
-	// More normal bins = better limb thickness; 4 is a good balance
+	// Inflate along normal opens cracks on hard edges (each face has unique verts).
+	// Only use a tiny inflate on very dense organic meshes.
+	const float inflate = (srcTris >= 5000) ? (cellSize * 0.12f) : 0.0f;
 	const int normalBins = 4;
 
 	Mesh mMesh;
@@ -491,7 +510,7 @@ bool MeshManager::CreateClusteredLod(
 		mMesh.cpuModel.submeshes.push_back(std::move(out));
 	}
 
-	// Too collapsed → single solid AABB (still no holes, silhouette only)
+	// Too collapsed → single solid AABB (watertight silhouette)
 	if (mMesh.cpuModel.submeshes.empty() || totalTris < 4)
 	{
 		mMesh.cpuModel.submeshes.clear();
@@ -504,10 +523,27 @@ bool MeshManager::CreateClusteredLod(
 	}
 	else
 	{
-		char buf[256];
-		sprintf_s(buf, "[MeshManager] LOD %s -> %s (cluster cells=%d, tris~%zu)\n",
-			srcName.c_str(), dstName.c_str(), gridCells, totalTris);
-		OutputDebugStringA(buf);
+		// If clustering dropped most of the surface, prefer solid AABB over a
+		// swiss-cheese mesh (typical when hard-edged models collapse badly).
+		const float keep = static_cast<float>(totalTris) / static_cast<float>((std::max)(srcTris, size_t(1)));
+		if (keep < 0.35f && srcTris < 500)
+		{
+			mMesh.cpuModel.submeshes.clear();
+			const std::string mat = src->cpuModel.submeshes[0].materialName;
+			mMesh.cpuModel.submeshes.push_back(MakeAabbBoxSubmesh(bmin, bmax, mat));
+			char buf[256];
+			sprintf_s(buf,
+				"[MeshManager] LOD %s -> %s (AABB; cluster kept only %.0f%% tris)\n",
+				srcName.c_str(), dstName.c_str(), keep * 100.f);
+			OutputDebugStringA(buf);
+		}
+		else
+		{
+			char buf[256];
+			sprintf_s(buf, "[MeshManager] LOD %s -> %s (cluster cells=%d, tris~%zu)\n",
+				srcName.c_str(), dstName.c_str(), gridCells, totalTris);
+			OutputDebugStringA(buf);
+		}
 	}
 
 	return UploadAndRegisterMesh(dstName, mMesh, device, cmdList);
