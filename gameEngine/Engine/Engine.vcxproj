@@ -85,6 +85,13 @@
     <ClCompile Include="..\Codes\Managers\ShaderManager.cpp" />
     <ClCompile Include="..\Codes\Memory\DescriptorAllocator.cpp" />
     <ClCompile Include="..\Codes\Systems\RenderSystem.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_GpuDriven.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_Instanced.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_Basic.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_Shadow.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_HiZ.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_SubLogic.cpp" />
+    <ClCompile Include="..\Codes\Systems\RenderSystem_Helpers.cpp" />
     <ClCompile Include="..\Codes\Systems\BoundsSystem.cpp" />
     <ClCompile Include="..\Codes\Systems\GravitySystem.cpp" />
     <ClCompile Include="..\Codes\Systems\CollisionSystem.cpp" />
