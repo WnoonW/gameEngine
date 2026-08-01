@@ -4,11 +4,15 @@
 #include "Engine.h"
 #include "ImGuiManager.h"
 #include "SceneViewport.h"
+#include "Entity.h"
 #include "d3dUtil.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <cstdio>
 #include <imgui.h>
+
+using ECS::Entity;
 
 using namespace DirectX;
 
@@ -42,6 +46,25 @@ void PlayMode::OnAfterInit(AppContext& ctx)
 
     if (ctx.imgui)
         ctx.imgui->SetPlayMode(true);
+
+    MatchSceneToClient(ctx);
+
+    // Product Game.exe: LoadScene already spawned presets. Re-apply only if empty
+    // (missed spawn). In-editor play keeps live widgets — avoid double-spawn.
+    if (ctx.engine)
+    {
+        if (ctx.engine->GetUiEntities().empty())
+            ctx.engine->ApplySceneUiPresetVisibility();
+        for (Entity e : ctx.engine->GetUiEntities())
+        {
+            ctx.engine->SetUiVisible(e, true);
+            ctx.engine->SetUiActive(e, true);
+        }
+        char buf[128];
+        sprintf_s(buf, "[Play] OnAfterInit live UI entities=%zu\n",
+            ctx.engine->GetUiEntities().size());
+        OutputDebugStringA(buf);
+    }
 
     if (ctx.gameConfig && !ctx.gameConfig->mouseLookOnStart)
         mMouseLookRequested = false;
@@ -77,22 +100,31 @@ void PlayMode::OnPresent(
     SceneViewport& sceneVP,
     ID3D12Resource* backBuffer)
 {
-    if (backBuffer
-        && sceneVP.IsValid()
-        && ctx.clientWidth && ctx.clientHeight
-        && sceneVP.GetWidth() == static_cast<UINT>(*ctx.clientWidth)
-        && sceneVP.GetHeight() == static_cast<UINT>(*ctx.clientHeight))
+    // Always present scene RT (3D + UI). Size is kept in sync via MatchSceneToClient;
+    // if off by one frame after resize, still attempt copy when dimensions match.
+    if (backBuffer && sceneVP.IsValid() && ctx.clientWidth && ctx.clientHeight)
     {
-        sceneVP.CopyColorTo(
-            cmdList,
-            backBuffer,
-            D3D12_RESOURCE_STATE_RENDER_TARGET);
+        const UINT cw = static_cast<UINT>((std::max)(1, *ctx.clientWidth));
+        const UINT ch = static_cast<UINT>((std::max)(1, *ctx.clientHeight));
+        if (sceneVP.GetWidth() == cw && sceneVP.GetHeight() == ch)
+        {
+            sceneVP.CopyColorTo(
+                cmdList,
+                backBuffer,
+                D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-        // EndFrame expects RENDER_TARGET → PRESENT.
-        cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            backBuffer,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_RENDER_TARGET));
+            // EndFrame expects RENDER_TARGET → PRESENT.
+            cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+                backBuffer,
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_RENDER_TARGET));
+        }
+        else
+        {
+            // Force desired size so next frame matches (UI must not disappear permanently).
+            if (ctx.imgui)
+                ctx.imgui->SetDesiredSceneSize(cw, ch);
+        }
     }
 
     // Close ImGui frame without drawing editor UI.

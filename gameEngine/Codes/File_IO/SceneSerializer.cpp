@@ -1,10 +1,14 @@
 #include "SceneSerializer.h"
+#include "UiPresetSerializer.h"
 #include <Windows.h>
 #include <fstream>
 #include <sstream>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 namespace
 {
@@ -59,7 +63,29 @@ bool SceneSerializer::SaveToFile(const std::string& path, const SceneFileData& s
     out << "version=" << SceneFileData::kCurrentVersion << "\n";
     out << "name=" << scene.name << "\n";
     out << "entity_count=" << scene.entities.size() << "\n";
+    for (const auto& entry : scene.uiPresets)
+    {
+        if (entry.name.empty())
+            continue;
+        // ui_preset=name,visible  (visible: 1/0) — old files without ,flag load as visible=1
+        out << "ui_preset=" << entry.name << "," << (entry.visible ? 1 : 0) << "\n";
+    }
     out << "\n";
+
+    // Full UI preset data (self-contained scene package)
+    for (const auto& preset : scene.uiPresetPayloads)
+    {
+        if (preset.name.empty() && preset.elements.empty())
+            continue;
+        out << "ui_preset_data\n";
+        out << "name=" << preset.name << "\n";
+        out << "version=" << preset.version << "\n";
+        out << "element_count=" << preset.elements.size() << "\n";
+        if (preset.designW > 1.0f && preset.designH > 1.0f)
+            out << "design=" << preset.designW << "," << preset.designH << "\n";
+        UiPresetSerializer::WriteElements(out, preset);
+        out << "end_ui_preset_data\n\n";
+    }
 
     for (const auto& e : scene.entities)
     {
@@ -119,6 +145,9 @@ bool SceneSerializer::LoadFromFile(const std::string& path, SceneFileData& outSc
 
     outScene = SceneFileData{};
     SceneEntityData* cur = nullptr;
+    bool inUiPresetData = false;
+    UiPresetData* curPreset = nullptr;
+    UiPresetElementData* curPresetEl = nullptr;
 
     std::string line;
     int lineNo = 0;
@@ -130,6 +159,44 @@ bool SceneSerializer::LoadFromFile(const std::string& path, SceneFileData& outSc
         line = Trim(line);
         if (line.empty() || line[0] == '#')
             continue;
+
+        // --- Embedded UI preset payload ---
+        if (line == "ui_preset_data")
+        {
+            outScene.uiPresetPayloads.emplace_back();
+            curPreset = &outScene.uiPresetPayloads.back();
+            curPresetEl = nullptr;
+            inUiPresetData = true;
+            cur = nullptr;
+            continue;
+        }
+        if (line == "end_ui_preset_data")
+        {
+            if (curPreset && curPreset->version <= 0)
+                curPreset->version = UiPresetData::kCurrentVersion;
+            if (curPreset && !curPreset->name.empty())
+            {
+                const bool exists = std::any_of(
+                    outScene.uiPresets.begin(), outScene.uiPresets.end(),
+                    [&](const SceneUiPresetEntry& e) { return e.name == curPreset->name; });
+                if (!exists)
+                    outScene.uiPresets.push_back(SceneUiPresetEntry{ curPreset->name, true });
+            }
+            inUiPresetData = false;
+            curPreset = nullptr;
+            curPresetEl = nullptr;
+            continue;
+        }
+        if (inUiPresetData && curPreset)
+        {
+            if (!UiPresetSerializer::ApplyElementLine(line, *curPreset, curPresetEl))
+            {
+                if (outError)
+                    *outError = "UI preset parse error at line " + std::to_string(lineNo) + ": " + line;
+                return false;
+            }
+            continue;
+        }
 
         if (line == "entity")
         {
@@ -162,6 +229,33 @@ bool SceneSerializer::LoadFromFile(const std::string& path, SceneFileData& outSc
                 outScene.name = val;
             else if (key == "entity_count")
             { /* optional, ignored */ }
+            else if (key == "ui_preset")
+            {
+                if (!val.empty())
+                {
+                    // Formats: "name" | "name,1" | "name,0" | "name,true" | "name,false"
+                    SceneUiPresetEntry entry;
+                    entry.visible = true;
+                    const auto comma = val.find(',');
+                    if (comma == std::string::npos)
+                    {
+                        entry.name = val;
+                    }
+                    else
+                    {
+                        entry.name = Trim(val.substr(0, comma));
+                        const std::string flag = Trim(val.substr(comma + 1));
+                        entry.visible = !(flag == "0" || flag == "false" || flag == "False");
+                    }
+                    if (entry.name.empty())
+                        continue;
+                    const bool exists = std::any_of(
+                        outScene.uiPresets.begin(), outScene.uiPresets.end(),
+                        [&](const SceneUiPresetEntry& e) { return e.name == entry.name; });
+                    if (!exists)
+                        outScene.uiPresets.push_back(std::move(entry));
+                }
+            }
             continue;
         }
 
@@ -240,4 +334,51 @@ std::string SceneSerializer::DefaultScenesDirectory()
     std::string dir = ExeDir() + "Scenes";
     CreateDirectoryA(dir.c_str(), nullptr);
     return dir;
+}
+
+std::vector<std::string> SceneSerializer::ListSceneNamesInDefaultDir()
+{
+    std::vector<std::string> names;
+    try
+    {
+        const fs::path dir = DefaultScenesDirectory();
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec))
+            return names;
+        for (const auto& entry : fs::directory_iterator(dir, ec))
+        {
+            if (ec) break;
+            if (!entry.is_regular_file(ec)) continue;
+            if (entry.path().extension() != ".scene") continue;
+            names.push_back(entry.path().stem().string());
+        }
+        std::sort(names.begin(), names.end());
+    }
+    catch (...) {}
+    return names;
+}
+
+bool SceneSerializer::DeleteSceneFile(const std::string& nameOrPath)
+{
+    if (nameOrPath.empty())
+        return false;
+    try
+    {
+        fs::path p(nameOrPath);
+        std::error_code ec;
+        if (!p.is_absolute())
+        {
+            std::string stem = nameOrPath;
+            if (stem.size() > 6 && stem.substr(stem.size() - 6) == ".scene")
+                stem = stem.substr(0, stem.size() - 6);
+            p = fs::path(DefaultScenesDirectory()) / (stem + ".scene");
+        }
+        if (!fs::is_regular_file(p, ec))
+            return false;
+        return fs::remove(p, ec) && !ec;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }

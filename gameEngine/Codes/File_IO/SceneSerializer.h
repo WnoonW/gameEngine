@@ -3,10 +3,12 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <cstdint>
 #include <DirectXMath.h>
+#include "UiPresetSerializer.h"
 
 // OneMore scene file (.scene) — human-readable text format.
-// Only serializes renderable entities (not the editor camera).
+// Serializes renderable entities + embedded UI preset payloads (not the editor camera).
 
 struct SceneEntityData
 {
@@ -32,12 +34,25 @@ struct SceneEntityData
     std::unordered_map<std::string, std::string> subMaterials;
 };
 
+// Scene association: which UI presets this level uses + visibility (saved with .scene).
+struct SceneUiPresetEntry
+{
+    std::string name;
+    bool visible = true; // shown when spawned / on scene load
+    // Runtime only (not written to file): live instance from SpawnUiPreset
+    uint32_t instanceId = 0;
+};
+
 struct SceneFileData
 {
     static constexpr int kCurrentVersion = 1;
     int version = kCurrentVersion;
     std::string name;
     std::vector<SceneEntityData> entities;
+    // UI presets to preload (+ optional spawn) when this scene loads.
+    std::vector<SceneUiPresetEntry> uiPresets;
+    // Full preset bodies embedded in the .scene (self-contained; also mirrored to UiPresets/).
+    std::vector<UiPresetData> uiPresetPayloads;
 };
 
 class SceneSerializer
@@ -51,4 +66,9 @@ public:
 
     // Default Scenes directory next to the exe (created if missing).
     static std::string DefaultScenesDirectory();
+
+    // List .scene stems in the default scenes directory.
+    static std::vector<std::string> ListSceneNamesInDefaultDir();
+    // Delete Scenes/<name>.scene (name with or without extension).
+    static bool DeleteSceneFile(const std::string& nameOrPath);
 };

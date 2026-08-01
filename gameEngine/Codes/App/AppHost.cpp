@@ -16,7 +16,9 @@
 #include "PlayMode.h"
 #include "FlyCameraMath.h"
 #include "SceneSerializer.h"
+#include "Entity.h"
 #include "d3dx12.h"
+#include <cstdio>
 
 using namespace DirectX;
 using ECS::Entity;
@@ -87,7 +89,9 @@ bool AppHost::SavePlaySnapshot(const std::string& absolutePath, std::string* out
 {
 	std::error_code ec;
 	std::filesystem::create_directories(std::filesystem::path(absolutePath).parent_path(), ec);
-	if (!mEngine.SaveSceneToFile(absolutePath, "play_snapshot"))
+
+	// Temp snapshot only: pack live UI into this file (no UiPresets/ spam, no editor list changes).
+	if (!mEngine.SaveSceneToFile(absolutePath, "play_snapshot", /*packLiveUiIntoFile=*/true))
 	{
 		if (outError)
 			*outError = "Failed to save scene snapshot: " + absolutePath;
@@ -150,13 +154,30 @@ bool AppHost::PlayStandalone()
 		CloseStandaloneProcess(true);
 	}
 
+	// Absolute scene path — Game.exe must load the exact snapshot we just wrote
+	// (relative Scenes/… can resolve to a different folder than the editor wrote).
 	const std::string absScene = MakeScenesTempPath("_play_standalone.scene");
-	const std::string relScene = "Scenes/_play_standalone.scene";
 	std::string err;
 	if (!SavePlaySnapshot(absScene, &err))
 	{
 		MessageBoxA(mhMainWnd, err.c_str(), "Play Standalone Failed", MB_OK | MB_ICONERROR);
 		return false;
+	}
+
+	{
+		const size_t nUi = mEngine.GetUiEntities().size();
+		char buf[256];
+		sprintf_s(buf, "[Editor] Play Standalone snapshot UI live=%zu file=%s\n",
+			nUi, absScene.c_str());
+		OutputDebugStringA(buf);
+		if (nUi == 0)
+		{
+			MessageBoxA(mhMainWnd,
+				"No live UI images to pack into the standalone snapshot.\n\n"
+				"Create UI first (UI panel → Create UI Image), then Play Standalone.\n"
+				"Or add a preset to Scene Preload and press Visible.",
+				"Play Standalone", MB_OK | MB_ICONWARNING);
+		}
 	}
 
 	const std::string gameExe = GameConfig::JoinPath(GameConfig::GetExeDirectory(), "Game.exe");
@@ -171,8 +192,8 @@ bool AppHost::PlayStandalone()
 		return false;
 	}
 
-	// Command line: first token is exe path (CreateProcess requirement when lpApplicationName is null).
-	std::string cmdLine = "\"" + gameExe + "\" --scene \"" + relScene + "\"";
+	// Absolute --scene path so Game never looks at a wrong/empty Scenes folder.
+	std::string cmdLine = "\"" + gameExe + "\" --scene \"" + absScene + "\"";
 	std::vector<char> cmdBuf(cmdLine.begin(), cmdLine.end());
 	cmdBuf.push_back('\0');
 
@@ -180,7 +201,8 @@ bool AppHost::PlayStandalone()
 	si.cb = sizeof(si);
 	PROCESS_INFORMATION pi{};
 
-	// Inherit editor working directory (Resources resolution).
+	// Start in the editor exe directory (Resources + Scenes next to Game.exe).
+	const std::string exeDir = GameConfig::GetExeDirectory();
 	const BOOL ok = CreateProcessA(
 		nullptr,
 		cmdBuf.data(),
@@ -189,7 +211,7 @@ bool AppHost::PlayStandalone()
 		FALSE,
 		0,
 		nullptr,
-		nullptr,
+		exeDir.empty() ? nullptr : exeDir.c_str(),
 		&si,
 		&pi);
 	if (!ok)
@@ -314,10 +336,29 @@ void AppHost::ApplyDeferredSessionActions()
 		mMode = std::move(play);
 		mInEditorPlaying = true;
 
+		// Full-window canvas for percent UI (edit Scene panel was smaller).
+		mImGuiManager.SetDesiredSceneSize(
+			static_cast<UINT>((std::max)(1, mClientWidth)),
+			static_cast<UINT>((std::max)(1, mClientHeight)));
+		mImGuiManager.EnsureSceneViewport([this]() { FlushCommandQueue(); });
+
+		// Keep live UI from the editor (do not spawn snapshot again → duplicates).
+		// If nothing is live, spawn from scene preload list (snapshot was just saved).
+		if (mEngine.GetUiEntities().empty())
+			mEngine.ApplySceneUiPresetVisibility();
+		for (Entity e : mEngine.GetUiEntities())
+		{
+			mEngine.SetUiVisible(e, true);
+			mEngine.SetUiActive(e, true);
+		}
+
 		if (mMode)
 			mMode->OnAfterInit(mCtx);
 
-		OutputDebugStringA("[Editor] Play In Editor started (ESC = Stop).\n");
+		char buf[128];
+		sprintf_s(buf, "[Editor] Play In Editor started; live UI=%zu\n",
+			mEngine.GetUiEntities().size());
+		OutputDebugStringA(buf);
 	}
 }
 
@@ -344,16 +385,27 @@ bool AppHost::Initialize()
 
 	if (mPlayMode && !mPendingSceneLoad.empty())
 	{
+		char loadMsg[512];
+		sprintf_s(loadMsg, "[Play] Loading scene: %s\n", mPendingSceneLoad.c_str());
+		OutputDebugStringA(loadMsg);
+
 		std::string err;
 		if (!mEngine.LoadSceneFromFile(mPendingSceneLoad, &err))
 		{
 			OutputDebugStringA(("[Play] Load scene failed: " + err + "\n").c_str());
+			MessageBoxA(mhMainWnd,
+				("Failed to load scene:\n" + mPendingSceneLoad + "\n\n" + err).c_str(),
+				"Play Mode", MB_OK | MB_ICONWARNING);
 			CreateInitialScene();
 		}
 		else
 		{
 			if (mMainCamera == INVALID_ENTITY)
 				mMainCamera = mEngine.CreateMainCamera({ 0.0f, 5.0f, -5.0f });
+
+			sprintf_s(loadMsg, "[Play] Scene loaded OK; UI entities=%zu\n",
+				mEngine.GetUiEntities().size());
+			OutputDebugStringA(loadMsg);
 		}
 	}
 	else
@@ -557,6 +609,12 @@ void AppHost::Draw(const GameTimer& gt)
 		sceneVP.Begin(mCommandList.Get(), sceneClear);
 
 		mEngine.Render(mCommandList.Get(), mCurrFrameResource, mCurrFrameResourceIndex, view, proj);
+
+		// In-game UI + VFX billboards (engine UiSystem, not ImGui)
+		mEngine.RenderUi(
+			mCommandList.Get(),
+			sceneVP.GetWidth(), sceneVP.GetHeight(),
+			view, proj);
 
 		sceneVP.End(mCommandList.Get());
 

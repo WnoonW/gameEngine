@@ -9,9 +9,12 @@
 #include "RenderLimits.h"
 #include "MathHelper.h"
 #include "SceneSerializer.h"
+#include "UiPresetSerializer.h"
 #include <algorithm>
 #include <vector>
 #include <filesystem>
+#include <cstdio>
+#include <climits>
 
 using namespace DirectX;
 
@@ -40,6 +43,8 @@ bool Engine::Initialize(ID3D12Device* device,
     RootSignatureManager::Get().Initialize(device);
     PipelineStateManager::Get().Initialize(device);
     mRenderSystem.Initialize(device);
+    mUiSystem.Initialize(device);
+    mUiSystem.SetSampleCount(4);
 
     return true;
 }
@@ -54,6 +59,22 @@ void Engine::Update(float deltaTime)
     // 충돌이 움직이면 full MarkDirty → GPU TRS/motion 재시드
     if (mCollisionSystem.Update(mWorld))
         UpdateBounds();
+
+    std::vector<Entity> toKill;
+    mWorld.ForEach<EffectBillboardComponent>(
+        [&](Entity e, EffectBillboardComponent& fx)
+        {
+            if (fx.lifetime < 0.f)
+                return;
+            fx.age += deltaTime;
+            if (fx.age >= fx.lifetime)
+                toKill.push_back(e);
+        });
+    for (Entity e : toKill)
+    {
+        mWorld.DestroyEntity(e);
+        mUiListDirty = true;
+    }
 }
 
 void Engine::UpdateBounds()
@@ -389,6 +410,891 @@ void Engine::Render(ID3D12GraphicsCommandList* cmdList,
         mDescriptorAllocator, currentFrameIndex, viewMatrix, projMatrix);
 }
 
+void Engine::RenderUi(
+    ID3D12GraphicsCommandList* cmdList,
+    UINT screenWidth, UINT screenHeight,
+    const XMMATRIX& viewMatrix,
+    const XMMATRIX& projMatrix)
+{
+    XMFLOAT3 eye{};
+    mWorld.ForEach<TransformComponent, CameraComponent>(
+        [&](Entity, TransformComponent& tf, CameraComponent& cam)
+        {
+            if (cam.isMainCamera)
+                eye = tf.position;
+        });
+    mUiSystem.Render(mWorld, cmdList, mDescriptorAllocator,
+        screenWidth, screenHeight, viewMatrix, projMatrix, eye);
+}
+
+Entity Engine::CreateUiImage(
+    UiSpaceMode mode,
+    const std::string& materialName,
+    XMFLOAT2 size,
+    XMFLOAT3 worldOrScreenPos,
+    XMFLOAT2 anchor)
+{
+    if (!mResourceManager || !mResourceManager->GetMaterial(materialName))
+    {
+        OutputDebugStringA("[Engine] CreateUiImage: material not found\n");
+        return INVALID_ENTITY;
+    }
+
+    Entity e = mWorld.CreateEntity();
+    UiElementComponent el{};
+    el.mode = mode;
+    el.active = true;
+    el.visible = true;
+    el.size = size;
+    el.anchor = anchor;
+    el.pivot = { 0.5f, 0.5f };
+
+    UiImageComponent img{};
+    img.materialName = materialName;
+
+    if (mode == UiSpaceMode::WorldBillboard)
+    {
+        TransformComponent tf{};
+        tf.position = worldOrScreenPos;
+        tf.MarkDirty(e);
+        mWorld.AddComponent(e, std::move(tf));
+    }
+    else
+    {
+        el.position = { worldOrScreenPos.x, worldOrScreenPos.y };
+    }
+
+    mWorld.AddComponent(e, std::move(el));
+    mWorld.AddComponent(e, std::move(img));
+    mUiListDirty = true;
+    return e;
+}
+
+Entity Engine::CreateUiImageScreenRect(
+    const std::string& materialName,
+    float minX, float minY, float maxX, float maxY,
+    float designW, float designH)
+{
+    if (maxX < minX)
+        std::swap(minX, maxX);
+    if (maxY < minY)
+        std::swap(minY, maxY);
+
+    float w = maxX - minX;
+    float h = maxY - minY;
+    constexpr float kMin = 8.0f;
+    if (w < kMin)
+    {
+        const float c = 0.5f * (minX + maxX);
+        minX = c - 0.5f * kMin;
+        maxX = c + 0.5f * kMin;
+        w = kMin;
+    }
+    if (h < kMin)
+    {
+        const float c = 0.5f * (minY + maxY);
+        minY = c - 0.5f * kMin;
+        maxY = c + 0.5f * kMin;
+        h = kMin;
+    }
+
+    std::string mat = materialName;
+    if (mat.empty() || !mResourceManager || !mResourceManager->GetMaterial(mat))
+    {
+        // Fall back to Default if selection is empty / missing
+        mat = "Default";
+        if (!mResourceManager || !mResourceManager->GetMaterial(mat))
+        {
+            OutputDebugStringA("[Engine] CreateUiImageScreenRect: no usable material\n");
+            return INVALID_ENTITY;
+        }
+    }
+
+    float dw = designW;
+    float dh = designH;
+    if (dw < 1.0f || dh < 1.0f)
+        mUiSystem.GetGlobalDesignResolution(dw, dh);
+    // Authoring canvas (Scene panel / window) for percent conversion
+    if (dw < 1.0f) dw = (std::max)(w, 1.0f);
+    if (dh < 1.0f) dh = (std::max)(h, 1.0f);
+
+    // Center of rect as % of canvas; size as % of canvas. Pivot = center.
+    const float centerX = (minX + maxX) * 0.5f;
+    const float centerY = (minY + maxY) * 0.5f;
+    const float centerPctX = centerX / dw;
+    const float centerPctY = centerY / dh;
+    const float sizePctX = w / dw;
+    const float sizePctY = h / dh;
+
+    Entity e = mWorld.CreateEntity();
+    UiElementComponent el{};
+    el.mode = UiSpaceMode::ScreenAlways;
+    el.active = true;
+    el.visible = true;
+    el.anchor = { 0.0f, 0.0f }; // canvas top-left origin
+    el.pivot = { 0.5f, 0.5f };  // position is the CENTER of the widget
+    el.layoutPercent = true;
+    el.position = { centerPctX, centerPctY };
+    el.size = { sizePctX, sizePctY };
+    el.zOrder = 0;
+    el.designW = dw;
+    el.designH = dh;
+
+    UiImageComponent img{};
+    img.materialName = mat;
+
+    mWorld.AddComponent(e, std::move(el));
+    mWorld.AddComponent(e, std::move(img));
+    mUiListDirty = true;
+
+    char buf[256];
+    sprintf_s(buf,
+        "[UI] CreateUiImageScreenRect mat=%s rectPx=(%.0f,%.0f)-(%.0f,%.0f) "
+        "center%%=(%.4f,%.4f) size%%=(%.4f,%.4f) canvas=%.0fx%.0f e=%u\n",
+        mat.c_str(), minX, minY, maxX, maxY,
+        centerPctX, centerPctY, sizePctX, sizePctY,
+        dw, dh, static_cast<unsigned>(e));
+    OutputDebugStringA(buf);
+    return e;
+}
+
+void Engine::SetUiScaleMode(UiScaleMode mode)
+{
+    mUiSystem.SetScaleMode(mode);
+}
+
+UiScaleMode Engine::GetUiScaleMode() const
+{
+    return mUiSystem.GetScaleMode();
+}
+
+void Engine::SetUiDesignResolution(float width, float height)
+{
+    mUiSystem.SetGlobalDesignResolution(width, height);
+}
+
+void Engine::GetUiDesignResolution(float& outW, float& outH) const
+{
+    mUiSystem.GetGlobalDesignResolution(outW, outH);
+}
+
+void Engine::DestroyUiEntity(Entity e)
+{
+    if (e == INVALID_ENTITY)
+        return;
+    mWorld.DestroyEntity(e);
+    mUiListDirty = true;
+}
+
+void Engine::SetUiActive(Entity e, bool active)
+{
+    if (auto* el = mWorld.GetComponent<UiElementComponent>(e))
+        el->active = active;
+}
+
+void Engine::SetUiVisible(Entity e, bool visible)
+{
+    if (auto* el = mWorld.GetComponent<UiElementComponent>(e))
+        el->visible = visible;
+}
+
+UiElementComponent* Engine::GetUiElement(Entity e)
+{
+    return mWorld.GetComponent<UiElementComponent>(e);
+}
+
+UiImageComponent* Engine::GetUiImage(Entity e)
+{
+    return mWorld.GetComponent<UiImageComponent>(e);
+}
+
+void Engine::RebuildUiListCacheIfNeeded()
+{
+    if (!mUiListDirty)
+        return;
+    mUiListCache.clear();
+    mWorld.ForEach<UiElementComponent>(
+        [&](Entity e, UiElementComponent&)
+        {
+            mUiListCache.push_back(e);
+        });
+    std::sort(mUiListCache.begin(), mUiListCache.end());
+    mUiListDirty = false;
+}
+
+const std::vector<Entity>& Engine::GetUiEntities()
+{
+    RebuildUiListCacheIfNeeded();
+    return mUiListCache;
+}
+
+void Engine::DestroyAllUiEntities()
+{
+    DestroyAllUiPresetInstances();
+
+    std::vector<Entity> toDestroy;
+    mWorld.ForEach<UiElementComponent>(
+        [&](Entity e, UiElementComponent&)
+        {
+            toDestroy.push_back(e);
+        });
+    for (Entity e : toDestroy)
+        mWorld.DestroyEntity(e);
+    mUiListDirty = true;
+}
+
+Entity Engine::PickUiScreen(float pixelX, float pixelY, UINT screenW, UINT screenH)
+{
+    if (screenW == 0 || screenH == 0)
+        return INVALID_ENTITY;
+
+    const float sw = static_cast<float>(screenW);
+    const float sh = static_cast<float>(screenH);
+    float gw = 0.f, gh = 0.f;
+    mUiSystem.GetGlobalDesignResolution(gw, gh);
+
+    Entity best = INVALID_ENTITY;
+    int bestZ = INT_MIN;
+
+    mWorld.ForEach<UiElementComponent, UiImageComponent>(
+        [&](Entity e, UiElementComponent& el, UiImageComponent&)
+        {
+            if (!el.visible)
+                return;
+            if (el.mode == UiSpaceMode::ScreenConditional && !el.active)
+                return;
+            if (el.mode == UiSpaceMode::WorldBillboard)
+                return;
+
+            DirectX::XMFLOAT2 posPx{}, sizePx{};
+            UiSystem::ResolveScreenLayout(
+                el, sw, sh, mUiSystem.GetScaleMode(), gw, gh, posPx, sizePx);
+
+            const float ax = el.anchor.x * sw + posPx.x;
+            const float ay = el.anchor.y * sh + posPx.y;
+            const float l = ax - el.pivot.x * sizePx.x;
+            const float t = ay - el.pivot.y * sizePx.y;
+            const float r = l + sizePx.x;
+            const float b = t + sizePx.y;
+            if (pixelX >= l && pixelX <= r && pixelY >= t && pixelY <= b)
+            {
+                if (el.zOrder >= bestZ)
+                {
+                    bestZ = el.zOrder;
+                    best = e;
+                }
+            }
+        });
+
+    return best;
+}
+
+bool Engine::DeleteUiPreset(const std::string& name, std::string* outError)
+{
+    if (name.empty())
+    {
+        if (outError) *outError = "Empty preset name";
+        return false;
+    }
+
+    RemoveSceneUiPreset(name);
+    UnregisterUiPreset(name);
+
+    if (!UiPresetSerializer::DeletePresetFile(name))
+    {
+        // Still success if only registry/scene entry existed
+        if (outError) *outError = "Preset file missing or already deleted (registry cleared)";
+        OutputDebugStringA(("[UI] DeleteUiPreset file missing: " + name + "\n").c_str());
+        return true;
+    }
+
+    OutputDebugStringA(("[UI] DeleteUiPreset ok: " + name + "\n").c_str());
+    return true;
+}
+
+UiPresetData Engine::CaptureCurrentUiAsPreset(const std::string& presetName)
+{
+    UiPresetData data;
+    data.version = UiPresetData::kCurrentVersion;
+    data.name = presetName;
+    mUiSystem.GetGlobalDesignResolution(data.designW, data.designH);
+
+    mWorld.ForEach<UiElementComponent, UiImageComponent>(
+        [&](Entity e, UiElementComponent& el, UiImageComponent& img)
+        {
+            UiPresetElementData d;
+            d.mode = el.mode;
+            d.active = el.active;
+            d.visible = el.visible;
+            d.zOrder = el.zOrder;
+            d.anchor = el.anchor;
+            d.pivot = el.pivot;
+            d.position = el.position;
+            d.size = el.size;
+            d.rotationRad = el.rotationRad;
+            d.layoutPercent = el.layoutPercent;
+            d.designW = el.designW;
+            d.designH = el.designH;
+            // Normalize legacy pixel (top-left) → center percent when design canvas known
+            if (!d.layoutPercent && d.designW > 1.0f && d.designH > 1.0f
+                && el.mode != UiSpaceMode::WorldBillboard)
+            {
+                const float cx = el.position.x + el.size.x * el.pivot.x;
+                const float cy = el.position.y + el.size.y * el.pivot.y;
+                d.layoutPercent = true;
+                d.position = { cx / d.designW, cy / d.designH };
+                d.size = { el.size.x / d.designW, el.size.y / d.designH };
+                d.pivot = { 0.5f, 0.5f };
+                d.anchor = { 0.0f, 0.0f };
+            }
+            // Older percent used top-left pivot — convert to center percent
+            else if (d.layoutPercent && el.mode != UiSpaceMode::WorldBillboard
+                && (el.pivot.x < 0.25f || el.pivot.y < 0.25f))
+            {
+                d.position.x = el.position.x + el.size.x * 0.5f;
+                d.position.y = el.position.y + el.size.y * 0.5f;
+                d.pivot = { 0.5f, 0.5f };
+                d.anchor = { 0.0f, 0.0f };
+            }
+            d.materialName = img.materialName;
+            d.color = img.color;
+            d.uvRect = img.uvRect;
+
+            if (el.mode == UiSpaceMode::WorldBillboard)
+            {
+                if (TransformComponent* tf = mWorld.GetComponent<TransformComponent>(e))
+                    d.worldPos = tf->position;
+            }
+
+            if (UiButtonComponent* btn = mWorld.GetComponent<UiButtonComponent>(e))
+            {
+                d.hasButton = true;
+                d.actionId = btn->actionId;
+                d.interactable = btn->interactable;
+            }
+
+            // Prefer a shared design res from elements if global was empty
+            if (data.designW < 1.0f && el.designW > 1.0f)
+                data.designW = el.designW;
+            if (data.designH < 1.0f && el.designH > 1.0f)
+                data.designH = el.designH;
+
+            data.elements.push_back(std::move(d));
+        });
+
+    return data;
+}
+
+bool Engine::SaveCurrentUiAsPreset(const std::string& presetName, std::string* outError)
+{
+    if (presetName.empty())
+    {
+        if (outError) *outError = "Preset name is empty";
+        return false;
+    }
+
+    UiPresetData data = CaptureCurrentUiAsPreset(presetName);
+    if (data.elements.empty())
+    {
+        if (outError) *outError = "No UI elements to save (create UI first)";
+        return false;
+    }
+
+    const std::string path = UiPresetSerializer::ResolvePresetPath(presetName);
+    if (!UiPresetSerializer::SaveToFile(path, data))
+    {
+        if (outError) *outError = "Failed to write: " + path;
+        return false;
+    }
+
+    RegisterUiPreset(presetName, data);
+
+    char buf[256];
+    sprintf_s(buf, "[UI] saved preset '%s' (%zu elements) -> %s\n",
+        presetName.c_str(), data.elements.size(), path.c_str());
+    OutputDebugStringA(buf);
+    return true;
+}
+
+bool Engine::RegisterUiPreset(const std::string& name, const UiPresetData& data)
+{
+    if (name.empty())
+        return false;
+    UiPresetData copy = data;
+    copy.name = name;
+    mUiPresetRegistry[name] = std::move(copy);
+    return true;
+}
+
+bool Engine::RegisterUiPresetFromFile(const std::string& nameOrPath, std::string* outError)
+{
+    const std::string path = UiPresetSerializer::ResolvePresetPath(nameOrPath);
+    UiPresetData data;
+    if (!UiPresetSerializer::LoadFromFile(path, data, outError))
+        return false;
+
+    // Registry key = caller name (stem), not whatever is inside the file.
+    std::string key = nameOrPath;
+    try
+    {
+        std::filesystem::path p(nameOrPath);
+        if (p.has_filename())
+            key = p.stem().string();
+    }
+    catch (...) {}
+    if (key.empty())
+        key = data.name;
+    if (data.name.empty())
+        data.name = key;
+
+    return RegisterUiPreset(key, data);
+}
+
+void Engine::UnregisterUiPreset(const std::string& name)
+{
+    mUiPresetRegistry.erase(name);
+}
+
+void Engine::ClearUiPresetRegistry()
+{
+    mUiPresetRegistry.clear();
+}
+
+bool Engine::HasUiPreset(const std::string& name) const
+{
+    return mUiPresetRegistry.find(name) != mUiPresetRegistry.end();
+}
+
+std::vector<std::string> Engine::GetRegisteredUiPresetNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(mUiPresetRegistry.size());
+    for (const auto& kv : mUiPresetRegistry)
+        names.push_back(kv.first);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+SceneUiPresetEntry* Engine::FindSceneUiPreset(const std::string& name)
+{
+    for (auto& e : mSceneUiPresets)
+    {
+        if (e.name == name)
+            return &e;
+    }
+    return nullptr;
+}
+
+const SceneUiPresetEntry* Engine::FindSceneUiPreset(const std::string& name) const
+{
+    for (const auto& e : mSceneUiPresets)
+    {
+        if (e.name == name)
+            return &e;
+    }
+    return nullptr;
+}
+
+void Engine::SetSceneUiPresetList(std::vector<SceneUiPresetEntry> entries)
+{
+    // Drop runtime instances for entries that disappear
+    for (auto& old : mSceneUiPresets)
+    {
+        if (old.instanceId == 0)
+            continue;
+        const bool keep = std::any_of(entries.begin(), entries.end(),
+            [&](const SceneUiPresetEntry& n) { return n.name == old.name; });
+        if (!keep)
+            DestroyUiPresetInstance(old.instanceId);
+    }
+    mSceneUiPresets = std::move(entries);
+    for (auto& e : mSceneUiPresets)
+        e.instanceId = 0;
+}
+
+void Engine::AddSceneUiPreset(const std::string& name, bool visible)
+{
+    if (name.empty())
+        return;
+    if (FindSceneUiPreset(name))
+        return;
+    SceneUiPresetEntry e;
+    e.name = name;
+    e.visible = visible;
+    e.instanceId = 0;
+    mSceneUiPresets.push_back(std::move(e));
+}
+
+void Engine::RemoveSceneUiPreset(const std::string& name)
+{
+    for (auto it = mSceneUiPresets.begin(); it != mSceneUiPresets.end(); ++it)
+    {
+        if (it->name != name)
+            continue;
+        if (it->instanceId != 0)
+            DestroyUiPresetInstance(it->instanceId);
+        mSceneUiPresets.erase(it);
+        return;
+    }
+}
+
+bool Engine::GetSceneUiPresetVisible(const std::string& name) const
+{
+    if (const SceneUiPresetEntry* e = FindSceneUiPreset(name))
+        return e->visible;
+    return false;
+}
+
+bool Engine::SetSceneUiPresetVisible(const std::string& name, bool visible)
+{
+    SceneUiPresetEntry* e = FindSceneUiPreset(name);
+    if (!e)
+        return false;
+
+    e->visible = visible;
+
+    if (!visible)
+    {
+        if (e->instanceId != 0)
+        {
+            DestroyUiPresetInstance(e->instanceId);
+            e->instanceId = 0;
+        }
+        return true;
+    }
+
+    if (!HasUiPreset(name))
+    {
+        std::string err;
+        RegisterUiPresetFromFile(name, &err);
+    }
+
+    if (e->instanceId == 0)
+    {
+        e->instanceId = SpawnUiPreset(name, true);
+        if (e->instanceId == 0)
+            return false;
+    }
+
+    SetUiPresetInstanceVisible(e->instanceId, true);
+    SetUiPresetInstanceActive(e->instanceId, true);
+
+    char buf[128];
+    sprintf_s(buf, "[UI] scene preset '%s' visible=%d instance=%u\n",
+        name.c_str(), visible ? 1 : 0, e->instanceId);
+    OutputDebugStringA(buf);
+    return true;
+}
+
+bool Engine::PreloadSceneUiPresets(std::string* outError)
+{
+    std::string combined;
+    bool allOk = true;
+    for (const auto& e : mSceneUiPresets)
+    {
+        if (e.name.empty() || HasUiPreset(e.name))
+            continue;
+        std::string err;
+        if (!RegisterUiPresetFromFile(e.name, &err))
+        {
+            allOk = false;
+            if (!combined.empty())
+                combined += "; ";
+            combined += e.name + ": " + err;
+        }
+    }
+    if (!allOk && outError)
+        *outError = combined;
+    return allOk || mSceneUiPresets.empty();
+}
+
+void Engine::ApplySceneUiPresetVisibility()
+{
+    for (auto& e : mSceneUiPresets)
+    {
+        if (e.name.empty())
+            continue;
+
+        // Only spawn when the scene marks this preset visible — no surprise UI.
+        if (!e.visible)
+        {
+            if (e.instanceId != 0)
+            {
+                DestroyUiPresetInstance(e.instanceId);
+                e.instanceId = 0;
+            }
+            continue;
+        }
+
+        if (e.instanceId == 0)
+            e.instanceId = SpawnUiPreset(e.name, true);
+        if (e.instanceId != 0)
+        {
+            SetUiPresetInstanceActive(e.instanceId, true);
+            SetUiPresetInstanceVisible(e.instanceId, true);
+            auto it = mUiPresetInstances.find(e.instanceId);
+            if (it != mUiPresetInstances.end())
+            {
+                for (Entity ent : it->second.entities)
+                {
+                    if (UiElementComponent* el = mWorld.GetComponent<UiElementComponent>(ent))
+                    {
+                        el->visible = true;
+                        el->active = true;
+                    }
+                }
+            }
+        }
+        else
+        {
+            char buf[160];
+            sprintf_s(buf, "[UI] ApplySceneUiPresetVisibility: spawn failed for '%s'\n",
+                e.name.c_str());
+            OutputDebugStringA(buf);
+        }
+    }
+
+    char summary[128];
+    sprintf_s(summary, "[UI] ApplySceneUiPresetVisibility: %zu scene presets, %zu live UI\n",
+        mSceneUiPresets.size(), GetUiEntities().size());
+    OutputDebugStringA(summary);
+}
+
+Entity Engine::SpawnUiPresetElement(const UiPresetElementData& src, uint32_t instanceId, bool startActive)
+{
+    std::string mat = src.materialName;
+    if (mat.empty() || !mResourceManager || !mResourceManager->GetMaterial(mat))
+    {
+        mat = "Default";
+        if (!mResourceManager || !mResourceManager->GetMaterial(mat))
+        {
+            OutputDebugStringA("[UI] SpawnUiPresetElement: material missing\n");
+            return INVALID_ENTITY;
+        }
+    }
+
+    Entity e = mWorld.CreateEntity();
+
+    UiElementComponent el{};
+    el.mode = src.mode;
+    el.active = startActive ? src.active : false;
+    // Prefer component visible flag; ApplySceneUiPresetVisibility may force true after spawn.
+    el.visible = src.visible;
+    el.zOrder = src.zOrder;
+    el.anchor = src.anchor;
+    el.pivot = src.pivot;
+    el.position = src.position;
+    el.size = src.size;
+    el.rotationRad = src.rotationRad;
+    el.layoutPercent = src.layoutPercent;
+    el.designW = src.designW;
+    el.designH = src.designH;
+    // Screen percent UI always uses center pivot for correct resize sync
+    if (el.layoutPercent && el.mode != UiSpaceMode::WorldBillboard)
+    {
+        if (el.pivot.x < 0.25f || el.pivot.y < 0.25f)
+        {
+            el.position.x = src.position.x + src.size.x * 0.5f;
+            el.position.y = src.position.y + src.size.y * 0.5f;
+        }
+        el.pivot = { 0.5f, 0.5f };
+        el.anchor = { 0.0f, 0.0f };
+    }
+    if (el.designW < 1.0f || el.designH < 1.0f)
+    {
+        float gw = 0.f, gh = 0.f;
+        mUiSystem.GetGlobalDesignResolution(gw, gh);
+        if (el.designW < 1.0f) el.designW = gw;
+        if (el.designH < 1.0f) el.designH = gh;
+    }
+
+    UiImageComponent img{};
+    img.materialName = mat;
+    img.color = src.color;
+    img.uvRect = src.uvRect;
+
+    if (src.mode == UiSpaceMode::WorldBillboard)
+    {
+        TransformComponent tf{};
+        tf.position = src.worldPos;
+        tf.MarkDirty(e);
+        mWorld.AddComponent(e, std::move(tf));
+    }
+
+    mWorld.AddComponent(e, std::move(el));
+    mWorld.AddComponent(e, std::move(img));
+
+    if (src.hasButton)
+    {
+        UiButtonComponent btn{};
+        btn.actionId = src.actionId;
+        btn.interactable = src.interactable;
+        mWorld.AddComponent(e, std::move(btn));
+    }
+
+    UiPresetInstanceTag tag{};
+    tag.instanceId = instanceId;
+    mWorld.AddComponent(e, std::move(tag));
+
+    mUiListDirty = true;
+    return e;
+}
+
+uint32_t Engine::SpawnUiPreset(const std::string& presetName, bool startActive)
+{
+    if (presetName.empty())
+        return 0;
+
+    if (!HasUiPreset(presetName))
+    {
+        std::string err;
+        if (!RegisterUiPresetFromFile(presetName, &err))
+        {
+            char buf[256];
+            sprintf_s(buf, "[UI] SpawnUiPreset: not registered and load failed '%s' (%s)\n",
+                presetName.c_str(), err.c_str());
+            OutputDebugStringA(buf);
+            return 0;
+        }
+    }
+
+    auto it = mUiPresetRegistry.find(presetName);
+    if (it == mUiPresetRegistry.end() || it->second.elements.empty())
+        return 0;
+
+    const UiPresetData& data = it->second;
+    const uint32_t id = mNextUiPresetInstanceId++;
+    UiPresetInstance inst;
+    inst.id = id;
+    inst.presetName = presetName;
+    inst.entities.reserve(data.elements.size());
+
+    for (const auto& elSrc : data.elements)
+    {
+        UiPresetElementData el = elSrc;
+        if (el.designW < 1.0f && data.designW > 1.0f)
+            el.designW = data.designW;
+        if (el.designH < 1.0f && data.designH > 1.0f)
+            el.designH = data.designH;
+        Entity e = SpawnUiPresetElement(el, id, startActive);
+        if (e != INVALID_ENTITY)
+            inst.entities.push_back(e);
+    }
+
+    if (inst.entities.empty())
+        return 0;
+
+    const size_t count = inst.entities.size();
+    mUiPresetInstances[id] = std::move(inst);
+
+    char buf[160];
+    sprintf_s(buf, "[UI] SpawnUiPreset '%s' instance=%u entities=%zu\n",
+        presetName.c_str(), id, count);
+    OutputDebugStringA(buf);
+    return id;
+}
+
+void Engine::SetUiPresetInstanceActive(uint32_t instanceId, bool active)
+{
+    auto it = mUiPresetInstances.find(instanceId);
+    if (it == mUiPresetInstances.end())
+        return;
+    for (Entity e : it->second.entities)
+        SetUiActive(e, active);
+}
+
+void Engine::SetUiPresetInstanceVisible(uint32_t instanceId, bool visible)
+{
+    auto it = mUiPresetInstances.find(instanceId);
+    if (it == mUiPresetInstances.end())
+        return;
+    for (Entity e : it->second.entities)
+        SetUiVisible(e, visible);
+}
+
+void Engine::DestroyUiPresetInstance(uint32_t instanceId)
+{
+    auto it = mUiPresetInstances.find(instanceId);
+    if (it == mUiPresetInstances.end())
+        return;
+    for (Entity e : it->second.entities)
+    {
+        if (e != INVALID_ENTITY)
+            mWorld.DestroyEntity(e);
+    }
+    mUiPresetInstances.erase(it);
+    for (auto& e : mSceneUiPresets)
+    {
+        if (e.instanceId == instanceId)
+            e.instanceId = 0;
+    }
+    mUiListDirty = true;
+}
+
+void Engine::DestroyAllUiPresetInstances()
+{
+    std::vector<uint32_t> ids;
+    ids.reserve(mUiPresetInstances.size());
+    for (const auto& kv : mUiPresetInstances)
+        ids.push_back(kv.first);
+    for (uint32_t id : ids)
+        DestroyUiPresetInstance(id);
+    for (auto& e : mSceneUiPresets)
+        e.instanceId = 0;
+}
+
+size_t Engine::CountUiPresetInstances(const std::string& presetName) const
+{
+    if (presetName.empty())
+        return mUiPresetInstances.size();
+    size_t n = 0;
+    for (const auto& kv : mUiPresetInstances)
+    {
+        if (kv.second.presetName == presetName)
+            ++n;
+    }
+    return n;
+}
+
+Entity Engine::CreateEffectBillboard(
+    const std::string& materialName,
+    XMFLOAT3 worldPos,
+    float size,
+    XMFLOAT4 color,
+    bool additive,
+    float lifetime)
+{
+    if (!mResourceManager || !mResourceManager->GetMaterial(materialName))
+    {
+        OutputDebugStringA("[Engine] CreateEffectBillboard: material not found\n");
+        return INVALID_ENTITY;
+    }
+    Entity e = mWorld.CreateEntity();
+    TransformComponent tf{};
+    tf.position = worldPos;
+    tf.MarkDirty(e);
+    mWorld.AddComponent(e, std::move(tf));
+    EffectBillboardComponent fx{};
+    fx.materialName = materialName;
+    fx.color = color;
+    fx.size = size;
+    fx.additive = additive;
+    fx.lifetime = lifetime;
+    mWorld.AddComponent(e, std::move(fx));
+    return e;
+}
+
+bool Engine::HandleUiPointer(
+    float scenePixelX, float scenePixelY,
+    UINT screenW, UINT screenH,
+    bool leftDown, bool leftPressedThisFrame,
+    std::vector<UiClickEvent>* outClicks)
+{
+    return mUiSystem.HandlePointer(
+        mWorld, scenePixelX, scenePixelY, screenW, screenH,
+        leftDown, leftPressedThisFrame, outClicks);
+}
+
 void Engine::SetRenderPath(RenderPath path)
 {
     mRenderSystem.SetRenderPath(path);
@@ -644,6 +1550,7 @@ std::string Engine::GetEntitySubMaterial(Entity entity, const std::string& subme
 
 void Engine::Shutdown()
 {
+    mUiSystem.Shutdown();
     mRenderSystem.Shutdown();
     PipelineStateManager::Get().Shutdown();
     RootSignatureManager::Get().Shutdown();
@@ -998,7 +1905,7 @@ void Engine::ClearRenderableEntities()
     mRenderSystem.InvalidateDrawCache();
 }
 
-bool Engine::SaveSceneToFile(const std::string& path, const std::string& sceneName)
+bool Engine::SaveSceneToFile(const std::string& path, const std::string& sceneName, bool packLiveUiIntoFile)
 {
     SceneFileData scene;
     scene.version = SceneFileData::kCurrentVersion;
@@ -1006,7 +1913,6 @@ bool Engine::SaveSceneToFile(const std::string& path, const std::string& sceneNa
         scene.name = sceneName;
     else
     {
-        // 파일명 stem
         try
         {
             scene.name = std::filesystem::path(path).stem().string();
@@ -1029,7 +1935,6 @@ bool Engine::SaveSceneToFile(const std::string& path, const std::string& sceneNa
 
         SceneEntityData data;
         data.meshName = rend->mesh->name;
-        // LOD 메시 이름(_lod1 등)이면 베이스 이름으로 저장
         {
             const auto lodPos = data.meshName.find("_lod");
             if (lodPos != std::string::npos)
@@ -1071,7 +1976,88 @@ bool Engine::SaveSceneToFile(const std::string& path, const std::string& sceneNa
         scene.entities.push_back(std::move(data));
     }
 
-    return SceneSerializer::SaveToFile(path, scene);
+    // Only what the user put on the scene preload list (no auto presets / no disk spam)
+    scene.uiPresets.clear();
+    scene.uiPresets.reserve(mSceneUiPresets.size() + (packLiveUiIntoFile ? 1u : 0u));
+    scene.uiPresetPayloads.clear();
+
+    for (const auto& e : mSceneUiPresets)
+    {
+        if (e.name.empty())
+            continue;
+        if (!HasUiPreset(e.name))
+        {
+            std::string err;
+            RegisterUiPresetFromFile(e.name, &err);
+        }
+
+        SceneUiPresetEntry saveE;
+        saveE.name = e.name;
+        saveE.visible = e.visible;
+        saveE.instanceId = 0;
+        scene.uiPresets.push_back(std::move(saveE));
+
+        auto it = mUiPresetRegistry.find(e.name);
+        if (it != mUiPresetRegistry.end())
+            scene.uiPresetPayloads.push_back(it->second);
+    }
+
+    // Optional: embed live UI into THIS file only (export / temp play snapshot).
+    // Does not write UiPresets/*.uipreset and does not change mSceneUiPresets.
+    if (packLiveUiIntoFile)
+    {
+        UiPresetData live = CaptureCurrentUiAsPreset("__live_ui__");
+        for (auto& el : live.elements)
+        {
+            el.visible = true;
+            el.active = true;
+            if (el.layoutPercent && el.mode != UiSpaceMode::WorldBillboard)
+            {
+                el.pivot = { 0.5f, 0.5f };
+                el.anchor = { 0.0f, 0.0f };
+            }
+            // Ensure size is never zero after pack (avoids invisible quads in Game.exe)
+            if (el.layoutPercent)
+            {
+                if (el.size.x < 0.001f) el.size.x = 0.05f;
+                if (el.size.y < 0.001f) el.size.y = 0.05f;
+            }
+        }
+        if (!live.elements.empty())
+        {
+            live.name = "__live_ui__";
+            // Replace any previous __live_ui__ entry
+            scene.uiPresets.erase(
+                std::remove_if(scene.uiPresets.begin(), scene.uiPresets.end(),
+                    [](const SceneUiPresetEntry& e) { return e.name == "__live_ui__"; }),
+                scene.uiPresets.end());
+            scene.uiPresetPayloads.erase(
+                std::remove_if(scene.uiPresetPayloads.begin(), scene.uiPresetPayloads.end(),
+                    [](const UiPresetData& p) { return p.name == "__live_ui__"; }),
+                scene.uiPresetPayloads.end());
+
+            SceneUiPresetEntry liveEntry;
+            liveEntry.name = "__live_ui__";
+            liveEntry.visible = true;
+            scene.uiPresets.insert(scene.uiPresets.begin(), liveEntry);
+            scene.uiPresetPayloads.insert(scene.uiPresetPayloads.begin(), std::move(live));
+        }
+        else
+        {
+            OutputDebugStringA("[UI] packLiveUi: CaptureCurrentUiAsPreset returned 0 elements\n");
+        }
+    }
+
+    char saveLog[192];
+    sprintf_s(saveLog, "[UI] scene save: %zu preset(s), %zu payload(s) packLive=%d path=%s\n",
+        scene.uiPresets.size(), scene.uiPresetPayloads.size(), packLiveUiIntoFile ? 1 : 0,
+        path.c_str());
+    OutputDebugStringA(saveLog);
+
+    const bool ok = SceneSerializer::SaveToFile(path, scene);
+    if (!ok)
+        OutputDebugStringA("[UI] scene save FAILED to write file\n");
+    return ok;
 }
 
 bool Engine::LoadSceneFromFile(const std::string& path, std::string* outError)
@@ -1081,6 +2067,52 @@ bool Engine::LoadSceneFromFile(const std::string& path, std::string* outError)
         return false;
 
     ClearRenderableEntities();
+    DestroyAllUiEntities();
+    ClearUiPresetRegistry();
+    mSceneUiPresets = scene.uiPresets;
+    for (auto& e : mSceneUiPresets)
+        e.instanceId = 0;
+
+    // Register embedded payloads in memory only — never write UiPresets/ as a side effect.
+    // Scene preload list stays exactly as written in the file (ui_preset= lines).
+    for (const auto& payload : scene.uiPresetPayloads)
+    {
+        if (payload.name.empty())
+            continue;
+        RegisterUiPreset(payload.name, payload);
+    }
+
+    // Fall back to disk files only for names already listed on the scene
+    {
+        std::string presetErr;
+        if (!PreloadSceneUiPresets(&presetErr) && !presetErr.empty())
+        {
+            char buf[512];
+            sprintf_s(buf, "[UI] scene preset preload: %s\n", presetErr.c_str());
+            OutputDebugStringA(buf);
+        }
+    }
+
+    // Spawn only presets marked visible on this scene
+    ApplySceneUiPresetVisibility();
+
+    {
+        char buf[256];
+        sprintf_s(buf,
+            "[UI] LoadScene '%s': scenePresets=%zu payloads=%zu liveUi=%zu\n",
+            path.c_str(),
+            mSceneUiPresets.size(),
+            scene.uiPresetPayloads.size(),
+            GetUiEntities().size());
+        OutputDebugStringA(buf);
+        for (const auto& e : mSceneUiPresets)
+        {
+            sprintf_s(buf, "  ui_preset name=%s visible=%d instance=%u hasReg=%d\n",
+                e.name.c_str(), e.visible ? 1 : 0, e.instanceId,
+                HasUiPreset(e.name) ? 1 : 0);
+            OutputDebugStringA(buf);
+        }
+    }
 
     size_t created = 0;
     for (const auto& data : scene.entities)

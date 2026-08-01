@@ -66,7 +66,35 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
 
     mManipulateSelected = ctx.imgui->IsManipulateSelected();
 
-    // Scene drag box multi-select (Shift = additive)
+    // UI image create: Project "Create UI Image" → drag on Scene
+    {
+        float ux0, uy0, ux1, uy1;
+        if (ctx.imgui->ConsumeUiImageCreate(ux0, uy0, ux1, uy1))
+        {
+            // Authoring canvas = Scene docking panel image size (same space as drag coords).
+            // Runtime remaps center%/size% to current Scene RT (edit) or window (play).
+            const float canvasW = static_cast<float>((std::max)(1u, ctx.imgui->GetDesiredSceneWidth()));
+            const float canvasH = static_cast<float>((std::max)(1u, ctx.imgui->GetDesiredSceneHeight()));
+
+            std::string mat = ctx.imgui->GetSelectedMaterial();
+            if (mat.empty())
+                mat = "Default";
+
+            Entity e = ctx.engine->CreateUiImageScreenRect(
+                mat,
+                ux0, uy0, ux1, uy1,
+                canvasW, canvasH);
+            ctx.engine->SetUiDesignResolution(canvasW, canvasH);
+
+            char buf[160];
+            sprintf_s(buf, "[UI] editor create mat=%s e=%u canvas=%.0fx%.0f (center%%)\n",
+                mat.c_str(), static_cast<unsigned>(e), canvasW, canvasH);
+            OutputDebugStringA(buf);
+        }
+    }
+
+    // Scene drag box multi-select (Shift = additive) — disabled while UI create mode
+    if (!ctx.imgui->IsUiImageCreateMode())
     {
         float bx0, by0, bx1, by1;
         bool additive = false;
@@ -97,11 +125,56 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
         }
     }
 
-    // Short LMB on Scene → mouse look
-    if (ctx.imgui->ConsumeSceneCaptureClick())
+    // Short LMB on Scene: prefer UI image pick, else mouse look
+    if (!ctx.imgui->IsUiImageCreateMode() && ctx.imgui->ConsumeSceneCaptureClick())
     {
-        mMouseLookRequested = true;
-        SyncMouseLook(ctx);
+        bool pickedUi = false;
+        const SceneViewport& sceneVP = ctx.imgui->GetSceneViewport();
+        const float pickW = sceneVP.IsValid()
+            ? static_cast<float>(sceneVP.GetWidth())
+            : static_cast<float>(ctx.imgui->GetDesiredSceneWidth());
+        const float pickH = sceneVP.IsValid()
+            ? static_cast<float>(sceneVP.GetHeight())
+            : static_cast<float>(ctx.imgui->GetDesiredSceneHeight());
+        const float uiW = static_cast<float>((std::max)(1u, ctx.imgui->GetDesiredSceneWidth()));
+        const float uiH = static_cast<float>((std::max)(1u, ctx.imgui->GetDesiredSceneHeight()));
+
+        RECT sceneClient{};
+        if (ctx.imgui->TryGetSceneClientRect(sceneClient) && ctx.hwnd)
+        {
+            POINT pt{};
+            GetCursorPos(&pt);
+            ScreenToClient(ctx.hwnd, &pt);
+            const float localX = static_cast<float>(pt.x) - static_cast<float>(sceneClient.left);
+            const float localY = static_cast<float>(pt.y) - static_cast<float>(sceneClient.top);
+            // Pick in panel-local space first (percent layout uses live canvas = panel/RT)
+            Entity uiHit = ctx.engine->PickUiScreen(
+                localX, localY,
+                static_cast<UINT>((std::max)(1.0f, uiW)),
+                static_cast<UINT>((std::max)(1.0f, uiH)));
+            // Also try RT space if panel and RT differ
+            if (uiHit == INVALID_ENTITY && (pickW != uiW || pickH != uiH))
+            {
+                const float sx = pickW / uiW;
+                const float sy = pickH / uiH;
+                uiHit = ctx.engine->PickUiScreen(
+                    localX * sx, localY * sy,
+                    static_cast<UINT>((std::max)(1.0f, pickW)),
+                    static_cast<UINT>((std::max)(1.0f, pickH)));
+            }
+            if (uiHit != INVALID_ENTITY)
+            {
+                ctx.engine->SetSelectedEntity(uiHit);
+                pickedUi = true;
+                OutputDebugStringA("[UI] selected UI image via Scene click\n");
+            }
+        }
+
+        if (!pickedUi)
+        {
+            mMouseLookRequested = true;
+            SyncMouseLook(ctx);
+        }
     }
 
     UpdateCamera(ctx, dt);
@@ -136,7 +209,10 @@ void EditorMode::OnResize(AppContext& /*ctx*/)
 
 bool EditorMode::OnMsg(AppContext& /*ctx*/, HWND /*hwnd*/, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    // ESC: release mouse look (do not quit)
+    // ESC: release mouse look (do not quit).
+    // IMPORTANT: always return false so the message still reaches ImGui via D3DApp.
+    // If KEYUP is swallowed, ImGui keeps Escape "down" forever and InputText
+    // immediately cancels on focus (looks like "click then cancel").
     if (msg == WM_KEYUP && wParam == VK_ESCAPE)
     {
         if (mMouseLookRequested || mMouseLook.IsActive())
@@ -144,7 +220,7 @@ bool EditorMode::OnMsg(AppContext& /*ctx*/, HWND /*hwnd*/, UINT msg, WPARAM wPar
             mMouseLookRequested = false;
             mMouseLook.SetActive(false);
         }
-        return true;
+        return false;
     }
 
     if (mMouseLook.IsActive()
@@ -268,6 +344,10 @@ void EditorMode::OnMouseWheel(AppContext& ctx, short wheelDelta, int /*x*/, int 
 
 void EditorMode::OnKeyDown(AppContext& ctx, WPARAM wParam)
 {
+    // Don't steer the camera with the same keys the user is typing into ImGui.
+    if (ImGui::GetIO().WantTextInput)
+        return;
+
     switch (wParam)
     {
     case 'W': mKeyW = true; break;
@@ -303,6 +383,9 @@ void EditorMode::OnKeyDown(AppContext& ctx, WPARAM wParam)
 
 void EditorMode::OnKeyUp(AppContext& /*ctx*/, WPARAM wParam)
 {
+    if (ImGui::GetIO().WantTextInput)
+        return;
+
     switch (wParam)
     {
     case 'W': mKeyW = false; break;
@@ -338,10 +421,28 @@ void EditorMode::OnDestroy(AppContext& /*ctx*/)
 
 void EditorMode::SyncMouseLook(AppContext& ctx)
 {
+    ImGuiIO& io = ImGui::GetIO();
+
+    // While editing text, never hold mouse-look / NoMouse — that kills InputText focus.
+    if (io.WantTextInput)
+    {
+        if (mMouseLookRequested || mMouseLook.IsActive())
+        {
+            mMouseLookRequested = false;
+            mMouseLook.SetActive(false);
+        }
+        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+        return;
+    }
+
     const bool wantActive = mMouseLookRequested
         && ctx.hwnd
         && GetForegroundWindow() == ctx.hwnd;
     mMouseLook.SetActive(wantActive);
+
+    // Safety: NoMouse must not stick when look is off (breaks all panel clicks/text).
+    if (!wantActive)
+        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
 }
 
 void EditorMode::InitializeOrbitFromSelection(AppContext& ctx)
@@ -515,5 +616,10 @@ void EditorMode::buttonClicked(ButtonAction action)
         XMFLOAT3 spawnPos{};
         XMStoreFloat3(&spawnPos, spawnVec);
         ctx.engine->CreateRenderableEntity(mesh, mat, spawnPos);
+    }
+    else if (action == ButtonAction::BeginCreateUiImage)
+    {
+        // ImGuiManager already queued deferred enable; do not re-enter (would be a no-op).
+        OutputDebugStringA("[UI] Create mode requested — drag on Scene, then Complete\n");
     }
 }

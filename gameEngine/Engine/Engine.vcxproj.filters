@@ -26,6 +26,7 @@
     <ClCompile Include="..\Codes\Engine\Engine.cpp"><Filter>Engine</Filter></ClCompile>
     <ClCompile Include="..\Codes\File_IO\ResourceLoader.cpp"><Filter>File_IO</Filter></ClCompile>
     <ClCompile Include="..\Codes\File_IO\SceneSerializer.cpp"><Filter>File_IO</Filter></ClCompile>
+    <ClCompile Include="..\Codes\File_IO\UiPresetSerializer.cpp"><Filter>File_IO</Filter></ClCompile>
     <ClCompile Include="..\Codes\File_IO\GameConfig.cpp"><Filter>File_IO</Filter></ClCompile>
     <ClCompile Include="..\Codes\File_IO\GameExporter.cpp"><Filter>File_IO</Filter></ClCompile>
     <ClCompile Include="..\Codes\Managers\ImGuiManager.cpp"><Filter>Managers</Filter></ClCompile>
@@ -45,6 +46,7 @@
     <ClCompile Include="..\Codes\Systems\RenderSystem_HiZ.cpp"><Filter>Systems</Filter></ClCompile>
     <ClCompile Include="..\Codes\Systems\RenderSystem_SubLogic.cpp"><Filter>Systems</Filter></ClCompile>
     <ClCompile Include="..\Codes\Systems\RenderSystem_Helpers.cpp"><Filter>Systems</Filter></ClCompile>
+    <ClCompile Include="..\Codes\Systems\UiSystem.cpp"><Filter>Systems</Filter></ClCompile>
     <ClCompile Include="..\Codes\Systems\BoundsSystem.cpp"><Filter>Systems</Filter></ClCompile>
     <ClCompile Include="..\Codes\Systems\GravitySystem.cpp"><Filter>Systems</Filter></ClCompile>
     <ClCompile Include="..\Codes\Systems\CollisionSystem.cpp"><Filter>Systems</Filter></ClCompile>

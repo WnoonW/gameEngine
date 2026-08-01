@@ -5,6 +5,7 @@
 #include "Entity.h"
 #include "ComponentStruct.h"
 #include "SceneSerializer.h"
+#include "UiPresetSerializer.h"
 #include "GameExporter.h"
 #include "AppContext.h"
 #include <algorithm>
@@ -629,6 +630,9 @@ void ImGuiManager::OpenPathDialog(PathDialogMode mode)
             mPathDialogFileName.clear();
     }
 
+    // Keep InputText buffer in sync when the dialog opens
+    strncpy_s(mPathDialogFileNameBuf, mPathDialogFileName.c_str(), _TRUNCATE);
+
     RefreshPathDialogListing();
 }
 
@@ -744,6 +748,7 @@ void ImGuiManager::DrawPathDialog(Engine* engine)
         {
             mPathDialogSelected = row;
             mPathDialogFileName = f;
+            strncpy_s(mPathDialogFileNameBuf, f.c_str(), _TRUNCATE);
             if (ImGui::IsMouseDoubleClicked(0) && mPathDialogMode == PathDialogMode::LoadScene)
             {
                 // confirm load on double-click
@@ -777,10 +782,11 @@ void ImGuiManager::DrawPathDialog(Engine* engine)
 
     if (mPathDialogMode == PathDialogMode::SaveScene)
     {
-        char nameBuf[260] = {};
-        strncpy_s(nameBuf, mPathDialogFileName.c_str(), _TRUNCATE);
-        if (ImGui::InputText("File name", nameBuf, sizeof(nameBuf)))
-            mPathDialogFileName = nameBuf;
+        // Member buffer: stack temps drop ActiveId / look like "click then cancel".
+        if (ImGui::InputText("File name", mPathDialogFileNameBuf, sizeof(mPathDialogFileNameBuf)))
+            mPathDialogFileName = mPathDialogFileNameBuf;
+        else
+            mPathDialogFileName = mPathDialogFileNameBuf;
     }
     else if (mPathDialogMode == PathDialogMode::LoadScene)
     {
@@ -1000,6 +1006,7 @@ void ImGuiManager::DrawMainMenuBar(Engine* engine)
         if (ImGui::MenuItem("Inspector", nullptr, &mShowInspector)) MarkUiSettingsDirty();
         ImGui::Separator();
         if (ImGui::MenuItem("Project", nullptr, &mShowProject)) MarkUiSettingsDirty();
+        if (ImGui::MenuItem("UI", nullptr, &mShowUi)) MarkUiSettingsDirty();
         if (ImGui::MenuItem("Render", nullptr, &mShowRender)) MarkUiSettingsDirty();
         if (ImGui::MenuItem("Help", nullptr, &mShowHelp)) MarkUiSettingsDirty();
         ImGui::Separator();
@@ -1024,7 +1031,7 @@ void ImGuiManager::DrawMainMenuBar(Engine* engine)
         ImGui::TextDisabled("Drag title bars onto panels");
         ImGui::TextDisabled("to dock as tabs (click tab = that window).");
         ImGui::Separator();
-        ImGui::TextDisabled("Bottom strip holds Project / Render / Help.");
+        ImGui::TextDisabled("Bottom strip holds Project / UI / Render / Help.");
         ImGui::TextDisabled("Left strip: Hierarchy + Tools.");
         ImGui::Separator();
         ImGui::TextDisabled("Settings: editor_ui.cfg + imgui.ini");
@@ -1084,6 +1091,7 @@ void ImGuiManager::ApplyDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& wo
     ImGui::DockBuilderDockWindow("Inspector", dock_id_right);
 
     ImGui::DockBuilderDockWindow("Project", dock_id_down);
+    ImGui::DockBuilderDockWindow("UI", dock_id_down);
     ImGui::DockBuilderDockWindow("Render", dock_id_down);
     ImGui::DockBuilderDockWindow("Help", dock_id_down);
 
@@ -1322,6 +1330,7 @@ bool ImGuiManager::LoadUiSettings()
         else if (key == "show_inspector") asBool(mShowInspector);
         else if (key == "show_tools") asBool(mShowTools);
         else if (key == "show_project") asBool(mShowProject);
+        else if (key == "show_ui") asBool(mShowUi);
         else if (key == "show_render") asBool(mShowRender);
         else if (key == "show_help") asBool(mShowHelp);
         else if (key == "manipulate") asBool(mManipulateSelected);
@@ -1420,6 +1429,7 @@ bool ImGuiManager::SaveUiSettings()
     out << "show_inspector=" << (mShowInspector ? 1 : 0) << "\n";
     out << "show_tools=" << (mShowTools ? 1 : 0) << "\n";
     out << "show_project=" << (mShowProject ? 1 : 0) << "\n";
+    out << "show_ui=" << (mShowUi ? 1 : 0) << "\n";
     out << "show_render=" << (mShowRender ? 1 : 0) << "\n";
     out << "show_help=" << (mShowHelp ? 1 : 0) << "\n";
     out << "manipulate=" << (mManipulateSelected ? 1 : 0) << "\n";
@@ -1611,6 +1621,7 @@ void ImGuiManager::SetupDockspace(Engine* engine)
         mShowInspector = true;
         mShowTools = true;
         mShowProject = true;
+        mShowUi = true;
         mShowRender = true;
         mShowHelp = true;
 
@@ -1629,11 +1640,15 @@ void ImGuiManager::DrawEditorPanels(Engine* engine)
     if (mPlayMode)
         return;
 
+    // Apply deferred UI-create enable + locks before any panel reads the mode flag.
+    TickUiImageCreateMode();
+
     const bool prevScene = mShowScene;
     const bool prevHierarchy = mShowHierarchy;
     const bool prevInspector = mShowInspector;
     const bool prevTools = mShowTools;
     const bool prevProject = mShowProject;
+    const bool prevUi = mShowUi;
     const bool prevRender = mShowRender;
     const bool prevHelp = mShowHelp;
     const bool prevManip = mManipulateSelected;
@@ -1649,7 +1664,9 @@ void ImGuiManager::DrawEditorPanels(Engine* engine)
     if (mShowInspector)
         DrawInspectorPanel(engine);
     if (mShowProject)
-        DrawProjectPanel();
+        DrawProjectPanel(engine);
+    if (mShowUi)
+        DrawUiPanel(engine);
     if (mShowRender)
         DrawRenderPanel(engine);
     if (mShowHelp)
@@ -1657,8 +1674,9 @@ void ImGuiManager::DrawEditorPanels(Engine* engine)
 
     if (prevScene != mShowScene || prevHierarchy != mShowHierarchy ||
         prevInspector != mShowInspector || prevTools != mShowTools ||
-        prevProject != mShowProject || prevRender != mShowRender ||
-        prevHelp != mShowHelp || prevManip != mManipulateSelected ||
+        prevProject != mShowProject || prevUi != mShowUi ||
+        prevRender != mShowRender || prevHelp != mShowHelp ||
+        prevManip != mManipulateSelected ||
         prevMesh != mSelectedMesh || prevMat != mSelectedMaterial)
     {
         MarkUiSettingsDirty();
@@ -1736,76 +1754,166 @@ void ImGuiManager::DrawScenePanel()
         mSceneClientMaxY = max.y - vpPos.y;
         mSceneClientRectValid = (mSceneClientMaxX > mSceneClientMinX && mSceneClientMaxY > mSceneClientMinY);
 
-        // --- LMB: 짧은 클릭 = 마우스 룩 / 드래그 = 박스 다중 선택 ---
+        // --- LMB ---
+        // UI create mode: drag = place UI image rect (selected material)
+        // Normal mode: short click = mouse look / drag = box multi-select
         ImGuiIO& io = ImGui::GetIO();
         const bool shift = io.KeyShift;
 
-        if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        if (mUiImageCreateMode)
         {
-            mBoxDragging = true;
-            mBoxStartScreen = io.MousePos;
-            mBoxEndScreen = io.MousePos;
-            mBoxSelectAdditive = shift;
-        }
-
-        if (mBoxDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left))
-        {
-            mBoxEndScreen = io.MousePos;
-            // 드래그 중 선택 박스 표시
-            const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
-            const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
-            if ((dx * dx + dy * dy) >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+            // Banner (locks ticked in TickUiImageCreateMode — not here)
             {
-                ImDrawList* dl = ImGui::GetForegroundDrawList();
-                ImVec2 a = mBoxStartScreen;
-                ImVec2 b = mBoxEndScreen;
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                const char* msg =
+                    !IsUiCreateSceneInputOk()
+                    ? "UI Create: ON — release mouse, then drag Scene  |  Complete in Project"
+                    : (mUiCreateHasRect
+                        ? "UI Create: rect set — press Complete in Project  |  re-drag OK"
+                        : "UI Create: drag on Scene  |  then Complete in Project");
+                dl->AddRectFilled(
+                    ImVec2(min.x + 8.0f, min.y + 8.0f),
+                    ImVec2(min.x + 8.0f + ImGui::CalcTextSize(msg).x + 12.0f, min.y + 28.0f),
+                    IM_COL32(20, 20, 20, 180), 4.0f);
+                dl->AddText(ImVec2(min.x + 14.0f, min.y + 12.0f), IM_COL32(120, 220, 160, 255), msg);
+            }
+
+            auto drawCreateRect = [&](ImVec2 a, ImVec2 b, bool confirmed)
+            {
                 if (a.x > b.x) std::swap(a.x, b.x);
                 if (a.y > b.y) std::swap(a.y, b.y);
-                // Scene 이미지 안으로 클램프
                 a.x = (std::max)(min.x, (std::min)(a.x, max.x));
                 a.y = (std::max)(min.y, (std::min)(a.y, max.y));
                 b.x = (std::max)(min.x, (std::min)(b.x, max.x));
                 b.y = (std::max)(min.y, (std::min)(b.y, max.y));
-                dl->AddRectFilled(a, b, IM_COL32(80, 160, 255, 40));
-                dl->AddRect(a, b, IM_COL32(80, 160, 255, 220), 0.0f, 0, 1.5f);
-            }
-        }
+                ImDrawList* dl = ImGui::GetForegroundDrawList();
+                const ImU32 fill = confirmed ? IM_COL32(80, 220, 140, 70) : IM_COL32(80, 220, 140, 40);
+                const ImU32 line = confirmed ? IM_COL32(80, 255, 160, 255) : IM_COL32(80, 220, 140, 220);
+                dl->AddRectFilled(a, b, fill);
+                dl->AddRect(a, b, line, 0.0f, 0, confirmed ? 2.5f : 2.0f);
+            };
 
-        if (mBoxDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-        {
-            mBoxEndScreen = io.MousePos;
-            const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
-            const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
-            const float dist2 = dx * dx + dy * dy;
+            if (mUiCreateHasRect && !mUiCreateDragging)
+            {
+                drawCreateRect(
+                    ImVec2(min.x + mUiCreateMinX, min.y + mUiCreateMinY),
+                    ImVec2(min.x + mUiCreateMaxX, min.y + mUiCreateMaxY),
+                    true);
+            }
+
+            // Scene drag only after mouse-up + short lock from the Project Create click
+            if (IsUiCreateSceneInputOk())
+            {
+                if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    mUiCreateDragging = true;
+                    mUiCreateStartScreen = io.MousePos;
+                    mUiCreateEndScreen = io.MousePos;
+                }
+
+                if (mUiCreateDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                {
+                    mUiCreateEndScreen = io.MousePos;
+                    drawCreateRect(mUiCreateStartScreen, mUiCreateEndScreen, false);
+                }
+
+                // Drag end: store preview only — mode stays ON until Complete/Cancel/Esc
+                if (mUiCreateDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                {
+                    mUiCreateEndScreen = io.MousePos;
+                    mUiCreateDragging = false;
+
+                    float x0 = mUiCreateStartScreen.x - min.x;
+                    float y0 = mUiCreateStartScreen.y - min.y;
+                    float x1 = mUiCreateEndScreen.x - min.x;
+                    float y1 = mUiCreateEndScreen.y - min.y;
+                    if (x0 > x1) std::swap(x0, x1);
+                    if (y0 > y1) std::swap(y0, y1);
+                    const float sw = max.x - min.x;
+                    const float sh = max.y - min.y;
+                    x0 = (std::max)(0.0f, (std::min)(x0, sw));
+                    y0 = (std::max)(0.0f, (std::min)(y0, sh));
+                    x1 = (std::max)(0.0f, (std::min)(x1, sw));
+                    y1 = (std::max)(0.0f, (std::min)(y1, sh));
+
+                    if ((x1 - x0) >= kBoxDragThresholdPx && (y1 - y0) >= kBoxDragThresholdPx)
+                    {
+                        mUiCreateMinX = x0;
+                        mUiCreateMinY = y0;
+                        mUiCreateMaxX = x1;
+                        mUiCreateMaxY = y1;
+                        mUiCreateHasRect = true;
+                        OutputDebugStringA("[UI] preview rect set (mode stays ON)\n");
+                    }
+                }
+            }
+
             mBoxDragging = false;
-
-            if (dist2 >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+        }
+        else
+        {
+            if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
-                // Scene 이미지 로컬 픽셀로 변환
-                float x0 = mBoxStartScreen.x - min.x;
-                float y0 = mBoxStartScreen.y - min.y;
-                float x1 = mBoxEndScreen.x - min.x;
-                float y1 = mBoxEndScreen.y - min.y;
-                if (x0 > x1) std::swap(x0, x1);
-                if (y0 > y1) std::swap(y0, y1);
-                const float sw = max.x - min.x;
-                const float sh = max.y - min.y;
-                x0 = (std::max)(0.0f, (std::min)(x0, sw));
-                y0 = (std::max)(0.0f, (std::min)(y0, sh));
-                x1 = (std::max)(0.0f, (std::min)(x1, sw));
-                y1 = (std::max)(0.0f, (std::min)(y1, sh));
-
-                mBoxResultMinX = x0;
-                mBoxResultMinY = y0;
-                mBoxResultMaxX = x1;
-                mBoxResultMaxY = y1;
-                mBoxSelectPending = true;
-                // 드래그 선택이면 마우스 룩 진입 안 함
+                mBoxDragging = true;
+                mBoxStartScreen = io.MousePos;
+                mBoxEndScreen = io.MousePos;
+                mBoxSelectAdditive = shift;
             }
-            else if (mSceneHovered)
+
+            if (mBoxDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left))
             {
-                // 짧은 클릭 → 기존처럼 마우스 룩 요청
-                mSceneCaptureClick = true;
+                mBoxEndScreen = io.MousePos;
+                const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
+                const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
+                if ((dx * dx + dy * dy) >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+                {
+                    ImDrawList* dl = ImGui::GetForegroundDrawList();
+                    ImVec2 a = mBoxStartScreen;
+                    ImVec2 b = mBoxEndScreen;
+                    if (a.x > b.x) std::swap(a.x, b.x);
+                    if (a.y > b.y) std::swap(a.y, b.y);
+                    a.x = (std::max)(min.x, (std::min)(a.x, max.x));
+                    a.y = (std::max)(min.y, (std::min)(a.y, max.y));
+                    b.x = (std::max)(min.x, (std::min)(b.x, max.x));
+                    b.y = (std::max)(min.y, (std::min)(b.y, max.y));
+                    dl->AddRectFilled(a, b, IM_COL32(80, 160, 255, 40));
+                    dl->AddRect(a, b, IM_COL32(80, 160, 255, 220), 0.0f, 0, 1.5f);
+                }
+            }
+
+            if (mBoxDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                mBoxEndScreen = io.MousePos;
+                const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
+                const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
+                const float dist2 = dx * dx + dy * dy;
+                mBoxDragging = false;
+
+                if (dist2 >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+                {
+                    float x0 = mBoxStartScreen.x - min.x;
+                    float y0 = mBoxStartScreen.y - min.y;
+                    float x1 = mBoxEndScreen.x - min.x;
+                    float y1 = mBoxEndScreen.y - min.y;
+                    if (x0 > x1) std::swap(x0, x1);
+                    if (y0 > y1) std::swap(y0, y1);
+                    const float sw = max.x - min.x;
+                    const float sh = max.y - min.y;
+                    x0 = (std::max)(0.0f, (std::min)(x0, sw));
+                    y0 = (std::max)(0.0f, (std::min)(y0, sh));
+                    x1 = (std::max)(0.0f, (std::min)(x1, sw));
+                    y1 = (std::max)(0.0f, (std::min)(y1, sh));
+
+                    mBoxResultMinX = x0;
+                    mBoxResultMinY = y0;
+                    mBoxResultMaxX = x1;
+                    mBoxResultMaxY = y1;
+                    mBoxSelectPending = true;
+                }
+                else if (mSceneHovered)
+                {
+                    mSceneCaptureClick = true;
+                }
             }
         }
     }
@@ -1836,6 +1944,100 @@ bool ImGuiManager::ConsumeBoxSelection(float& outMinX, float& outMinY, float& ou
     outMaxX = mBoxResultMaxX;
     outMaxY = mBoxResultMaxY;
     outAdditive = mBoxSelectAdditive;
+    return true;
+}
+
+void ImGuiManager::TickUiImageCreateMode()
+{
+    // Deferred enable: Create was clicked last frame (or earlier this frame via API).
+    // Applying here means Project never draws Cancel on the same submit as Create.
+    if (mUiCreateEnablePending)
+    {
+        mUiCreateEnablePending = false;
+        mUiImageCreateMode = true;
+        mUiCreateWaitMouseRelease = true;
+        mUiCreateSceneLockFrames = 3;
+        // Longer than a double-click gap so a second click cannot hit Cancel.
+        mUiCreateExitLockFrames = 24;
+        mUiCreateDragging = false;
+        mUiCreateHasRect = false;
+        mUiCreatePending = false;
+        mBoxDragging = false;
+        mBoxSelectPending = false;
+        mSceneCaptureClick = false;
+        OutputDebugStringA("[UI] create mode ON\n");
+    }
+
+    if (!mUiImageCreateMode)
+        return;
+
+    if (mUiCreateWaitMouseRelease)
+    {
+        // Stay locked until LMB is fully up (Create click release settles).
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            mUiCreateWaitMouseRelease = false;
+        return;
+    }
+
+    if (mUiCreateSceneLockFrames > 0)
+        --mUiCreateSceneLockFrames;
+    if (mUiCreateExitLockFrames > 0)
+        --mUiCreateExitLockFrames;
+
+    // Esc only after exit arm (same gate as Cancel). Never while typing in ImGui.
+    if (IsUiCreateExitOk()
+        && !ImGui::GetIO().WantTextInput
+        && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    {
+        SetUiImageCreateMode(false);
+        OutputDebugStringA("[UI] create mode OFF (Esc)\n");
+    }
+}
+
+bool ImGuiManager::IsUiCreateSceneInputOk() const
+{
+    return mUiImageCreateMode
+        && !mUiCreateWaitMouseRelease
+        && mUiCreateSceneLockFrames <= 0;
+}
+
+bool ImGuiManager::IsUiCreateExitOk() const
+{
+    return mUiImageCreateMode
+        && !mUiCreateWaitMouseRelease
+        && mUiCreateExitLockFrames <= 0;
+}
+
+void ImGuiManager::SetUiImageCreateMode(bool on)
+{
+    if (on)
+    {
+        // Already on or already queued — do not reset in-progress rect/drag.
+        if (mUiImageCreateMode || mUiCreateEnablePending)
+            return;
+        mUiCreateEnablePending = true;
+        return;
+    }
+
+    mUiImageCreateMode = false;
+    mUiCreateEnablePending = false;
+    mUiCreateWaitMouseRelease = false;
+    mUiCreateSceneLockFrames = 0;
+    mUiCreateExitLockFrames = 0;
+    mUiCreateHasRect = false;
+    mUiCreateDragging = false;
+    OutputDebugStringA("[UI] create mode OFF\n");
+}
+
+bool ImGuiManager::ConsumeUiImageCreate(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY)
+{
+    if (!mUiCreatePending)
+        return false;
+    mUiCreatePending = false;
+    outMinX = mUiCreateMinX;
+    outMinY = mUiCreateMinY;
+    outMaxX = mUiCreateMaxX;
+    outMaxY = mUiCreateMaxY;
     return true;
 }
 
@@ -1911,6 +2113,7 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
     }
 
     TextLine("Objects: %zu", engine->GetRenderableObjectCount());
+    TextLine("UI images: %zu", engine->GetUiEntities().size());
     TextLine("FPS: %.1f", ImGui::GetIO().Framerate);
 
     const size_t selCount = engine->GetSelectedCount();
@@ -1924,34 +2127,26 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
     if (ImGui::Button("Clear Selection", ImVec2(-FLT_MIN, 0)))
         engine->ClearSelection();
 
-    TextLineDisabled("Scene: LMB drag box | Shift+drag add");
-    TextLineDisabled("List: click | Ctrl+click toggle");
+    TextLineDisabled("3D: LMB drag box | Shift+drag add | RMB pick");
+    TextLineDisabled("UI: short LMB on image | list click");
     ImGui::Separator();
 
     auto entities = engine->GetRenderableEntities();
-    if (entities.empty())
-    {
-        TextLineDisabled("No renderable entities");
-        ImGui::End();
-        return;
-    }
+    auto uiEntities = engine->GetUiEntities();
 
-    // 남은 영역을 리스트로 채움 — 가로/세로 스크롤 + 긴 라벨 폭 보장
     if (ImGui::BeginChild("##EntityList", ImVec2(0, 0), ImGuiChildFlags_Borders, kPanelWindowFlags))
     {
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(entities.size()));
-        while (clipper.Step())
+        ImGui::SeparatorText("3D Objects");
+        if (entities.empty())
+            TextLineDisabled("No renderable entities");
+        else
         {
-            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+            for (Entity e : entities)
             {
-                const Entity e = entities[static_cast<size_t>(i)];
                 RenderableComponent* rend = engine->GetRenderable(e);
                 const char* meshName = (rend && rend->mesh) ? rend->mesh->name.c_str() : "(no mesh)";
-
                 char label[160];
                 snprintf(label, sizeof(label), "Entity %u  [%s]", e, meshName);
-
                 const bool isSelected = engine->IsEntitySelected(e);
                 if (SelectableFull(label, isSelected))
                 {
@@ -1960,8 +2155,25 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
                     else
                         engine->SetSelectedEntity(e);
                 }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", label);
+            }
+        }
+
+        ImGui::SeparatorText("UI Images");
+        if (uiEntities.empty())
+            TextLineDisabled("No UI images");
+        else
+        {
+            for (Entity e : uiEntities)
+            {
+                UiImageComponent* img = engine->GetUiImage(e);
+                UiElementComponent* el = engine->GetUiElement(e);
+                const char* mat = (img && !img->materialName.empty()) ? img->materialName.c_str() : "?";
+                const bool vis = el ? el->visible : false;
+                char label[192];
+                snprintf(label, sizeof(label), "UI %u  [%s]%s", e, mat, vis ? "" : " (hidden)");
+                const bool isSelected = engine->IsEntitySelected(e);
+                if (SelectableFull(label, isSelected))
+                    engine->SetSelectedEntity(e);
             }
         }
     }
@@ -2026,7 +2238,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
     if (selectedList.empty())
     {
         TextLineDisabled("No entity selected");
-        TextLineDisabled("Scene drag-box, RMB pick, or Hierarchy.");
+        TextLineDisabled("Scene drag-box, RMB pick, UI click, or Hierarchy.");
         ImGui::End();
         return;
     }
@@ -2044,6 +2256,45 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
         for (Entity e : selectedList)
             fn(e);
     };
+
+    // --- UI Image inspector (when selected entity is UI) ---
+    if (UiElementComponent* uiEl = engine->GetUiElement(primary))
+    {
+        ImGui::SeparatorText("UI Image");
+        if (UiImageComponent* img = engine->GetUiImage(primary))
+            TextLine("Material: %s", img->materialName.empty() ? "(none)" : img->materialName.c_str());
+
+        bool vis = uiEl->visible;
+        if (CheckboxWrapped("Visible", &vis))
+            engine->SetUiVisible(primary, vis);
+        bool act = uiEl->active;
+        if (CheckboxWrapped("Active", &act))
+            engine->SetUiActive(primary, act);
+
+        TextLine("Layout: %s", uiEl->layoutPercent ? "center %% of canvas" : "legacy pixels");
+        if (uiEl->layoutPercent)
+        {
+            float center[2] = { uiEl->position.x * 100.f, uiEl->position.y * 100.f };
+            float sizePct[2] = { uiEl->size.x * 100.f, uiEl->size.y * 100.f };
+            if (DragFloatFull("Center X %", &center[0], 0.1f, 0.f, 100.f))
+                uiEl->position.x = center[0] * 0.01f;
+            if (DragFloatFull("Center Y %", &center[1], 0.1f, 0.f, 100.f))
+                uiEl->position.y = center[1] * 0.01f;
+            if (DragFloatFull("Width %", &sizePct[0], 0.1f, 0.1f, 100.f))
+                uiEl->size.x = sizePct[0] * 0.01f;
+            if (DragFloatFull("Height %", &sizePct[1], 0.1f, 0.1f, 100.f))
+                uiEl->size.y = sizePct[1] * 0.01f;
+        }
+        if (ImGui::Button("Delete UI Entity", ImVec2(-FLT_MIN, 0)))
+        {
+            engine->ClearSelection();
+            engine->DestroyUiEntity(primary);
+            ImGui::End();
+            return;
+        }
+        ImGui::End();
+        return;
+    }
 
     if (!ImGui::BeginTabBar("InspectorTabs", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_DrawSelectedOverline))
     {
@@ -2317,7 +2568,7 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
     ImGui::End();
 }
 
-void ImGuiManager::DrawProjectSpawnContent()
+void ImGuiManager::DrawProjectSpawnContent(Engine* engine)
 {
     auto meshNames = MeshManager::Get().GetLoadedMeshNames();
     std::sort(meshNames.begin(), meshNames.end());
@@ -2394,6 +2645,9 @@ void ImGuiManager::DrawProjectSpawnContent()
         TextLine("Ready: %s / %s", mSelectedMesh.c_str(), spawnMat);
         TextLineDisabled("Spawns at the Scene crosshair (view center).");
     }
+
+    ImGui::Separator();
+    TextLineDisabled("In-game UI tools moved to the UI dock panel (View → UI).");
 
     ImGui::Separator();
     TextLineDisabled("Loaded meshes: %zu", meshNames.size());
@@ -2578,7 +2832,7 @@ void ImGuiManager::DrawHelpContent()
 {
     ImGui::Separator();
     TextLine("Dock / Tabs");
-    BulletLine("Bottom strip: Project / Render / Help as dock tabs");
+    BulletLine("Bottom strip: Project / UI / Render / Help as dock tabs");
     BulletLine("Left strip: Hierarchy / Tools as dock tabs");
     BulletLine("Click a tab to show only that window");
     BulletLine("Drag a window title onto another panel to dock as a new tab");
@@ -2593,6 +2847,7 @@ void ImGuiManager::DrawHelpContent()
     BulletLine("Scene: short LMB click enters mouse look");
     BulletLine("Inspector: Transform / Physics / Material");
     BulletLine("Project: pick mesh + material, then Spawn");
+    BulletLine("UI panel: create image (center%%), presets, scene preload visible");
     BulletLine("Tools: 3rd-person manipulate mode");
     BulletLine("Render: path, cull, LOD, frame stats");
     BulletLine("Play menu: Play In Editor (F5) / Standalone Game.exe (Ctrl+F5)");
@@ -2606,14 +2861,295 @@ void ImGuiManager::DrawHelpContent()
     BulletLine("ESC releases mouse look (does not quit)");
 }
 
-void ImGuiManager::DrawProjectPanel()
+void ImGuiManager::DrawUiPanelContent(Engine* engine)
+{
+    TextLineDisabled("Edit canvas = Scene dock size. Play canvas = window size.");
+    TextLineDisabled("Layout: center & size stored as %% of canvas (updates on resize).");
+
+    // --- Create ---
+    ImGui::SeparatorText("Create");
+    {
+        const char* uiMat = mSelectedMaterial.empty() ? "Default" : mSelectedMaterial.c_str();
+        TextLine("Material: %s", uiMat);
+        TextLineDisabled("Uses Project Main Material (empty → Default).");
+
+        ImGui::PushID("ui_image_create");
+        if (mUiImageCreateMode)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.95f, 0.65f, 1.0f));
+            TextLine("UI Create mode ON");
+            ImGui::PopStyleColor();
+            if (mUiCreateHasRect)
+                TextLine("Rect: %.0f x %.0f px  (re-drag Scene to change)",
+                    mUiCreateMaxX - mUiCreateMinX, mUiCreateMaxY - mUiCreateMinY);
+            else
+                TextLineDisabled("Drag a rectangle on the Scene panel.");
+
+            const bool exitOk = IsUiCreateExitOk();
+            const bool canComplete = exitOk && mUiCreateHasRect;
+
+            if (!canComplete)
+                ImGui::BeginDisabled();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.42f, 0.28f, 1.0f));
+            ImGui::Button("Complete##ui_create_ok", ImVec2(-FLT_MIN, 0));
+            if (canComplete && ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            {
+                mUiCreatePending = true;
+                SetUiImageCreateMode(false);
+                OutputDebugStringA("[UI] Complete pressed\n");
+            }
+            ImGui::PopStyleColor();
+            if (!canComplete)
+                ImGui::EndDisabled();
+
+            if (!exitOk)
+                ImGui::BeginDisabled();
+            ImGui::Button("Cancel##ui_create_cancel", ImVec2(-FLT_MIN, 0));
+            if (exitOk && ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            {
+                SetUiImageCreateMode(false);
+                OutputDebugStringA("[UI] Cancel pressed\n");
+            }
+            if (!exitOk)
+                ImGui::EndDisabled();
+
+            if (!exitOk)
+                TextLineDisabled("Wait a moment… then Complete / Cancel / Esc.");
+            else
+                TextLineDisabled("Mode ends only via Complete / Cancel / Esc.");
+        }
+        else
+        {
+            if (ImGui::Button("Create UI Image##ui_create_start", ImVec2(-FLT_MIN, 0)))
+            {
+                SetUiImageCreateMode(true);
+                if (m_Callback)
+                    m_Callback->buttonClicked(ButtonAction::BeginCreateUiImage);
+            }
+            if (mUiCreateEnablePending)
+                TextLineDisabled("Starting UI Create mode…");
+            else
+                TextLineDisabled("1) Create  2) Drag on Scene  3) Complete");
+        }
+        ImGui::PopID();
+    }
+
+    // --- Scale / canvas info ---
+    ImGui::SeparatorText("Canvas & Scale");
+    if (engine)
+    {
+        const float canvasW = static_cast<float>((std::max)(1u, mDesiredSceneWidth));
+        const float canvasH = static_cast<float>((std::max)(1u, mDesiredSceneHeight));
+        TextLine("Live canvas: %.0f x %.0f  (Scene panel / play window)", canvasW, canvasH);
+        TextLine("Live UI elements: %zu", engine->GetUiEntities().size());
+
+        int scaleMode = static_cast<int>(engine->GetUiScaleMode());
+        const char* scaleItems[] = { "Stretch (%% of canvas)", "Uniform Min", "Uniform Max" };
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::Combo("##ui_scale_mode", &scaleMode, scaleItems, IM_ARRAYSIZE(scaleItems)))
+            engine->SetUiScaleMode(static_cast<UiScaleMode>(scaleMode));
+        TextLineDisabled("Stretch: center/size as %% of current canvas every frame.");
+    }
+    else
+    {
+        TextLineDisabled("Engine unavailable.");
+    }
+
+    // --- Presets ---
+    ImGui::SeparatorText("Presets");
+    if (!engine)
+    {
+        TextLineDisabled("Engine unavailable.");
+        return;
+    }
+
+    const size_t liveUi = engine->GetUiEntities().size();
+    TextLineDisabled("Save layout → scene preload → Spawn / export.");
+
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputText("##ui_preset_name", mUiPresetNameBuf, sizeof(mUiPresetNameBuf));
+    TextLineDisabled("Preset name (file: UiPresets/<name>.uipreset)");
+
+    const bool canSave = liveUi > 0 && mUiPresetNameBuf[0] != '\0';
+    if (!canSave)
+        ImGui::BeginDisabled();
+    if (ImGui::Button("Save Current UI as Preset", ImVec2(-FLT_MIN, 0)))
+    {
+        std::string err;
+        if (engine->SaveCurrentUiAsPreset(mUiPresetNameBuf, &err))
+        {
+            // File + registry only — do not auto-add to scene or spawn UI
+            mUiPresetLastMsg = std::string("Saved preset file: ") + mUiPresetNameBuf
+                + " (use Add to Scene Preload to attach)";
+        }
+        else
+            mUiPresetLastMsg = err.empty() ? "Save failed" : err;
+    }
+    if (!canSave)
+        ImGui::EndDisabled();
+
+    auto diskPresets = UiPresetSerializer::ListPresetNamesInDefaultDir();
+    if (!diskPresets.empty())
+    {
+        if (mUiPresetDiskIndex >= (int)diskPresets.size())
+            mUiPresetDiskIndex = 0;
+        auto getter = [](void* data, int idx) -> const char*
+        {
+            auto* v = static_cast<std::vector<std::string>*>(data);
+            if (idx < 0 || idx >= (int)v->size()) return nullptr;
+            return (*v)[idx].c_str();
+        };
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::Combo("##ui_preset_disk", &mUiPresetDiskIndex, getter, &diskPresets, (int)diskPresets.size());
+
+        if (ImGui::Button("Add to Scene Preload", ImVec2(-FLT_MIN, 0)))
+        {
+            const std::string& n = diskPresets[mUiPresetDiskIndex];
+            engine->RegisterUiPresetFromFile(n, nullptr);
+            // List only — press Visible when you want it shown (no auto-spawn)
+            engine->AddSceneUiPreset(n, false);
+            mUiPresetLastMsg = "Added to scene preload (hidden). Press Visible to show.";
+        }
+        if (ImGui::Button("Spawn Preset (test)", ImVec2(-FLT_MIN, 0)))
+        {
+            const std::string& n = diskPresets[mUiPresetDiskIndex];
+            const uint32_t id = engine->SpawnUiPreset(n, true);
+            if (id != 0)
+                mUiPresetLastMsg = "Spawned instance " + std::to_string(id) + " (" + n + ")";
+            else
+                mUiPresetLastMsg = "Spawn failed: " + n;
+        }
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.15f, 0.15f, 1.0f));
+        if (ImGui::Button("Delete Preset File", ImVec2(-FLT_MIN, 0)))
+        {
+            const std::string& n = diskPresets[mUiPresetDiskIndex];
+            std::string err;
+            if (engine->DeleteUiPreset(n, &err))
+                mUiPresetLastMsg = "Deleted preset: " + n;
+            else
+                mUiPresetLastMsg = err.empty() ? "Delete failed" : err;
+        }
+        ImGui::PopStyleColor();
+    }
+    else
+    {
+        TextLineDisabled("No .uipreset files in UiPresets/ yet.");
+    }
+
+    // --- Delete scene files ---
+    ImGui::SeparatorText("Scenes on Disk");
+    {
+        auto scenes = SceneSerializer::ListSceneNamesInDefaultDir();
+        static int sceneDiskIndex = 0;
+        if (!scenes.empty())
+        {
+            if (sceneDiskIndex >= (int)scenes.size())
+                sceneDiskIndex = 0;
+            auto getter = [](void* data, int idx) -> const char*
+            {
+                auto* v = static_cast<std::vector<std::string>*>(data);
+                if (idx < 0 || idx >= (int)v->size()) return nullptr;
+                return (*v)[idx].c_str();
+            };
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::Combo("##scene_disk", &sceneDiskIndex, getter, &scenes, (int)scenes.size());
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.15f, 0.15f, 1.0f));
+            if (ImGui::Button("Delete Scene File", ImVec2(-FLT_MIN, 0)))
+            {
+                const std::string& n = scenes[sceneDiskIndex];
+                if (SceneSerializer::DeleteSceneFile(n))
+                    mUiPresetLastMsg = "Deleted scene: " + n + ".scene";
+                else
+                    mUiPresetLastMsg = "Failed to delete scene: " + n;
+            }
+            ImGui::PopStyleColor();
+            TextLineDisabled("Deletes Scenes/<name>.scene (cannot undo).");
+        }
+        else
+        {
+            TextLineDisabled("No .scene files in Scenes/ yet.");
+        }
+    }
+
+    ImGui::Spacing();
+    TextLine("Scene preload (%zu):", engine->GetSceneUiPresetList().size());
+    TextLineDisabled("Visible/Invisible is saved with the scene.");
+    const std::vector<SceneUiPresetEntry> sceneList = engine->GetSceneUiPresetList();
+    for (size_t i = 0; i < sceneList.size(); ++i)
+    {
+        const auto& entry = sceneList[i];
+        ImGui::PushID(static_cast<int>(i) + 9000);
+
+        const bool isVis = entry.visible;
+        ImGui::PushStyleColor(ImGuiCol_Text, isVis
+            ? ImVec4(0.45f, 0.95f, 0.55f, 1.0f)
+            : ImVec4(0.65f, 0.65f, 0.65f, 1.0f));
+        TextLine("%s  %s%s",
+            entry.name.c_str(),
+            isVis ? "[visible]" : "[hidden]",
+            engine->HasUiPreset(entry.name) ? "" : "  (missing)");
+        ImGui::PopStyleColor();
+
+        if (isVis)
+            ImGui::BeginDisabled();
+        if (ImGui::SmallButton("Visible"))
+            engine->SetSceneUiPresetVisible(entry.name, true);
+        if (isVis)
+            ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        if (!isVis)
+            ImGui::BeginDisabled();
+        if (ImGui::SmallButton("Invisible"))
+            engine->SetSceneUiPresetVisible(entry.name, false);
+        if (!isVis)
+            ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X"))
+            engine->RemoveSceneUiPreset(entry.name);
+
+        ImGui::PopID();
+    }
+
+    TextLine("Registered: %zu  |  live instances: %zu",
+        engine->GetRegisteredUiPresetNames().size(),
+        engine->CountUiPresetInstances());
+
+    if (ImGui::Button("Destroy All Preset Instances", ImVec2(-FLT_MIN, 0)))
+    {
+        engine->DestroyAllUiPresetInstances();
+        mUiPresetLastMsg = "Destroyed all preset instances";
+    }
+    if (ImGui::Button("Clear All Live UI", ImVec2(-FLT_MIN, 0)))
+    {
+        engine->DestroyAllUiEntities();
+        mUiPresetLastMsg = "Cleared all live UI";
+    }
+
+    if (!mUiPresetLastMsg.empty())
+        TextLineDisabled("%s", mUiPresetLastMsg.c_str());
+}
+
+void ImGuiManager::DrawUiPanel(Engine* engine)
+{
+    if (!ImGui::Begin("UI", &mShowUi, kPanelWindowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+    DrawUiPanelContent(engine);
+    ImGui::End();
+}
+
+void ImGuiManager::DrawProjectPanel(Engine* engine)
 {
     if (!ImGui::Begin("Project", &mShowProject, kPanelWindowFlags))
     {
         ImGui::End();
         return;
     }
-    DrawProjectSpawnContent();
+    DrawProjectSpawnContent(engine);
     ImGui::End();
 }
 

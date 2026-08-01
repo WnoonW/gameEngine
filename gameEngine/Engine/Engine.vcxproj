@@ -73,6 +73,7 @@
     <ClCompile Include="..\Codes\Engine\Engine.cpp" />
     <ClCompile Include="..\Codes\File_IO\ResourceLoader.cpp" />
     <ClCompile Include="..\Codes\File_IO\SceneSerializer.cpp" />
+    <ClCompile Include="..\Codes\File_IO\UiPresetSerializer.cpp" />
     <ClCompile Include="..\Codes\File_IO\GameConfig.cpp" />
     <ClCompile Include="..\Codes\File_IO\GameExporter.cpp" />
     <ClCompile Include="..\Codes\Managers\ImGuiManager.cpp" />
@@ -92,6 +93,7 @@
     <ClCompile Include="..\Codes\Systems\RenderSystem_HiZ.cpp" />
     <ClCompile Include="..\Codes\Systems\RenderSystem_SubLogic.cpp" />
     <ClCompile Include="..\Codes\Systems\RenderSystem_Helpers.cpp" />
+    <ClCompile Include="..\Codes\Systems\UiSystem.cpp" />
     <ClCompile Include="..\Codes\Systems\BoundsSystem.cpp" />
     <ClCompile Include="..\Codes\Systems\GravitySystem.cpp" />
     <ClCompile Include="..\Codes\Systems\CollisionSystem.cpp" />

@@ -27,7 +27,7 @@ enum class ButtonAction
     PrintECSStats,
     ToggleManipulateSelected,
     SpawnSelectedMesh,
-    // ... 필요할 때마다 추가
+    BeginCreateUiImage, // enter Scene drag-to-create UI mode
 };
 
 class IFunctionCallback
@@ -74,7 +74,8 @@ public:
     void DrawHierarchyPanel(Engine* engine = nullptr);
     void DrawInspectorPanel(Engine* engine = nullptr);
     void DrawToolsPanel();
-    void DrawProjectPanel();
+    void DrawProjectPanel(Engine* engine);
+    void DrawUiPanel(Engine* engine);
     void DrawRenderPanel(Engine* engine = nullptr);
     void DrawHelpPanel();
 
@@ -114,6 +115,12 @@ public:
     // additive: Shift 누른 채 드래그
     bool ConsumeBoxSelection(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY, bool& outAdditive);
 
+    // UI image create: Project "Create UI Image" → drag on Scene → consume rect (scene local px).
+    // Enable is deferred to the next Tick so the Create click cannot also hit Cancel.
+    void SetUiImageCreateMode(bool on);
+    bool IsUiImageCreateMode() const { return mUiImageCreateMode; }
+    bool ConsumeUiImageCreate(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY);
+
     void SetManipulateSelected(bool on) { mManipulateSelected = on; }
     bool IsManipulateSelected() const { return mManipulateSelected; }
 
@@ -128,10 +135,14 @@ private:
     void CaptureDockSplitRatios(ImGuiDockNode* node);
     void ApplyDockSplitRatios(ImGuiDockNode* node, ImVec2 size);
     void SyncDockLayoutToWorkSize(ImGuiID dockspace_id, const ImVec2& workSize);
-    void DrawProjectSpawnContent();
+    void DrawProjectSpawnContent(Engine* engine);
+    void DrawUiPanelContent(Engine* engine);
     void DrawRenderContent(Engine* engine);
     void DrawHelpContent();
     void DrawToolsContent();
+    void TickUiImageCreateMode();
+    bool IsUiCreateSceneInputOk() const;
+    bool IsUiCreateExitOk() const;
 
     // ImGui file/folder picker (no Win32 common dialog / shell browser — avoids VS Output noise)
     enum class PathDialogMode { None, SaveScene, LoadScene, ExportFolder };
@@ -167,12 +178,13 @@ private:
     bool mShowInspector = true;
     bool mShowTools = true;
     bool mShowProject = true;
+    bool mShowUi = true; // In-game UI tools (create / presets / scale)
     bool mShowRender = true;
     bool mShowHelp = true;
     bool mRequestResetLayout = false;
 
     // 레이아웃 버전을 올리면(코드 변경 시) 기본 도크 배치를 다시 깐다.
-    static constexpr int kDockLayoutVersion = 5;
+    static constexpr int kDockLayoutVersion = 6; // +UI dock panel
     static constexpr int kUiSettingsFileVersion = 1;
     int mAppliedDockLayoutVersion = 0;
     ImVec2 mLastDockWorkSize{ 0.0f, 0.0f };
@@ -213,6 +225,7 @@ private:
     PathDialogMode mPathDialogMode = PathDialogMode::None;
     std::string mPathDialogDir;
     std::string mPathDialogFileName; // save filename / selected file
+    char mPathDialogFileNameBuf[260] = {}; // persistent buffer for InputText (not stack)
     char mPathDialogExportTitle[128] = "MyGame";
     std::vector<std::string> mPathDialogDirs;
     std::vector<std::string> mPathDialogFiles;
@@ -242,4 +255,26 @@ private:
     float mBoxResultMinX = 0, mBoxResultMinY = 0;
     float mBoxResultMaxX = 0, mBoxResultMaxY = 0;
     static constexpr float kBoxDragThresholdPx = 4.0f;
+
+    // Create UI Image mode (drag size on Scene with selected material).
+    // Mode stays ON until Complete / Cancel / Esc — drag only updates the preview rect.
+    bool mUiImageCreateMode = false;
+    // Create button sets this; Tick applies mode ON next panel frame (avoids same-click Cancel).
+    bool mUiCreateEnablePending = false;
+    // UI preset editor fields
+    char mUiPresetNameBuf[64] = "hud_main";
+    int mUiPresetDiskIndex = 0;
+    std::string mUiPresetLastMsg;
+    // True until LMB is fully up after enable (Create click may still be settling).
+    bool mUiCreateWaitMouseRelease = false;
+    // After mouse-up: short lock before Scene drag, longer lock before Complete/Cancel/Esc.
+    int mUiCreateSceneLockFrames = 0;
+    int mUiCreateExitLockFrames = 0;
+    bool mUiCreateDragging = false;
+    bool mUiCreateHasRect = false;   // valid preview rect ready for Complete
+    bool mUiCreatePending = false;   // Complete pressed → EditorMode creates entity
+    ImVec2 mUiCreateStartScreen{ 0, 0 };
+    ImVec2 mUiCreateEndScreen{ 0, 0 };
+    float mUiCreateMinX = 0, mUiCreateMinY = 0;
+    float mUiCreateMaxX = 0, mUiCreateMaxY = 0;
 };

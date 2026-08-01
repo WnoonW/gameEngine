@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include <DirectXMath.h>
 #include <DirectXCollision.h>
+#include <string>
+#include <cstdint>
 #include "Entity.h"
 #include "TransformDirtyTracker.h"
 struct Mesh;
@@ -128,4 +130,78 @@ struct CollisionComponent {
 
 struct SelectedComponent {
     // Editor tag: this entity is the active viewport selection.
+};
+
+// ---------------------------------------------------------------------------
+// In-game UI (NOT ImGui). Image-based quads; three space modes.
+// ---------------------------------------------------------------------------
+enum class UiSpaceMode : int
+{
+    ScreenAlways = 0,      // Ortho HUD: always drawn when visible
+    ScreenConditional = 1, // Ortho: only when active == true
+    WorldBillboard = 2,    // World pos + camera-facing
+};
+
+// How design-space pixels map to the current screen/RT resolution.
+enum class UiScaleMode : int
+{
+    Stretch = 0,     // scale X/Y independently (fills different aspects)
+    UniformMin = 1,  // s = min(sx,sy) — keep aspect, may letterbox
+    UniformMax = 2,  // s = max(sx,sy) — keep aspect, may crop
+};
+
+struct UiElementComponent
+{
+    UiSpaceMode mode = UiSpaceMode::ScreenAlways;
+    bool active = true;
+    bool visible = true;
+    int zOrder = 0;
+    // Screen origin for offsets (usually 0,0 = top-left of canvas).
+    DirectX::XMFLOAT2 anchor{ 0.0f, 0.0f };
+    // Widget local pivot. layoutPercent screen UI uses (0.5,0.5) — position is the CENTER.
+    DirectX::XMFLOAT2 pivot{ 0.5f, 0.5f };
+    // layoutPercent=true:
+    //   position = center of widget as 0..1 of canvas (Scene panel / window)
+    //   size     = width/height as 0..1 of canvas
+    // layoutPercent=false (legacy): design-space pixels + designW/H scale.
+    DirectX::XMFLOAT2 position{ 0.5f, 0.5f };
+    DirectX::XMFLOAT2 size{ 0.1f, 0.1f };
+    float rotationRad = 0.0f;
+    bool layoutPercent = true;
+    // Authoring canvas size (info / Uniform mode). Runtime Stretch uses live canvas only.
+    float designW = 0.0f;
+    float designH = 0.0f;
+};
+
+struct UiImageComponent
+{
+    std::string materialName;
+    DirectX::XMFLOAT4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
+    DirectX::XMFLOAT4 uvRect{ 0.0f, 0.0f, 1.0f, 1.0f };
+};
+
+struct UiButtonComponent
+{
+    std::string actionId;
+    bool interactable = true;
+    bool hovered = false;
+    bool pressed = false;
+};
+
+// Marks UI entities spawned from a registered preset instance (POD only — ECS memcpy).
+struct UiPresetInstanceTag
+{
+    uint32_t instanceId = 0;
+};
+
+// World-space VFX billboard (camera-facing)
+struct EffectBillboardComponent
+{
+    std::string materialName;
+    DirectX::XMFLOAT4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
+    float size = 1.0f;
+    bool additive = true;
+    float lifetime = -1.0f;
+    float age = 0.0f;
+    bool visible = true;
 };

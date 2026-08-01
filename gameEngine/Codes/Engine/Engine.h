@@ -7,6 +7,7 @@
 
 #include "World.h"
 #include "RenderSystem.h"
+#include "UiSystem.h"
 #include "BoundsSystem.h"
 #include "GravitySystem.h"
 #include "CollisionSystem.h"
@@ -14,6 +15,10 @@
 #include "AppStruct.h"
 #include "ResourceManager.h"
 #include "ComponentStruct.h"
+#include "UiPresetSerializer.h"
+#include "SceneSerializer.h"
+#include <unordered_map>
+#include <cstdint>
 
 using namespace DirectX;
 
@@ -34,12 +39,98 @@ public:
     // AABB 업데이트 시스템
     void UpdateBounds();
 
-    // 렌더링
+    // 렌더링 (3D world)
     void Render(ID3D12GraphicsCommandList* cmdList,
         FrameResource* currentFrameResource,
         int currentFrameIndex,
         const XMMATRIX& viewMatrix,
         const XMMATRIX& projMatrix);
+
+    // In-game UI + VFX billboards (after 3D, before SceneViewport::End). No ImGui.
+    void RenderUi(
+        ID3D12GraphicsCommandList* cmdList,
+        UINT screenWidth, UINT screenHeight,
+        const XMMATRIX& viewMatrix,
+        const XMMATRIX& projMatrix);
+
+    Entity CreateUiImage(
+        UiSpaceMode mode,
+        const std::string& materialName,
+        DirectX::XMFLOAT2 size,
+        DirectX::XMFLOAT3 worldOrScreenPos = { 0, 0, 0 },
+        DirectX::XMFLOAT2 anchor = { 0.5f, 0.5f });
+
+    // ScreenAlways: top-left (minX,minY) + size in design-space pixels.
+    // designW/H = authoring resolution (0 = use engine global design res).
+    Entity CreateUiImageScreenRect(
+        const std::string& materialName,
+        float minX, float minY, float maxX, float maxY,
+        float designW = 0.0f, float designH = 0.0f);
+
+    // UI canvas scaler (screen-space elements).
+    void SetUiScaleMode(UiScaleMode mode);
+    UiScaleMode GetUiScaleMode() const;
+    void SetUiDesignResolution(float width, float height);
+    void GetUiDesignResolution(float& outW, float& outH) const;
+
+    void DestroyUiEntity(Entity e);
+    void SetUiActive(Entity e, bool active);
+    void SetUiVisible(Entity e, bool visible);
+    const std::vector<Entity>& GetUiEntities();
+    void DestroyAllUiEntities();
+    UiElementComponent* GetUiElement(Entity e);
+    UiImageComponent* GetUiImage(Entity e);
+    // Screen-space UI pick (panel/window pixels). Returns INVALID_ENTITY if none.
+    Entity PickUiScreen(float pixelX, float pixelY, UINT screenW, UINT screenH);
+
+    // --- UI presets: save layout → register on scene load → Spawn when needed ---
+    // Capture every live UiElement in the world into a preset blob.
+    UiPresetData CaptureCurrentUiAsPreset(const std::string& presetName);
+    // Write current UI to UiPresets/<name>.uipreset (and register under that name).
+    bool SaveCurrentUiAsPreset(const std::string& presetName, std::string* outError = nullptr);
+    // Delete .uipreset file, unregister, remove from scene preload (+ destroy instance).
+    bool DeleteUiPreset(const std::string& name, std::string* outError = nullptr);
+    bool RegisterUiPreset(const std::string& name, const UiPresetData& data);
+    bool RegisterUiPresetFromFile(const std::string& nameOrPath, std::string* outError = nullptr);
+    void UnregisterUiPreset(const std::string& name);
+    void ClearUiPresetRegistry();
+    bool HasUiPreset(const std::string& name) const;
+    std::vector<std::string> GetRegisteredUiPresetNames() const;
+
+    // Scene preload list (saved as ui_preset=name,visible). Visibility toggled in editor.
+    const std::vector<SceneUiPresetEntry>& GetSceneUiPresetList() const { return mSceneUiPresets; }
+    void SetSceneUiPresetList(std::vector<SceneUiPresetEntry> entries);
+    void AddSceneUiPreset(const std::string& name, bool visible = true);
+    void RemoveSceneUiPreset(const std::string& name);
+    // Toggle visibility for a scene-listed preset (spawns instance if needed). Saved with scene.
+    bool SetSceneUiPresetVisible(const std::string& name, bool visible);
+    bool GetSceneUiPresetVisible(const std::string& name) const;
+    // Load every name in the scene list into the registry (files under UiPresets/).
+    bool PreloadSceneUiPresets(std::string* outError = nullptr);
+    // After preload: spawn each listed preset and apply saved visible flags.
+    void ApplySceneUiPresetVisibility();
+
+    // Instantiate a registered preset. Returns instance id (>0) or 0 on failure.
+    uint32_t SpawnUiPreset(const std::string& presetName, bool startActive = true);
+    void SetUiPresetInstanceActive(uint32_t instanceId, bool active);
+    void SetUiPresetInstanceVisible(uint32_t instanceId, bool visible);
+    void DestroyUiPresetInstance(uint32_t instanceId);
+    void DestroyAllUiPresetInstances();
+    size_t CountUiPresetInstances(const std::string& presetName = {}) const;
+
+    Entity CreateEffectBillboard(
+        const std::string& materialName,
+        DirectX::XMFLOAT3 worldPos,
+        float size = 1.0f,
+        DirectX::XMFLOAT4 color = { 1, 1, 1, 1 },
+        bool additive = true,
+        float lifetime = -1.0f);
+
+    bool HandleUiPointer(
+        float scenePixelX, float scenePixelY,
+        UINT screenW, UINT screenH,
+        bool leftDown, bool leftPressedThisFrame,
+        std::vector<UiClickEvent>* outClicks);
 
     void SetRenderPath(RenderPath path);
     RenderPath GetRenderPath() const;
@@ -188,8 +279,12 @@ public:
     void DestroyRenderableEntity(Entity entity);
     void ClearRenderableEntities();
 
-    // 씬 파일 (.scene) 저장/불러오기 — 렌더 오브젝트만
-    bool SaveSceneToFile(const std::string& path, const std::string& sceneName = {});
+    // 씬 파일 (.scene) 저장/불러오기
+    // packLiveUiIntoFile: embed current live UI into THIS file only (no UiPresets/*.uipreset, no editor list mutation)
+    bool SaveSceneToFile(
+        const std::string& path,
+        const std::string& sceneName = {},
+        bool packLiveUiIntoFile = false);
     bool LoadSceneFromFile(const std::string& path, std::string* outError = nullptr);
 
     void Shutdown();
@@ -198,10 +293,30 @@ private:
 
     ECS::World mWorld;
     RenderSystem mRenderSystem;
+    UiSystem mUiSystem;
     BoundsSystem mBoundsSystem;
     GravitySystem mGravitySystem;
     CollisionSystem mCollisionSystem;
     ResourceManager* mResourceManager = nullptr;
+
+    std::vector<Entity> mUiListCache;
+    bool mUiListDirty = true;
+    void RebuildUiListCacheIfNeeded();
+
+    // UI preset registry + live instances
+    std::unordered_map<std::string, UiPresetData> mUiPresetRegistry;
+    std::vector<SceneUiPresetEntry> mSceneUiPresets;
+    SceneUiPresetEntry* FindSceneUiPreset(const std::string& name);
+    const SceneUiPresetEntry* FindSceneUiPreset(const std::string& name) const;
+    struct UiPresetInstance
+    {
+        uint32_t id = 0;
+        std::string presetName;
+        std::vector<Entity> entities;
+    };
+    std::unordered_map<uint32_t, UiPresetInstance> mUiPresetInstances;
+    uint32_t mNextUiPresetInstanceId = 1;
+    Entity SpawnUiPresetElement(const UiPresetElementData& el, uint32_t instanceId, bool startActive);
 
     ID3D12Device* mDevice = nullptr;
     std::vector<std::unique_ptr<FrameResource>>* mFrameResources = nullptr;

@@ -2,6 +2,8 @@
 #include "GameConfig.h"
 #include "Engine.h"
 #include "SceneSerializer.h"
+#include "UiPresetSerializer.h"
+#include <Windows.h>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -18,6 +20,7 @@ namespace
         "hiz_build.hlsl",
         "object_cb.hlsl",
         "object_instanced.hlsl",
+        "ui_quad.hlsl",
     };
 
     bool FileExists(const fs::path& p)
@@ -236,14 +239,42 @@ GameExportResult GameExporter::Export(
         return result;
     }
 
-    // 1) Save current scene into package
+    // 1) Write game.scene — pack live UI into THIS file only (no editor UiPresets auto-create)
     const fs::path scenesDir = fs::path(exportDir) / "Scenes";
     fs::create_directories(scenesDir, ec);
     const std::string scenePath = (scenesDir / "game.scene").string();
-    if (!engine.SaveSceneToFile(scenePath, gameTitle.empty() ? "game" : gameTitle))
+    if (!engine.SaveSceneToFile(scenePath, gameTitle.empty() ? "game" : gameTitle, /*packLiveUiIntoFile=*/true))
     {
         result.message = "Failed to write Scenes/game.scene";
         return result;
+    }
+
+    // 1b) Copy all UiPresets (scene-listed + just-written startup snapshot)
+    {
+        const fs::path dstPresets = fs::path(exportDir) / "UiPresets";
+        fs::create_directories(dstPresets, ec);
+        const fs::path srcPresets = UiPresetSerializer::DefaultUiPresetsDirectory();
+        std::error_code lec;
+        if (fs::is_directory(srcPresets, lec))
+        {
+            std::string presetCopyErr;
+            if (!CopyDirectoryRecursive(srcPresets, dstPresets, presetCopyErr))
+            {
+                OutputDebugStringA(("[Export] UiPresets copy warning: " + presetCopyErr + "\n").c_str());
+            }
+        }
+        // Force-copy every scene-listed preset (overwrite so export matches editor state)
+        for (const auto& entry : engine.GetSceneUiPresetList())
+        {
+            if (entry.name.empty())
+                continue;
+            const fs::path src = UiPresetSerializer::ResolvePresetPath(entry.name);
+            const fs::path dst = dstPresets / (entry.name + ".uipreset");
+            if (fs::is_regular_file(src, lec))
+            {
+                fs::copy_file(src, dst, fs::copy_options::overwrite_existing, lec);
+            }
+        }
     }
 
     // 2) Copy complete Resources (prefer project root over stale x64/Debug/Resources)
