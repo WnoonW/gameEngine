@@ -99,24 +99,64 @@
     <ClCompile Include="..\Codes\Systems\CollisionSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\Codes\App\AppHost.h" />
+    <!-- App -->
     <ClInclude Include="..\Codes\App\AppContext.h" />
+    <ClInclude Include="..\Codes\App\AppHost.h" />
     <ClInclude Include="..\Codes\App\DefaultAssets.h" />
-    <ClInclude Include="..\Codes\App\IAppMode.h" />
     <ClInclude Include="..\Codes\App\EditorMode.h" />
-    <ClInclude Include="..\Codes\App\PlayMode.h" />
-    <ClInclude Include="..\Codes\App\MouseLookCapture.h" />
     <ClInclude Include="..\Codes\App\FlyCameraMath.h" />
-    <ClInclude Include="..\Codes\Engine\Engine.h" />
-    <ClInclude Include="..\Codes\File_IO\GameExporter.h" />
-    <ClInclude Include="..\Codes\File_IO\GameConfig.h" />
+    <ClInclude Include="..\Codes\App\IAppMode.h" />
+    <ClInclude Include="..\Codes\App\MouseLookCapture.h" />
+    <ClInclude Include="..\Codes\App\PlayMode.h" />
+    <!-- Common -->
     <ClInclude Include="..\Codes\Common\d3dApp.h" />
     <ClInclude Include="..\Codes\Common\d3dUtil.h" />
+    <ClInclude Include="..\Codes\Common\d3dx12.h" />
+    <ClInclude Include="..\Codes\Common\DDSTextureLoader.h" />
+    <ClInclude Include="..\Codes\Common\GameTimer.h" />
+    <ClInclude Include="..\Codes\Common\GeometryGenerator.h" />
+    <ClInclude Include="..\Codes\Common\MathHelper.h" />
+    <ClInclude Include="..\Codes\Common\UploadBuffer.h" />
+    <!-- ECS -->
+    <ClInclude Include="..\Codes\ECS\Archetype.h" />
+    <ClInclude Include="..\Codes\ECS\ArchetypeManager.h" />
+    <ClInclude Include="..\Codes\ECS\Component.h" />
+    <ClInclude Include="..\Codes\ECS\ComponentStruct.h" />
     <ClInclude Include="..\Codes\ECS\Entity.h" />
+    <ClInclude Include="..\Codes\ECS\TransformDirtyTracker.h" />
     <ClInclude Include="..\Codes\ECS\World.h" />
+    <!-- Engine -->
+    <ClInclude Include="..\Codes\Engine\Engine.h" />
+    <!-- File_IO -->
+    <ClInclude Include="..\Codes\File_IO\GameConfig.h" />
+    <ClInclude Include="..\Codes\File_IO\GameExporter.h" />
+    <ClInclude Include="..\Codes\File_IO\ResourceLoader.h" />
+    <ClInclude Include="..\Codes\File_IO\SceneSerializer.h" />
+    <ClInclude Include="..\Codes\File_IO\UiPresetSerializer.h" />
+    <!-- Managers -->
     <ClInclude Include="..\Codes\Managers\ImGuiManager.h" />
+    <ClInclude Include="..\Codes\Managers\MaterialManager.h" />
+    <ClInclude Include="..\Codes\Managers\MeshManager.h" />
+    <ClInclude Include="..\Codes\Managers\PipelineStateManager.h" />
+    <ClInclude Include="..\Codes\Managers\ResourceManager.h" />
+    <ClInclude Include="..\Codes\Managers\RootSignatureManager.h" />
     <ClInclude Include="..\Codes\Managers\SceneViewport.h" />
+    <ClInclude Include="..\Codes\Managers\ShaderManager.h" />
+    <!-- Memory -->
+    <ClInclude Include="..\Codes\Memory\DescriptorAllocator.h" />
+    <!-- Structs -->
+    <ClInclude Include="..\Codes\Structs\AppStruct.h" />
+    <ClInclude Include="..\Codes\Structs\constantStruct.h" />
+    <ClInclude Include="..\Codes\Structs\IndirectDrawStructs.h" />
+    <ClInclude Include="..\Codes\Structs\modelStruct.h" />
+    <ClInclude Include="..\Codes\Structs\RenderLimits.h" />
+    <!-- Systems -->
+    <ClInclude Include="..\Codes\Systems\BoundsSystem.h" />
+    <ClInclude Include="..\Codes\Systems\CollisionSystem.h" />
+    <ClInclude Include="..\Codes\Systems\GravitySystem.h" />
+    <ClInclude Include="..\Codes\Systems\RenderDrawHelpers.h" />
     <ClInclude Include="..\Codes\Systems\RenderSystem.h" />
+    <ClInclude Include="..\Codes\Systems\UiSystem.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

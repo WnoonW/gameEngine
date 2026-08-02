@@ -8,6 +8,7 @@
     <Filter Include="File_IO"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000005}</UniqueIdentifier></Filter>
     <Filter Include="Managers"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000006}</UniqueIdentifier></Filter>
     <Filter Include="Memory"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000007}</UniqueIdentifier></Filter>
+    <Filter Include="Structs"><UniqueIdentifier>{a1000001-0000-0000-0000-00000000000A}</UniqueIdentifier></Filter>
     <Filter Include="Systems"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000008}</UniqueIdentifier></Filter>
     <Filter Include="ImGui"><UniqueIdentifier>{a1000001-0000-0000-0000-000000000009}</UniqueIdentifier></Filter>
   </ItemGroup>
@@ -56,5 +57,65 @@
     <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\imgui_widgets.cpp"><Filter>ImGui</Filter></ClCompile>
     <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\backends\imgui_impl_dx12.cpp"><Filter>ImGui</Filter></ClCompile>
     <ClCompile Include="D:\Study\API\imgui-docking\imgui-docking\backends\imgui_impl_win32.cpp"><Filter>ImGui</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- App -->
+    <ClInclude Include="..\Codes\App\AppContext.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\AppHost.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\DefaultAssets.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\EditorMode.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\FlyCameraMath.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\IAppMode.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\MouseLookCapture.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="..\Codes\App\PlayMode.h"><Filter>App</Filter></ClInclude>
+    <!-- Common -->
+    <ClInclude Include="..\Codes\Common\d3dApp.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\d3dUtil.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\d3dx12.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\DDSTextureLoader.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\GameTimer.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\GeometryGenerator.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\MathHelper.h"><Filter>Common</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Common\UploadBuffer.h"><Filter>Common</Filter></ClInclude>
+    <!-- ECS -->
+    <ClInclude Include="..\Codes\ECS\Archetype.h"><Filter>ECS</Filter></ClInclude>
+    <ClInclude Include="..\Codes\ECS\ArchetypeManager.h"><Filter>ECS</Filter></ClInclude>
+    <ClInclude Include="..\Codes\ECS\Component.h"><Filter>ECS</Filter></ClInclude>
+    <ClInclude Include="..\Codes\ECS\ComponentStruct.h"><Filter>ECS</Filter></ClInclude>
+    <ClInclude Include="..\Codes\ECS\Entity.h"><Filter>ECS</Filter></ClInclude>
+    <ClInclude Include="..\Codes\ECS\TransformDirtyTracker.h"><Filter>ECS</Filter></ClInclude>
+    <ClInclude Include="..\Codes\ECS\World.h"><Filter>ECS</Filter></ClInclude>
+    <!-- Engine -->
+    <ClInclude Include="..\Codes\Engine\Engine.h"><Filter>Engine</Filter></ClInclude>
+    <!-- File_IO -->
+    <ClInclude Include="..\Codes\File_IO\GameConfig.h"><Filter>File_IO</Filter></ClInclude>
+    <ClInclude Include="..\Codes\File_IO\GameExporter.h"><Filter>File_IO</Filter></ClInclude>
+    <ClInclude Include="..\Codes\File_IO\ResourceLoader.h"><Filter>File_IO</Filter></ClInclude>
+    <ClInclude Include="..\Codes\File_IO\SceneSerializer.h"><Filter>File_IO</Filter></ClInclude>
+    <ClInclude Include="..\Codes\File_IO\UiPresetSerializer.h"><Filter>File_IO</Filter></ClInclude>
+    <!-- Managers -->
+    <ClInclude Include="..\Codes\Managers\ImGuiManager.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\MaterialManager.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\MeshManager.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\PipelineStateManager.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\ResourceManager.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\RootSignatureManager.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\SceneViewport.h"><Filter>Managers</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Managers\ShaderManager.h"><Filter>Managers</Filter></ClInclude>
+    <!-- Memory -->
+    <ClInclude Include="..\Codes\Memory\DescriptorAllocator.h"><Filter>Memory</Filter></ClInclude>
+    <!-- Structs -->
+    <ClInclude Include="..\Codes\Structs\AppStruct.h"><Filter>Structs</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Structs\constantStruct.h"><Filter>Structs</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Structs\IndirectDrawStructs.h"><Filter>Structs</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Structs\modelStruct.h"><Filter>Structs</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Structs\RenderLimits.h"><Filter>Structs</Filter></ClInclude>
+    <!-- Systems -->
+    <ClInclude Include="..\Codes\Systems\BoundsSystem.h"><Filter>Systems</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Systems\CollisionSystem.h"><Filter>Systems</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Systems\GravitySystem.h"><Filter>Systems</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Systems\RenderDrawHelpers.h"><Filter>Systems</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Systems\RenderSystem.h"><Filter>Systems</Filter></ClInclude>
+    <ClInclude Include="..\Codes\Systems\UiSystem.h"><Filter>Systems</Filter></ClInclude>
   </ItemGroup>
 </Project>
