@@ -50,6 +50,10 @@ private:
     void InitializeOrbitFromSelection(AppContext& ctx);
     void SyncMouseLook(AppContext& ctx);
     void BindMouseLook(AppContext& ctx);
+    void ApplyOrbitZoomFromPixels(float dxPixels);
+    void ApplyOrbitHeightFromPixels(float dyPixels);
+    void EndRmbOrbitZoom(AppContext& ctx);
+    bool IsMeshManipulateActive(AppContext& ctx) const;
 
     MouseLookCapture mMouseLook;
     bool mMouseLookRequested = false;
@@ -69,8 +73,16 @@ private:
     bool mKeySpace = false, mKeyShift = false, mKeyCtrl = false;
 
     bool mManipulateSelected = false;
+    bool mManipulateUi = false;
     float mOrbitRadius = 10.0f;
+    // World-Y crane offset (RMB drag U/D). Does not change orbit pitch/yaw.
+    float mOrbitHeightOffset = 0.0f;
     Entity mOrbitTarget = INVALID_ENTITY;
+
+    // Manipulate mesh: RMB drag L/R zooms, U/D world-Y height (no RMB pick).
+    bool mRmbOrbitZoomActive = false;
+    int mLastRmbZoomX = 0;
+    int mLastRmbZoomY = 0;
 
     int mSpiralIndex = 0;
 

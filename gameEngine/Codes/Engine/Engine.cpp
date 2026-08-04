@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <climits>
+#include <cmath>
 
 using namespace DirectX;
 
@@ -132,14 +133,21 @@ void Engine::ClearSelection()
         mWorld.RemoveComponent<SelectedComponent>(e);
 }
 
+// 3D mesh objects need Transform; screen UI objects have UiElement only (no Transform).
+// WorldBillboard UI may have both. Without this, Hierarchy/Scene UI pick never sticks.
+static bool CanSelectEntity(ECS::World& world, Entity entity)
+{
+    if (entity == INVALID_ENTITY)
+        return false;
+    return world.GetComponent<TransformComponent>(entity) != nullptr
+        || world.GetComponent<UiElementComponent>(entity) != nullptr;
+}
+
 void Engine::SetSelectedEntity(Entity entity)
 {
     ClearSelection();
 
-    if (entity == INVALID_ENTITY)
-        return;
-
-    if (!mWorld.GetComponent<TransformComponent>(entity))
+    if (!CanSelectEntity(mWorld, entity))
         return;
 
     if (!mWorld.GetComponent<SelectedComponent>(entity))
@@ -148,9 +156,7 @@ void Engine::SetSelectedEntity(Entity entity)
 
 void Engine::AddSelectedEntity(Entity entity)
 {
-    if (entity == INVALID_ENTITY)
-        return;
-    if (!mWorld.GetComponent<TransformComponent>(entity))
+    if (!CanSelectEntity(mWorld, entity))
         return;
     if (mWorld.GetComponent<SelectedComponent>(entity))
         return;
@@ -159,9 +165,7 @@ void Engine::AddSelectedEntity(Entity entity)
 
 void Engine::ToggleSelectedEntity(Entity entity)
 {
-    if (entity == INVALID_ENTITY)
-        return;
-    if (!mWorld.GetComponent<TransformComponent>(entity))
+    if (!CanSelectEntity(mWorld, entity))
         return;
 
     if (mWorld.GetComponent<SelectedComponent>(entity))
@@ -326,6 +330,37 @@ size_t Engine::SelectObjectsInRect(
             ++count;
         });
 
+    // Screen UI objects (no Transform) — rect pick in same scene-pixel space as layout.
+    float gw = 0.f, gh = 0.f;
+    mUiSystem.GetGlobalDesignResolution(gw, gh);
+    mWorld.ForEach<UiElementComponent, UiImageComponent>(
+        [&](Entity e, UiElementComponent& el, UiImageComponent&)
+        {
+            if (!UiElementShouldDraw(el) || el.mode == UiSpaceMode::WorldBillboard)
+                return;
+            if (IsEntitySelected(e))
+                return;
+
+            DirectX::XMFLOAT2 posPx{}, sizePx{};
+            UiSystem::ResolveScreenLayout(
+                el, sceneWidth, sceneHeight, el.scaleMode, gw, gh, posPx, sizePx);
+
+            const float ax = el.anchor.x * sceneWidth + posPx.x;
+            const float ay = el.anchor.y * sceneHeight + posPx.y;
+            const float l = ax - el.pivot.x * sizePx.x;
+            const float t = ay - el.pivot.y * sizePx.y;
+            const float r = l + sizePx.x;
+            const float b = t + sizePx.y;
+
+            const bool overlap =
+                !(r < rectMinX || l > rectMaxX || b < rectMinY || t > rectMaxY);
+            if (!overlap)
+                return;
+
+            AddSelectedEntity(e);
+            ++count;
+        });
+
     return count;
 }
 
@@ -400,6 +435,294 @@ void Engine::MoveSelectedPlanar(float forward, float right, float up, float spee
     tf->MarkDirty(selected);
 }
 
+void Engine::MoveSelectedUi(float dPosX, float dPosY)
+{
+    if (dPosX == 0.f && dPosY == 0.f)
+        return;
+
+    for (Entity e : GetSelectedEntities())
+    {
+        UiElementComponent* el = mWorld.GetComponent<UiElementComponent>(e);
+        if (!el || el->mode == UiSpaceMode::WorldBillboard)
+            continue;
+        el->position.x += dPosX;
+        el->position.y += dPosY;
+        // Free drag breaks edge lock (re-snap on drop may set again).
+        el->snapLeft = el->snapRight = el->snapTop = el->snapBottom = false;
+    }
+}
+
+void Engine::SnapSelectedMesh(float threshold)
+{
+    if (threshold <= 0.f)
+        return;
+
+    const Entity selected = GetSelectedEntity();
+    if (selected == INVALID_ENTITY)
+        return;
+    if (!GetRenderable(selected))
+        return;
+    TransformComponent* tf = mWorld.GetComponent<TransformComponent>(selected);
+    BoundsComponent* sb = mWorld.GetComponent<BoundsComponent>(selected);
+    if (!tf || !sb)
+        return;
+
+    // Fresh world AABB (union of submeshes)
+    mBoundsSystem.Update(mWorld);
+    sb = mWorld.GetComponent<BoundsComponent>(selected);
+    if (!sb)
+        return;
+
+    const BoundingBox& sBox = sb->worldBounds;
+    if (sBox.Extents.x <= 0.f && sBox.Extents.y <= 0.f && sBox.Extents.z <= 0.f)
+        return;
+
+    const float sMin[3] = {
+        sBox.Center.x - sBox.Extents.x,
+        sBox.Center.y - sBox.Extents.y,
+        sBox.Center.z - sBox.Extents.z
+    };
+    const float sMax[3] = {
+        sBox.Center.x + sBox.Extents.x,
+        sBox.Center.y + sBox.Extents.y,
+        sBox.Center.z + sBox.Extents.z
+    };
+    const float sCtr[3] = { sBox.Center.x, sBox.Center.y, sBox.Center.z };
+
+    float bestDelta[3] = { 0.f, 0.f, 0.f };
+    float bestAbs[3] = { threshold + 1.f, threshold + 1.f, threshold + 1.f };
+    bool any = false;
+
+    auto consider = [&](int axis, float delta)
+    {
+        const float ad = fabsf(delta);
+        if (ad <= threshold && ad < bestAbs[axis])
+        {
+            bestAbs[axis] = ad;
+            bestDelta[axis] = delta;
+            any = true;
+        }
+    };
+
+    mWorld.ForEach<TransformComponent, RenderableComponent, BoundsComponent>(
+        [&](Entity e, TransformComponent&, RenderableComponent& rend, BoundsComponent& bnds)
+        {
+            if (e == selected || !rend.visible || !rend.mesh)
+                return;
+            const BoundingBox& o = bnds.worldBounds;
+            if (o.Extents.x <= 0.f && o.Extents.y <= 0.f && o.Extents.z <= 0.f)
+                return;
+
+            const float oMin[3] = {
+                o.Center.x - o.Extents.x,
+                o.Center.y - o.Extents.y,
+                o.Center.z - o.Extents.z
+            };
+            const float oMax[3] = {
+                o.Center.x + o.Extents.x,
+                o.Center.y + o.Extents.y,
+                o.Center.z + o.Extents.z
+            };
+            const float oCtr[3] = { o.Center.x, o.Center.y, o.Center.z };
+
+            for (int a = 0; a < 3; ++a)
+            {
+                // Face-to-face (adjacent / touch)
+                consider(a, oMin[a] - sMax[a]); // selected max → other min
+                consider(a, oMax[a] - sMin[a]); // selected min → other max
+                // Coplanar faces (same side align)
+                consider(a, oMin[a] - sMin[a]);
+                consider(a, oMax[a] - sMax[a]);
+                // Centers on axis
+                consider(a, oCtr[a] - sCtr[a]);
+            }
+        });
+
+    if (!any)
+        return;
+
+    // Only apply axes that actually found a snap within threshold
+    XMFLOAT3 delta{ 0, 0, 0 };
+    if (bestAbs[0] <= threshold) delta.x = bestDelta[0];
+    if (bestAbs[1] <= threshold) delta.y = bestDelta[1];
+    if (bestAbs[2] <= threshold) delta.z = bestDelta[2];
+    if (delta.x == 0.f && delta.y == 0.f && delta.z == 0.f)
+        return;
+
+    tf->position.x += delta.x;
+    tf->position.y += delta.y;
+    tf->position.z += delta.z;
+    tf->MarkDirty(selected);
+    mBoundsSystem.Update(mWorld);
+}
+
+bool Engine::SnapSelectedUi(float thresholdPercent, float canvasW, float canvasH)
+{
+    // Editor canvas only: snap widget edges to window left / right / top / bottom.
+    // thresholdPercent is % of canvas width (X) / height (Y).
+    if (thresholdPercent <= 0.f || canvasW < 1.f || canvasH < 1.f)
+        return false;
+
+    const float thresholdPxX = (thresholdPercent * 0.01f) * canvasW;
+    const float thresholdPxY = (thresholdPercent * 0.01f) * canvasH;
+
+    float gw = 0.f, gh = 0.f;
+    mUiSystem.GetGlobalDesignResolution(gw, gh);
+
+    struct UiRect
+    {
+        Entity e = INVALID_ENTITY;
+        UiElementComponent* el = nullptr;
+        float l = 0, t = 0, r = 0, b = 0;
+    };
+
+    std::vector<UiRect> rects;
+    rects.reserve(16);
+    mWorld.ForEach<UiElementComponent, UiImageComponent>(
+        [&](Entity e, UiElementComponent& el, UiImageComponent&)
+        {
+            if (!UiElementShouldDraw(el) || el.mode == UiSpaceMode::WorldBillboard)
+                return;
+            XMFLOAT2 posPx{}, sizePx{};
+            UiSystem::ResolveScreenLayout(
+                el, canvasW, canvasH, el.scaleMode, gw, gh, posPx, sizePx);
+            const float ax = el.anchor.x * canvasW + posPx.x;
+            const float ay = el.anchor.y * canvasH + posPx.y;
+            UiRect ur;
+            ur.e = e;
+            ur.el = &el;
+            ur.l = ax - el.pivot.x * sizePx.x;
+            ur.t = ay - el.pivot.y * sizePx.y;
+            ur.r = ur.l + sizePx.x;
+            ur.b = ur.t + sizePx.y;
+            rects.push_back(ur);
+        });
+
+    bool anySnapped = false;
+
+    auto snapOne = [&](UiRect& self) -> bool
+    {
+        float bestDx = 0.f, bestDy = 0.f;
+        float bestAx = thresholdPxX + 1.f, bestAy = thresholdPxY + 1.f;
+        bool bestIsLeft = false, bestIsTop = false;
+
+        auto considerX = [&](float edge, float guide, bool isLeft)
+        {
+            const float d = guide - edge;
+            const float ad = fabsf(d);
+            if (ad <= thresholdPxX && ad < bestAx)
+            {
+                bestAx = ad;
+                bestDx = d;
+                bestIsLeft = isLeft;
+            }
+        };
+        auto considerY = [&](float edge, float guide, bool isTop)
+        {
+            const float d = guide - edge;
+            const float ad = fabsf(d);
+            if (ad <= thresholdPxY && ad < bestAy)
+            {
+                bestAy = ad;
+                bestDy = d;
+                bestIsTop = isTop;
+            }
+        };
+
+        // Left / right of canvas
+        considerX(self.l, 0.f, true);
+        considerX(self.r, canvasW, false);
+        // Top / bottom of canvas
+        considerY(self.t, 0.f, true);
+        considerY(self.b, canvasH, false);
+
+        const bool xOk = bestAx <= thresholdPxX;
+        const bool yOk = bestAy <= thresholdPxY;
+        if (!xOk && !yOk)
+            return false;
+
+        // Priority: single edge (L/R/T/B line) > corner (two edges at once).
+        constexpr float kCornerPriorityScale = 0.5f;
+        bool applyX = false;
+        bool applyY = false;
+
+        if (xOk && yOk)
+        {
+            if (bestAx <= bestAy)
+            {
+                applyX = true;
+                applyY = (bestAy <= thresholdPxY * kCornerPriorityScale);
+            }
+            else
+            {
+                applyY = true;
+                applyX = (bestAx <= thresholdPxX * kCornerPriorityScale);
+            }
+        }
+        else if (xOk)
+        {
+            applyX = true;
+        }
+        else
+        {
+            applyY = true;
+        }
+
+        if (!applyX && !applyY)
+            return false;
+
+        if (self.el->layoutPercent)
+        {
+            if (applyX)
+                self.el->position.x += bestDx / canvasW;
+            if (applyY)
+                self.el->position.y += bestDy / canvasH;
+        }
+        else
+        {
+            if (applyX)
+                self.el->position.x += bestDx;
+            if (applyY)
+                self.el->position.y += bestDy;
+        }
+
+        // Persist edge locks for Keep Aspect Fit resize maintenance.
+        self.el->snapLeft = self.el->snapRight = self.el->snapTop = self.el->snapBottom = false;
+        if (applyX)
+        {
+            self.el->snapLeft = bestIsLeft;
+            self.el->snapRight = !bestIsLeft;
+        }
+        if (applyY)
+        {
+            self.el->snapTop = bestIsTop;
+            self.el->snapBottom = !bestIsTop;
+        }
+
+        // Immediately re-lock in Keep Aspect Fit so size/pos stay consistent this frame.
+        if (self.el->scaleMode == UiScaleMode::UniformMin)
+        {
+            UiSystem::MaintainKeepAspectFitEdgeLocks(
+                *self.el, canvasW, canvasH, gw, gh);
+        }
+        return true;
+    };
+
+    for (Entity e : GetSelectedEntities())
+    {
+        for (UiRect& ur : rects)
+        {
+            if (ur.e == e)
+            {
+                if (snapOne(ur))
+                    anySnapped = true;
+                break;
+            }
+        }
+    }
+    return anySnapped;
+}
+
 void Engine::Render(ID3D12GraphicsCommandList* cmdList,
     FrameResource* currentFrameResource,
     int currentFrameIndex,
@@ -443,6 +766,7 @@ Entity Engine::CreateUiImage(
     Entity e = mWorld.CreateEntity();
     UiElementComponent el{};
     el.mode = mode;
+    el.scaleMode = mUiSystem.GetScaleMode(); // inherit editor default for new UI
     el.active = true;
     el.visible = true;
     el.size = size;
@@ -529,6 +853,7 @@ Entity Engine::CreateUiImageScreenRect(
     Entity e = mWorld.CreateEntity();
     UiElementComponent el{};
     el.mode = UiSpaceMode::ScreenAlways;
+    el.scaleMode = mUiSystem.GetScaleMode(); // inherit Canvas & Scale default
     el.active = true;
     el.visible = true;
     el.anchor = { 0.0f, 0.0f }; // canvas top-left origin
@@ -560,6 +885,7 @@ Entity Engine::CreateUiImageScreenRect(
 
 void Engine::SetUiScaleMode(UiScaleMode mode)
 {
+    // Default for newly created UI only — existing widgets keep el.scaleMode.
     mUiSystem.SetScaleMode(mode);
 }
 
@@ -653,22 +979,25 @@ Entity Engine::PickUiScreen(float pixelX, float pixelY, UINT screenW, UINT scree
     float gw = 0.f, gh = 0.f;
     mUiSystem.GetGlobalDesignResolution(gw, gh);
 
+    mWorld.ForEach<UiElementComponent>(
+        [&](Entity, UiElementComponent& el)
+        {
+            UiSystem::MaintainKeepAspectFitEdgeLocks(el, sw, sh, gw, gh);
+        });
+
     Entity best = INVALID_ENTITY;
     int bestZ = INT_MIN;
 
     mWorld.ForEach<UiElementComponent, UiImageComponent>(
         [&](Entity e, UiElementComponent& el, UiImageComponent&)
         {
-            if (!el.visible)
-                return;
-            if (el.mode == UiSpaceMode::ScreenConditional && !el.active)
-                return;
-            if (el.mode == UiSpaceMode::WorldBillboard)
+            // Editor pick: same draw gate as render; screen UI only.
+            if (!UiElementShouldDraw(el) || el.mode == UiSpaceMode::WorldBillboard)
                 return;
 
             DirectX::XMFLOAT2 posPx{}, sizePx{};
             UiSystem::ResolveScreenLayout(
-                el, sw, sh, mUiSystem.GetScaleMode(), gw, gh, posPx, sizePx);
+                el, sw, sh, el.scaleMode, gw, gh, posPx, sizePx);
 
             const float ax = el.anchor.x * sw + posPx.x;
             const float ay = el.anchor.y * sh + posPx.y;
@@ -724,6 +1053,7 @@ UiPresetData Engine::CaptureCurrentUiAsPreset(const std::string& presetName)
         {
             UiPresetElementData d;
             d.mode = el.mode;
+            d.scaleMode = el.scaleMode;
             d.active = el.active;
             d.visible = el.visible;
             d.zOrder = el.zOrder;
@@ -735,6 +1065,10 @@ UiPresetData Engine::CaptureCurrentUiAsPreset(const std::string& presetName)
             d.layoutPercent = el.layoutPercent;
             d.designW = el.designW;
             d.designH = el.designH;
+            d.snapLeft = el.snapLeft;
+            d.snapRight = el.snapRight;
+            d.snapTop = el.snapTop;
+            d.snapBottom = el.snapBottom;
             // Normalize legacy pixel (top-left) → center percent when design canvas known
             if (!d.layoutPercent && d.designW > 1.0f && d.designH > 1.0f
                 && el.mode != UiSpaceMode::WorldBillboard)
@@ -1077,6 +1411,7 @@ Entity Engine::SpawnUiPresetElement(const UiPresetElementData& src, uint32_t ins
 
     UiElementComponent el{};
     el.mode = src.mode;
+    el.scaleMode = src.scaleMode;
     el.active = startActive ? src.active : false;
     // Prefer component visible flag; ApplySceneUiPresetVisibility may force true after spawn.
     el.visible = src.visible;
@@ -1089,6 +1424,10 @@ Entity Engine::SpawnUiPresetElement(const UiPresetElementData& src, uint32_t ins
     el.layoutPercent = src.layoutPercent;
     el.designW = src.designW;
     el.designH = src.designH;
+    el.snapLeft = src.snapLeft;
+    el.snapRight = src.snapRight;
+    el.snapTop = src.snapTop;
+    el.snapBottom = src.snapBottom;
     // Screen percent UI always uses center pivot for correct resize sync
     if (el.layoutPercent && el.mode != UiSpaceMode::WorldBillboard)
     {

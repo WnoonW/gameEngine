@@ -5,6 +5,7 @@
 #include "ImGuiManager.h"
 #include "SceneViewport.h"
 #include "ComponentStruct.h"
+#include "MaterialManager.h"
 #include "d3dUtil.h"
 #include <algorithm>
 #include <cmath>
@@ -65,6 +66,7 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
     ctx.imgui->DrawEditorPanels(ctx.engine);
 
     mManipulateSelected = ctx.imgui->IsManipulateSelected();
+    mManipulateUi = ctx.imgui->IsManipulateUi();
 
     // UI image create: Project "Create UI Image" → drag on Scene
     {
@@ -76,9 +78,51 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
             const float canvasW = static_cast<float>((std::max)(1u, ctx.imgui->GetDesiredSceneWidth()));
             const float canvasH = static_cast<float>((std::max)(1u, ctx.imgui->GetDesiredSceneHeight()));
 
-            std::string mat = ctx.imgui->GetSelectedMaterial();
+            // UI panel material only — not Project mesh spawn material.
+            std::string mat = ctx.imgui->GetSelectedUiMaterial();
             if (mat.empty())
                 mat = "Default";
+
+            // Fit-image-aspect already applied on drag in ImGuiManager; re-apply if needed.
+            if (ctx.imgui->IsUiCreateFitImageAspect())
+            {
+                if (auto m = MaterialManager::Get().GetMaterial(mat))
+                {
+                    if (m->mTexture)
+                    {
+                        const D3D12_RESOURCE_DESC desc = m->mTexture->GetDesc();
+                        if (desc.Width > 0 && desc.Height > 0)
+                        {
+                            const float aspect =
+                                static_cast<float>(desc.Width) / static_cast<float>(desc.Height);
+                            if (ux0 > ux1) std::swap(ux0, ux1);
+                            if (uy0 > uy1) std::swap(uy0, uy1);
+                            const float boxW = ux1 - ux0;
+                            const float boxH = uy1 - uy0;
+                            if (boxW > 1.f && boxH > 1.f && aspect > 1e-6f)
+                            {
+                                float outW = boxW, outH = boxH;
+                                if (boxW / boxH > aspect)
+                                {
+                                    outH = boxH;
+                                    outW = outH * aspect;
+                                }
+                                else
+                                {
+                                    outW = boxW;
+                                    outH = outW / aspect;
+                                }
+                                const float cx = 0.5f * (ux0 + ux1);
+                                const float cy = 0.5f * (uy0 + uy1);
+                                ux0 = cx - 0.5f * outW;
+                                ux1 = cx + 0.5f * outW;
+                                uy0 = cy - 0.5f * outH;
+                                uy1 = cy + 0.5f * outH;
+                            }
+                        }
+                    }
+                }
+            }
 
             Entity e = ctx.engine->CreateUiImageScreenRect(
                 mat,
@@ -87,14 +131,15 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
             ctx.engine->SetUiDesignResolution(canvasW, canvasH);
 
             char buf[160];
-            sprintf_s(buf, "[UI] editor create mat=%s e=%u canvas=%.0fx%.0f (center%%)\n",
-                mat.c_str(), static_cast<unsigned>(e), canvasW, canvasH);
+            sprintf_s(buf, "[UI] editor create mat=%s e=%u canvas=%.0fx%.0f fitAspect=%d\n",
+                mat.c_str(), static_cast<unsigned>(e), canvasW, canvasH,
+                ctx.imgui->IsUiCreateFitImageAspect() ? 1 : 0);
             OutputDebugStringA(buf);
         }
     }
 
-    // Scene drag box multi-select (Shift = additive) — disabled while UI create mode
-    if (!ctx.imgui->IsUiImageCreateMode())
+    // Scene drag box multi-select (Shift = additive) — disabled while UI create / UI drag
+    if (!ctx.imgui->IsUiImageCreateMode() && !ctx.imgui->IsUiManipDragging())
     {
         float bx0, by0, bx1, by1;
         bool additive = false;
@@ -125,8 +170,12 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
         }
     }
 
-    // Short LMB on Scene: prefer UI image pick, else mouse look
-    if (!ctx.imgui->IsUiImageCreateMode() && ctx.imgui->ConsumeSceneCaptureClick())
+    // Short LMB on Scene: prefer UI pick (when not in UI-manip drag mode), else mouse look.
+    // When Manipulate UI is on, pick+drag is handled in ImGuiManager Scene panel.
+    if (!ctx.imgui->IsUiImageCreateMode()
+        && !ctx.imgui->IsUiManipDragging()
+        && !ctx.imgui->IsManipulateUi()
+        && ctx.imgui->ConsumeSceneCaptureClick())
     {
         bool pickedUi = false;
         const SceneViewport& sceneVP = ctx.imgui->GetSceneViewport();
@@ -147,12 +196,10 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
             ScreenToClient(ctx.hwnd, &pt);
             const float localX = static_cast<float>(pt.x) - static_cast<float>(sceneClient.left);
             const float localY = static_cast<float>(pt.y) - static_cast<float>(sceneClient.top);
-            // Pick in panel-local space first (percent layout uses live canvas = panel/RT)
             Entity uiHit = ctx.engine->PickUiScreen(
                 localX, localY,
                 static_cast<UINT>((std::max)(1.0f, uiW)),
                 static_cast<UINT>((std::max)(1.0f, uiH)));
-            // Also try RT space if panel and RT differ
             if (uiHit == INVALID_ENTITY && (pickW != uiW || pickH != uiH))
             {
                 const float sx = pickW / uiW;
@@ -175,6 +222,12 @@ void EditorMode::OnUpdate(AppContext& ctx, float dt)
             mMouseLookRequested = true;
             SyncMouseLook(ctx);
         }
+    }
+    else if (ctx.imgui->IsManipulateUi() && ctx.imgui->ConsumeSceneCaptureClick())
+    {
+        // Empty short click while UI manip: mouse look still ok
+        mMouseLookRequested = true;
+        SyncMouseLook(ctx);
     }
 
     UpdateCamera(ctx, dt);
@@ -257,8 +310,21 @@ bool EditorMode::OnMsg(AppContext& /*ctx*/, HWND /*hwnd*/, UINT msg, WPARAM wPar
             const LONG my = raw->data.mouse.lLastY;
             if (mx != 0 || my != 0)
             {
-                mPendingMouseDx += XMConvertToRadians(mMouseSensitivity * static_cast<float>(mx));
-                mPendingMouseDy += XMConvertToRadians(mMouseSensitivity * static_cast<float>(my));
+                // Manipulate: RMB + L/R = zoom, RMB + U/D = camera height (orbit pitch).
+                if (mRmbOrbitZoomActive)
+                {
+                    if (mx != 0)
+                        ApplyOrbitZoomFromPixels(static_cast<float>(mx));
+                    if (my != 0)
+                        ApplyOrbitHeightFromPixels(static_cast<float>(my));
+                }
+                else
+                {
+                    mPendingMouseDx += XMConvertToRadians(
+                        mMouseSensitivity * static_cast<float>(mx));
+                    mPendingMouseDy += XMConvertToRadians(
+                        mMouseSensitivity * static_cast<float>(my));
+                }
             }
         }
         return true;
@@ -267,10 +333,72 @@ bool EditorMode::OnMsg(AppContext& /*ctx*/, HWND /*hwnd*/, UINT msg, WPARAM wPar
     return false;
 }
 
+bool EditorMode::IsMeshManipulateActive(AppContext& ctx) const
+{
+    return mManipulateSelected
+        && ctx.engine
+        && ctx.engine->GetSelectedEntity() != INVALID_ENTITY;
+}
+
+void EditorMode::ApplyOrbitZoomFromPixels(float dxPixels)
+{
+    // Drag right = zoom in (closer), left = zoom out. ~40px ≈ one wheel notch.
+    if (dxPixels == 0.0f)
+        return;
+    const float scrollUnits = -dxPixels / 40.0f;
+    mOrbitRadius *= powf(1.1f, scrollUnits);
+    mOrbitRadius = MathHelper::Clamp(mOrbitRadius, kMinOrbitRadius, kMaxOrbitRadius);
+}
+
+void EditorMode::ApplyOrbitHeightFromPixels(float dyPixels)
+{
+    // Pure world-Y crane: does not change mPhi/mTheta (no orbit rotation).
+    // Screen Y increases downward → drag up raises camera.
+    if (dyPixels == 0.0f)
+        return;
+    constexpr float kHeightPerPixel = 0.04f;
+    mOrbitHeightOffset -= dyPixels * kHeightPerPixel;
+    mOrbitHeightOffset = MathHelper::Clamp(mOrbitHeightOffset, -50.0f, 50.0f);
+}
+
+void EditorMode::EndRmbOrbitZoom(AppContext& ctx)
+{
+    if (!mRmbOrbitZoomActive)
+        return;
+    mRmbOrbitZoomActive = false;
+    if (ctx.hwnd && GetCapture() == ctx.hwnd && !mMouseLook.IsActive())
+        ReleaseCapture();
+}
+
 void EditorMode::OnMouseDown(AppContext& ctx, WPARAM btnState, int x, int y)
 {
     if (!(btnState & MK_RBUTTON) || !ctx.imgui || !ctx.engine)
         return;
+
+    // Manipulate mesh with a selection: RMB starts orbit zoom (no pick).
+    if (IsMeshManipulateActive(ctx))
+    {
+        if (!mMouseLook.IsActive())
+        {
+            // Allow when over Scene even if ImGui wants capture; block other UI panels.
+            if (ImGui::GetIO().WantCaptureMouse)
+            {
+                RECT sceneScreen{};
+                if (!ctx.imgui->TryGetSceneScreenRect(sceneScreen))
+                    return;
+                POINT pt{ x, y };
+                ClientToScreen(ctx.hwnd, &pt);
+                if (pt.x < sceneScreen.left || pt.y < sceneScreen.top
+                    || pt.x >= sceneScreen.right || pt.y >= sceneScreen.bottom)
+                    return;
+            }
+            SetCapture(ctx.hwnd);
+        }
+        mRmbOrbitZoomActive = true;
+        mLastRmbZoomX = x;
+        mLastRmbZoomY = y;
+        return;
+    }
 
     if (!mMouseLook.IsActive() && ImGui::GetIO().WantCaptureMouse)
         return;
@@ -317,29 +445,48 @@ void EditorMode::OnMouseDown(AppContext& ctx, WPARAM btnState, int x, int y)
     }
 }
 
-void EditorMode::OnMouseUp(AppContext& /*ctx*/, WPARAM /*btnState*/, int /*x*/, int /*y*/)
+void EditorMode::OnMouseUp(AppContext& ctx, WPARAM /*btnState*/, int /*x*/, int /*y*/)
 {
+    if ((GetKeyState(VK_RBUTTON) & 0x8000) == 0)
+        EndRmbOrbitZoom(ctx);
 }
 
-void EditorMode::OnMouseMove(AppContext& /*ctx*/, WPARAM /*btnState*/, int /*x*/, int /*y*/)
+void EditorMode::OnMouseMove(AppContext& ctx, WPARAM btnState, int x, int y)
 {
+    if (!mRmbOrbitZoomActive)
+        return;
+
+    if (!(btnState & MK_RBUTTON) || !IsMeshManipulateActive(ctx))
+    {
+        EndRmbOrbitZoom(ctx);
+        return;
+    }
+
+    // Mouse-look path applies zoom/height from raw input (cursor is locked).
+    if (mMouseLook.IsActive())
+    {
+        mLastRmbZoomX = x;
+        mLastRmbZoomY = y;
+        return;
+    }
+
+    const int dx = x - mLastRmbZoomX;
+    const int dy = y - mLastRmbZoomY;
+    mLastRmbZoomX = x;
+    mLastRmbZoomY = y;
+    if (dx != 0)
+        ApplyOrbitZoomFromPixels(static_cast<float>(dx));
+    if (dy != 0)
+        ApplyOrbitHeightFromPixels(static_cast<float>(dy));
 }
 
-void EditorMode::OnMouseWheel(AppContext& ctx, short wheelDelta, int /*x*/, int /*y*/)
+void EditorMode::OnMouseWheel(AppContext& /*ctx*/, short wheelDelta, int /*x*/, int /*y*/)
 {
-    const float factor = 1.1f;
+    // Always adjust move speed (including during mesh manipulate).
+    // Orbit zoom is RMB drag left/right while manipulating a selected mesh.
     const float scroll = wheelDelta / 120.0f;
-
-    if (mManipulateSelected && ctx.engine && ctx.engine->GetSelectedEntity() != INVALID_ENTITY)
-    {
-        mOrbitRadius *= powf(factor, scroll);
-        mOrbitRadius = MathHelper::Clamp(mOrbitRadius, kMinOrbitRadius, kMaxOrbitRadius);
-    }
-    else
-    {
-        mFlySpeed *= powf(1.2f, scroll);
-        mFlySpeed = MathHelper::Clamp(mFlySpeed, 1.0f, 500.0f);
-    }
+    mFlySpeed *= powf(1.2f, scroll);
+    mFlySpeed = MathHelper::Clamp(mFlySpeed, 1.0f, 500.0f);
 }
 
 void EditorMode::OnKeyDown(AppContext& ctx, WPARAM wParam)
@@ -459,6 +606,7 @@ void EditorMode::InitializeOrbitFromSelection(AppContext& ctx)
     }
 
     mOrbitTarget = selected;
+    mOrbitHeightOffset = 0.0f;
 
     XMVECTOR pivot = XMLoadFloat3(&tf->position);
     XMVECTOR camPos = XMVectorSet(mCamX, mCamY, mCamZ, 1.0f);
@@ -488,7 +636,16 @@ void EditorMode::UpdateCamera(AppContext& ctx, float dt)
         return;
 
     const Entity selected = ctx.engine->GetSelectedEntity();
-    const bool thirdPersonMode = mManipulateSelected && selected != INVALID_ENTITY;
+    UiElementComponent* selectedUi = (selected != INVALID_ENTITY)
+        ? ctx.engine->GetUiElement(selected) : nullptr;
+    const bool selectedIsScreenUi = selectedUi
+        && selectedUi->mode != UiSpaceMode::WorldBillboard;
+
+    // UI move is mouse drag on Scene (ImGuiManager) when Tools → Manipulate UI is on.
+
+    const bool thirdPersonMode = mManipulateSelected && selected != INVALID_ENTITY
+        && ctx.engine->GetTransform(selected) != nullptr
+        && !selectedIsScreenUi; // mesh objects only
 
     if (thirdPersonMode && selected != mOrbitTarget)
         InitializeOrbitFromSelection(ctx);
@@ -512,11 +669,11 @@ void EditorMode::UpdateCamera(AppContext& ctx, float dt)
     XMVECTOR worldUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
     float speed = mFlySpeed * dt;
-    if (mKeyCtrl)
+    if (mKeyShift)
         speed *= 2.0f;
 
     const auto axes = FlyCameraMath::BuildNormalizedAxes(
-        mKeyW, mKeyS, mKeyA, mKeyD, mKeySpace, mKeyShift);
+        mKeyW, mKeyS, mKeyA, mKeyD, mKeySpace, mKeyCtrl);
 
     XMVECTOR horizForward = FlyCameraMath::FlattenHorizForward(lookForward, yawRot);
     XMFLOAT3 horizFwd{};
@@ -540,13 +697,29 @@ void EditorMode::UpdateCamera(AppContext& ctx, float dt)
             return;
         }
 
+        // When UI manip also uses WASD on a mesh selection we still move mesh here.
+        // If UI is selected, thirdPersonMode is false so UI path owns keys.
         if (axes.fwd != 0.0f || axes.strafe != 0.0f || axes.ascend != 0.0f)
+        {
             ctx.engine->MoveSelectedPlanar(
                 axes.fwd, axes.strafe, axes.ascend, speed, horizFwd, horizRgt);
+            // Hold Shift to temporarily bypass mesh snap (still allows free placement).
+            if (ctx.imgui && ctx.imgui->IsSnapMesh() && !mKeyShift)
+                ctx.engine->SnapSelectedMesh(ctx.imgui->GetSnapMeshThreshold());
+        }
 
         XMVECTOR pivot = XMLoadFloat3(&targetTf->position);
         XMVECTOR camPos = FlyCameraMath::ComputeThirdPersonCameraPosition(
             pivot, targetTf->rotation.y, mPhi, mTheta, mOrbitRadius);
+
+        // World-Y crane only: same offset on look target keeps view direction fixed
+        // (no orbit pitch/yaw change, object does not appear to rotate).
+        if (mOrbitHeightOffset != 0.0f)
+        {
+            const XMVECTOR heightLift = XMVectorSet(0.0f, mOrbitHeightOffset, 0.0f, 0.0f);
+            camPos = XMVectorAdd(camPos, heightLift);
+            pivot = XMVectorAdd(pivot, heightLift);
+        }
 
         XMMATRIX view = FlyCameraMath::BuildOrbitView(
             camPos, pivot, worldUp, mCamX, mCamY, mCamZ);
@@ -595,7 +768,14 @@ void EditorMode::buttonClicked(ButtonAction action)
         if (mManipulateSelected && ctx.engine->GetSelectedEntity() != INVALID_ENTITY)
             InitializeOrbitFromSelection(ctx);
         else
+        {
             mOrbitTarget = INVALID_ENTITY;
+            EndRmbOrbitZoom(ctx);
+        }
+    }
+    else if (action == ButtonAction::ToggleManipulateUi)
+    {
+        mManipulateUi = ctx.imgui->IsManipulateUi();
     }
     else if (action == ButtonAction::SpawnSelectedMesh)
     {

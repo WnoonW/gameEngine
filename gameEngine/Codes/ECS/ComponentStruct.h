@@ -133,45 +133,97 @@ struct SelectedComponent {
 };
 
 // ---------------------------------------------------------------------------
-// In-game UI (NOT ImGui). Image-based quads; three space modes.
+// In-game UI (NOT ImGui) — image quads.
+//
+// Component roles (do not merge):
+//   UiElementComponent  — layout / space / visibility
+//   UiImageComponent    — what to draw (material, tint, UV)
+//   UiButtonComponent   — optional input (actionId + hover/press)
+//   UiPresetInstanceTag — marks entities spawned from a preset instance
+//
+// World-space camera-facing quads also exist as EffectBillboardComponent (VFX).
+// That path is separate on purpose:
+//   Ui WorldBillboard  = gameplay UI (HP bar, nameplate, prompt) — layout/zOrder/preset
+//   EffectBillboard    = one-shot VFX (flash, spark) — lifetime, additive, auto-destroy
+// Both may share EmitWorldBillboard in UiSystem; components stay distinct.
+//
+// Field semantics (UiElement):
+//   visible — render on/off for every mode
+//   active  — logic on/off:
+//               ScreenConditional: must be true to draw
+//               all modes: must be true to accept pointer (ScreenAlways can stay
+//               drawn with active=false to disable input only)
+//   layoutPercent=true (canonical): position/size are 0..1 of live canvas
+//   layoutPercent=false (legacy): design-space pixels + designW/H scale
 // ---------------------------------------------------------------------------
 enum class UiSpaceMode : int
 {
-    ScreenAlways = 0,      // Ortho HUD: always drawn when visible
-    ScreenConditional = 1, // Ortho: only when active == true
-    WorldBillboard = 2,    // World pos + camera-facing
+    ScreenAlways = 0,      // Ortho HUD: draw when visible (active ignored for draw)
+    ScreenConditional = 1, // Ortho: draw only when visible && active
+    WorldBillboard = 2,    // World Transform + camera-facing UI (not VFX)
 };
 
-// How design-space pixels map to the current screen/RT resolution.
+// Per-widget canvas scaler (also used as "default for new UI" on UiSystem).
+// Stretch: live canvas % — width/height scale independently (may squash widgets).
+// UniformMin / UniformMax: position same as Stretch (% of live canvas);
+//   size uses one scale from designW/H so authored pixel aspect is preserved.
 enum class UiScaleMode : int
 {
-    Stretch = 0,     // scale X/Y independently (fills different aspects)
-    UniformMin = 1,  // s = min(sx,sy) — keep aspect, may letterbox
-    UniformMax = 2,  // s = max(sx,sy) — keep aspect, may crop
+    Stretch = 0,     // X/Y independent % of live canvas (may squash)
+    UniformMin = 1,  // Keep aspect fit:  pos = live %; size s = min(sx,sy)
+    UniformMax = 2,  // Keep aspect fill: pos = live %; size s = max(sx,sy)
 };
 
 struct UiElementComponent
 {
     UiSpaceMode mode = UiSpaceMode::ScreenAlways;
-    bool active = true;
-    bool visible = true;
+    bool active = true;   // logic / Conditional draw / pointer (see header notes)
+    bool visible = true;  // render gate (all modes)
     int zOrder = 0;
+    // How this widget maps design → live canvas (overridable per UI in Inspector).
+    UiScaleMode scaleMode = UiScaleMode::Stretch;
     // Screen origin for offsets (usually 0,0 = top-left of canvas).
     DirectX::XMFLOAT2 anchor{ 0.0f, 0.0f };
-    // Widget local pivot. layoutPercent screen UI uses (0.5,0.5) — position is the CENTER.
+    // Local pivot. Percent screen UI default (0.5,0.5) → position is the CENTER.
     DirectX::XMFLOAT2 pivot{ 0.5f, 0.5f };
-    // layoutPercent=true:
-    //   position = center of widget as 0..1 of canvas (Scene panel / window)
-    //   size     = width/height as 0..1 of canvas
-    // layoutPercent=false (legacy): design-space pixels + designW/H scale.
+    // layoutPercent=true (canonical):
+    //   position = center 0..1 of canvas; size = extent 0..1 of authoring design.
+    //   Stretch: pos & size both % of live screen (widget aspect may change).
+    //   Uniform*: pos % of live screen (like Stretch); size keeps design aspect.
+    // layoutPercent=false (legacy only): design-space pixels + designW/H.
     DirectX::XMFLOAT2 position{ 0.5f, 0.5f };
     DirectX::XMFLOAT2 size{ 0.1f, 0.1f };
     float rotationRad = 0.0f;
     bool layoutPercent = true;
-    // Authoring canvas size (info / Uniform mode). Runtime Stretch uses live canvas only.
+    // Authoring canvas size when this widget was created/saved (required for Uniform*).
     float designW = 0.0f;
     float designH = 0.0f;
+    // Keep Aspect Fit (UniformMin): stick to canvas edges across resize (set by editor snap).
+    bool snapLeft = false;
+    bool snapRight = false;
+    bool snapTop = false;
+    bool snapBottom = false;
 };
+
+// Shared draw/input gates — keep UiSystem / Engine pick in sync.
+inline bool UiElementShouldDraw(const UiElementComponent& el)
+{
+    if (!el.visible)
+        return false;
+    if (el.mode == UiSpaceMode::ScreenConditional && !el.active)
+        return false;
+    return true;
+}
+
+// Screen-space pointer only (WorldBillboard pick is not supported in MVP).
+inline bool UiElementShouldAcceptPointer(const UiElementComponent& el)
+{
+    if (!el.visible || !el.active)
+        return false;
+    if (el.mode == UiSpaceMode::WorldBillboard)
+        return false;
+    return true;
+}
 
 struct UiImageComponent
 {
@@ -184,9 +236,14 @@ struct UiButtonComponent
 {
     std::string actionId;
     bool interactable = true;
-    bool hovered = false;
-    bool pressed = false;
+    bool hovered = false;  // runtime
+    bool pressed = false;  // runtime
 };
+
+inline bool UiButtonShouldAcceptPointer(const UiElementComponent& el, const UiButtonComponent& btn)
+{
+    return btn.interactable && UiElementShouldAcceptPointer(el);
+}
 
 // Marks UI entities spawned from a registered preset instance (POD only — ECS memcpy).
 struct UiPresetInstanceTag
@@ -194,14 +251,15 @@ struct UiPresetInstanceTag
     uint32_t instanceId = 0;
 };
 
-// World-space VFX billboard (camera-facing)
+// World-space VFX billboard (camera-facing). NOT gameplay UI — use Ui WorldBillboard for that.
+// Shared renderer helper with UI world quads; lifecycle (age/lifetime) is Effect-only.
 struct EffectBillboardComponent
 {
     std::string materialName;
     DirectX::XMFLOAT4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
-    float size = 1.0f;
+    float size = 1.0f;       // world units, square extent
     bool additive = true;
-    float lifetime = -1.0f;
+    float lifetime = -1.0f;  // seconds; <0 = infinite
     float age = 0.0f;
     bool visible = true;
 };

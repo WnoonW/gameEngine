@@ -67,12 +67,13 @@ namespace FlyCameraMath
         float ascend = 0.f;
     };
 
-    inline KeyAxes BuildNormalizedAxes(bool w, bool s, bool a, bool d, bool space, bool shift)
+    // space = up, down = descend (Ctrl in editor/play fly move).
+    inline KeyAxes BuildNormalizedAxes(bool w, bool s, bool a, bool d, bool space, bool down)
     {
         KeyAxes axes;
         axes.fwd = (w ? 1.f : 0.f) - (s ? 1.f : 0.f);
         axes.strafe = (d ? 1.f : 0.f) - (a ? 1.f : 0.f);
-        axes.ascend = (space ? 1.f : 0.f) - (shift ? 1.f : 0.f);
+        axes.ascend = (space ? 1.f : 0.f) - (down ? 1.f : 0.f);
 
         const float horizLenSq = axes.fwd * axes.fwd + axes.strafe * axes.strafe;
         if (horizLenSq > 1.0f)

@@ -107,6 +107,7 @@ void UiPresetSerializer::WriteElements(std::ostream& out, const UiPresetData& pr
     {
         out << "element\n";
         out << "mode=" << static_cast<int>(e.mode) << "\n";
+        out << "scaleMode=" << static_cast<int>(e.scaleMode) << "\n";
         out << "active=" << (e.active ? 1 : 0) << "\n";
         out << "visible=" << (e.visible ? 1 : 0) << "\n";
         out << "zOrder=" << e.zOrder << "\n";
@@ -119,6 +120,13 @@ void UiPresetSerializer::WriteElements(std::ostream& out, const UiPresetData& pr
         out << "layoutPercent=" << (e.layoutPercent ? 1 : 0) << "\n";
         if (e.designW > 1.0f && e.designH > 1.0f)
             out << "design=" << e.designW << "," << e.designH << "\n";
+        if (e.snapLeft || e.snapRight || e.snapTop || e.snapBottom)
+        {
+            out << "snapLeft=" << (e.snapLeft ? 1 : 0) << "\n";
+            out << "snapRight=" << (e.snapRight ? 1 : 0) << "\n";
+            out << "snapTop=" << (e.snapTop ? 1 : 0) << "\n";
+            out << "snapBottom=" << (e.snapBottom ? 1 : 0) << "\n";
+        }
         out << "material=" << e.materialName << "\n";
         WriteFloat4(out, "color", e.color);
         WriteFloat4(out, "uv", e.uvRect);
@@ -180,6 +188,12 @@ bool UiPresetSerializer::ApplyElementLine(
 
     if (key == "mode")
         curElement->mode = static_cast<UiSpaceMode>(std::atoi(val.c_str()));
+    else if (key == "scaleMode")
+    {
+        const int sm = std::atoi(val.c_str());
+        if (sm >= 0 && sm <= 2)
+            curElement->scaleMode = static_cast<UiScaleMode>(sm);
+    }
     else if (key == "active")
         curElement->active = (val == "1" || val == "true");
     else if (key == "visible")
@@ -209,6 +223,14 @@ bool UiPresetSerializer::ApplyElementLine(
             curElement->designH = d.y;
         }
     }
+    else if (key == "snapLeft")
+        curElement->snapLeft = (val == "1" || val == "true");
+    else if (key == "snapRight")
+        curElement->snapRight = (val == "1" || val == "true");
+    else if (key == "snapTop")
+        curElement->snapTop = (val == "1" || val == "true");
+    else if (key == "snapBottom")
+        curElement->snapBottom = (val == "1" || val == "true");
     else if (key == "material")
         curElement->materialName = val;
     else if (key == "color")

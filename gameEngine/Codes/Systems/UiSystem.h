@@ -1,7 +1,8 @@
 #pragma once
 // In-game UI + simple effect billboards (NO ImGui).
 // Screen modes: orthographic (CPU builds NDC quads).
-// WorldBillboard / EffectBillboard: camera-facing quads in clip space.
+// Ui WorldBillboard = gameplay UI in world; EffectBillboard = VFX (lifetime/additive).
+// Both use EmitWorldBillboard; gates: UiElementShouldDraw / UiButtonShouldAcceptPointer.
 
 #include <d3d12.h>
 #include <wrl.h>
@@ -62,7 +63,7 @@ public:
         mPsoAdditive.Reset();
     }
 
-    // Canvas scaler: design-space → current screen/RT pixels.
+    // Default scale mode for newly created UI (each element stores its own scaleMode).
     void SetScaleMode(UiScaleMode mode) { mScaleMode = mode; }
     UiScaleMode GetScaleMode() const { return mScaleMode; }
     void SetGlobalDesignResolution(float w, float h)
@@ -86,6 +87,13 @@ public:
         DirectX::XMFLOAT2& outSizePx,
         float* outScaleX = nullptr,
         float* outScaleY = nullptr);
+
+    // Keep Aspect Fit + edge snap flags: rewrite position so locked edges stay on canvas
+    // after resize (size uses uniform scale, so center-% alone does not hold edges).
+    static void MaintainKeepAspectFitEdgeLocks(
+        UiElementComponent& el,
+        float screenW, float screenH,
+        float globalDesignW, float globalDesignH);
 
 private:
     struct UiVertex
@@ -139,6 +147,7 @@ private:
     BYTE* mUploadMapped = nullptr;
     UINT64 mUploadBytes = 0;
     UINT mSampleCount = 4;
+    // Default only — layout resolution uses UiElementComponent::scaleMode.
     UiScaleMode mScaleMode = UiScaleMode::Stretch;
     // 0 = elements without designW/H render 1:1 (legacy). New UI sets per-element design.
     float mGlobalDesignW = 0.0f;

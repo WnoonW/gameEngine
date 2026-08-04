@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -166,6 +167,54 @@ namespace
         if (idx - 1 < 0 || idx - 1 >= (int)names->size()) return nullptr;
         return (*names)[idx - 1].c_str();
     };
+
+    // Texture aspect of a loaded material (Width/Height). Returns false if unavailable.
+    bool TryGetMaterialTextureAspect(const std::string& materialName, float& outAspect)
+    {
+        const std::string name = materialName.empty() ? "Default" : materialName;
+        auto mat = MaterialManager::Get().GetMaterial(name);
+        if (!mat || !mat->mTexture)
+            return false;
+        const D3D12_RESOURCE_DESC desc = mat->mTexture->GetDesc();
+        if (desc.Height == 0 || desc.Width == 0)
+            return false;
+        outAspect = static_cast<float>(desc.Width) / static_cast<float>(desc.Height);
+        return outAspect > 1e-6f;
+    }
+
+    // Fit (x0,y0)-(x1,y1) inside itself to imageAspect, centered. Coordinates may be unsorted.
+    void FitRectToAspect(float& x0, float& y0, float& x1, float& y1, float imageAspect)
+    {
+        if (imageAspect <= 1e-6f)
+            return;
+        if (x0 > x1) std::swap(x0, x1);
+        if (y0 > y1) std::swap(y0, y1);
+        const float boxW = x1 - x0;
+        const float boxH = y1 - y0;
+        if (boxW < 1.f || boxH < 1.f)
+            return;
+
+        const float boxAspect = boxW / boxH;
+        float outW = boxW;
+        float outH = boxH;
+        if (boxAspect > imageAspect)
+        {
+            // Box wider than image → height-limited
+            outH = boxH;
+            outW = outH * imageAspect;
+        }
+        else
+        {
+            outW = boxW;
+            outH = outW / imageAspect;
+        }
+        const float cx = 0.5f * (x0 + x1);
+        const float cy = 0.5f * (y0 + y1);
+        x0 = cx - 0.5f * outW;
+        x1 = cx + 0.5f * outW;
+        y0 = cy - 0.5f * outH;
+        y1 = cy + 0.5f * outH;
+    }
 
     // --- 좁은 패널용 레이아웃 헬퍼 (글/위젯 잘림 방지) ---
 
@@ -368,7 +417,7 @@ namespace
     }
     if (mManipulateSelected) {
         ImGui::Text("3rd-person follow mode ON");
-        ImGui::Text("Mouse: orbit | WASD: XZ move | Space/Shift: Y move | Wheel: zoom");
+        ImGui::Text("Mouse: orbit | WASD: XZ | Space/Ctrl: Y | Shift: faster | Wheel: speed | RMB drag: zoom");
     }
 
     // === Loaded Meshes & Object Creator ===
@@ -412,7 +461,7 @@ namespace
                 matIdx = 1 + (int)std::distance(matNames.begin(), it);
         }
 
-        if (ImGui::Combo("Main Material (spawn)", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1)) {
+        if (ImGui::Combo("Mesh Material (spawn)", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1)) {
             mSelectedMaterial = (matIdx == 0) ? "" : matNames[matIdx - 1];
         }
     } else {
@@ -1334,8 +1383,23 @@ bool ImGuiManager::LoadUiSettings()
         else if (key == "show_render") asBool(mShowRender);
         else if (key == "show_help") asBool(mShowHelp);
         else if (key == "manipulate") asBool(mManipulateSelected);
+        else if (key == "manipulate_ui") asBool(mManipulateUi);
+        else if (key == "snap_mesh") asBool(mSnapMesh);
+        else if (key == "snap_ui") asBool(mSnapUi);
+        else if (key == "snap_mesh_threshold")
+            mSnapMeshThreshold = static_cast<float>(std::atof(val.c_str()));
+        else if (key == "snap_ui_threshold_percent")
+            mSnapUiThresholdPercent = static_cast<float>(std::atof(val.c_str()));
+        else if (key == "snap_ui_threshold_px")
+        {
+            // Legacy: ~px at 1080p height → rough percent
+            const float px = static_cast<float>(std::atof(val.c_str()));
+            mSnapUiThresholdPercent = (std::max)(0.1f, (std::min)(20.f, px / 10.8f));
+        }
         else if (key == "selected_mesh") mSelectedMesh = val;
         else if (key == "selected_material") mSelectedMaterial = val;
+        else if (key == "selected_ui_material") mSelectedUiMaterial = val;
+        else if (key == "ui_create_fit_image_aspect") asBool(mUiCreateFitImageAspect);
         else if (key == "dock_layout_version")
             dockLayoutVersion = std::atoi(val.c_str());
         else if (key == "has_custom_dock")
@@ -1433,8 +1497,15 @@ bool ImGuiManager::SaveUiSettings()
     out << "show_render=" << (mShowRender ? 1 : 0) << "\n";
     out << "show_help=" << (mShowHelp ? 1 : 0) << "\n";
     out << "manipulate=" << (mManipulateSelected ? 1 : 0) << "\n";
+    out << "manipulate_ui=" << (mManipulateUi ? 1 : 0) << "\n";
+    out << "snap_mesh=" << (mSnapMesh ? 1 : 0) << "\n";
+    out << "snap_ui=" << (mSnapUi ? 1 : 0) << "\n";
+    out << "snap_mesh_threshold=" << mSnapMeshThreshold << "\n";
+    out << "snap_ui_threshold_percent=" << mSnapUiThresholdPercent << "\n";
     out << "selected_mesh=" << mSelectedMesh << "\n";
     out << "selected_material=" << mSelectedMaterial << "\n";
+    out << "selected_ui_material=" << mSelectedUiMaterial << "\n";
+    out << "ui_create_fit_image_aspect=" << (mUiCreateFitImageAspect ? 1 : 0) << "\n";
     out << "dock_layout_version=" << kDockLayoutVersion << "\n";
     out << "has_custom_dock=1\n";
 
@@ -1652,11 +1723,18 @@ void ImGuiManager::DrawEditorPanels(Engine* engine)
     const bool prevRender = mShowRender;
     const bool prevHelp = mShowHelp;
     const bool prevManip = mManipulateSelected;
+    const bool prevManipUi = mManipulateUi;
+    const bool prevSnapMesh = mSnapMesh;
+    const bool prevSnapUi = mSnapUi;
+    const float prevSnapMeshT = mSnapMeshThreshold;
+    const float prevSnapUiT = mSnapUiThresholdPercent;
     const std::string prevMesh = mSelectedMesh;
     const std::string prevMat = mSelectedMaterial;
+    const std::string prevUiMat = mSelectedUiMaterial;
+    const bool prevUiFit = mUiCreateFitImageAspect;
 
     if (mShowScene)
-        DrawScenePanel();
+        DrawScenePanel(engine);
     if (mShowHierarchy)
         DrawHierarchyPanel(engine);
     if (mShowTools)
@@ -1677,7 +1755,11 @@ void ImGuiManager::DrawEditorPanels(Engine* engine)
         prevProject != mShowProject || prevUi != mShowUi ||
         prevRender != mShowRender || prevHelp != mShowHelp ||
         prevManip != mManipulateSelected ||
-        prevMesh != mSelectedMesh || prevMat != mSelectedMaterial)
+        prevManipUi != mManipulateUi ||
+        prevSnapMesh != mSnapMesh || prevSnapUi != mSnapUi ||
+        prevSnapMeshT != mSnapMeshThreshold || prevSnapUiT != mSnapUiThresholdPercent ||
+        prevMesh != mSelectedMesh || prevMat != mSelectedMaterial ||
+        prevUiMat != mSelectedUiMaterial || prevUiFit != mUiCreateFitImageAspect)
     {
         MarkUiSettingsDirty();
     }
@@ -1687,7 +1769,7 @@ void ImGuiManager::DrawEditorPanels(Engine* engine)
 
 // ==================== 각 패널 ====================
 
-void ImGuiManager::DrawScenePanel()
+void ImGuiManager::DrawScenePanel(Engine* engine)
 {
     if (!ImGui::Begin("Scene", &mShowScene))
     {
@@ -1793,6 +1875,16 @@ void ImGuiManager::DrawScenePanel()
                 dl->AddRect(a, b, line, 0.0f, 0, confirmed ? 2.5f : 2.0f);
             };
 
+            auto applyCreateAspectIfNeeded = [&](float& x0, float& y0, float& x1, float& y1)
+            {
+                if (!mUiCreateFitImageAspect)
+                    return;
+                float aspect = 1.f;
+                if (!TryGetMaterialTextureAspect(mSelectedUiMaterial, aspect))
+                    return;
+                FitRectToAspect(x0, y0, x1, y1, aspect);
+            };
+
             if (mUiCreateHasRect && !mUiCreateDragging)
             {
                 drawCreateRect(
@@ -1814,7 +1906,17 @@ void ImGuiManager::DrawScenePanel()
                 if (mUiCreateDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left))
                 {
                     mUiCreateEndScreen = io.MousePos;
-                    drawCreateRect(mUiCreateStartScreen, mUiCreateEndScreen, false);
+                    ImVec2 a = mUiCreateStartScreen;
+                    ImVec2 b = mUiCreateEndScreen;
+                    if (mUiCreateFitImageAspect)
+                    {
+                        float lx0 = a.x - min.x, ly0 = a.y - min.y;
+                        float lx1 = b.x - min.x, ly1 = b.y - min.y;
+                        applyCreateAspectIfNeeded(lx0, ly0, lx1, ly1);
+                        a = ImVec2(min.x + lx0, min.y + ly0);
+                        b = ImVec2(min.x + lx1, min.y + ly1);
+                    }
+                    drawCreateRect(a, b, false);
                 }
 
                 // Drag end: store preview only — mode stays ON until Complete/Cancel/Esc
@@ -1836,6 +1938,12 @@ void ImGuiManager::DrawScenePanel()
                     x1 = (std::max)(0.0f, (std::min)(x1, sw));
                     y1 = (std::max)(0.0f, (std::min)(y1, sh));
 
+                    applyCreateAspectIfNeeded(x0, y0, x1, y1);
+                    x0 = (std::max)(0.0f, (std::min)(x0, sw));
+                    y0 = (std::max)(0.0f, (std::min)(y0, sh));
+                    x1 = (std::max)(0.0f, (std::min)(x1, sw));
+                    y1 = (std::max)(0.0f, (std::min)(y1, sh));
+
                     if ((x1 - x0) >= kBoxDragThresholdPx && (y1 - y0) >= kBoxDragThresholdPx)
                     {
                         mUiCreateMinX = x0;
@@ -1849,9 +1957,130 @@ void ImGuiManager::DrawScenePanel()
             }
 
             mBoxDragging = false;
+            mUiManipDragging = false;
+        }
+        else if (mManipulateUi && engine)
+        {
+            // --- UI click-drag-drop (Tools → Manipulate UI) ---
+            // Free move while dragging; if Snap UI is on, always snap on drop.
+            const float sw = max.x - min.x;
+            const float sh = max.y - min.y;
+            const float localX = io.MousePos.x - min.x;
+            const float localY = io.MousePos.y - min.y;
+
+            if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                const Entity hit = engine->PickUiScreen(
+                    localX, localY,
+                    static_cast<UINT>((std::max)(1.0f, sw)),
+                    static_cast<UINT>((std::max)(1.0f, sh)));
+                if (hit != INVALID_ENTITY)
+                {
+                    if (!engine->IsEntitySelected(hit))
+                        engine->SetSelectedEntity(hit);
+                    mUiManipDragging = true;
+                    mUiDragMoved = false;
+                    mUiDragLastLocalX = localX;
+                    mUiDragLastLocalY = localY;
+                    mBoxDragging = false;
+                }
+                else
+                {
+                    // Missed UI: mesh box-select / short click path
+                    mUiManipDragging = false;
+                    mBoxDragging = true;
+                    mBoxStartScreen = io.MousePos;
+                    mBoxEndScreen = io.MousePos;
+                    mBoxSelectAdditive = shift;
+                }
+            }
+
+            if (mUiManipDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                const float dx = localX - mUiDragLastLocalX;
+                const float dy = localY - mUiDragLastLocalY;
+                if (fabsf(dx) > 0.01f || fabsf(dy) > 0.01f)
+                {
+                    mUiDragMoved = true;
+                    if (sw > 1.f && sh > 1.f)
+                        engine->MoveSelectedUi(dx / sw, dy / sh);
+                    mUiDragLastLocalX = localX;
+                    mUiDragLastLocalY = localY;
+                }
+
+                ImDrawList* dl = ImGui::GetForegroundDrawList();
+                const char* hint = mSnapUi ? "UI drag (snap on drop)" : "UI drag";
+                dl->AddText(ImVec2(min.x + 10.f, min.y + 10.f), IM_COL32(180, 230, 255, 255), hint);
+            }
+
+            if (mUiManipDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                // Always snap on drop when Snap UI is enabled (including after a previous snap).
+                if (mUiDragMoved && mSnapUi)
+                    engine->SnapSelectedUi(mSnapUiThresholdPercent, sw, sh);
+
+                mUiManipDragging = false;
+                mUiDragMoved = false;
+            }
+
+            // Box select when UI manip is on but started on empty space
+            if (mBoxDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left) && !mUiManipDragging)
+            {
+                mBoxEndScreen = io.MousePos;
+                const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
+                const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
+                if ((dx * dx + dy * dy) >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+                {
+                    ImDrawList* dl = ImGui::GetForegroundDrawList();
+                    ImVec2 a = mBoxStartScreen;
+                    ImVec2 b = mBoxEndScreen;
+                    if (a.x > b.x) std::swap(a.x, b.x);
+                    if (a.y > b.y) std::swap(a.y, b.y);
+                    a.x = (std::max)(min.x, (std::min)(a.x, max.x));
+                    a.y = (std::max)(min.y, (std::min)(a.y, max.y));
+                    b.x = (std::max)(min.x, (std::min)(b.x, max.x));
+                    b.y = (std::max)(min.y, (std::min)(b.y, max.y));
+                    dl->AddRectFilled(a, b, IM_COL32(80, 160, 255, 40));
+                    dl->AddRect(a, b, IM_COL32(80, 160, 255, 220), 0.0f, 0, 1.5f);
+                }
+            }
+
+            if (mBoxDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !mUiManipDragging)
+            {
+                mBoxEndScreen = io.MousePos;
+                const float dx = mBoxEndScreen.x - mBoxStartScreen.x;
+                const float dy = mBoxEndScreen.y - mBoxStartScreen.y;
+                const float dist2 = dx * dx + dy * dy;
+                mBoxDragging = false;
+
+                if (dist2 >= kBoxDragThresholdPx * kBoxDragThresholdPx)
+                {
+                    float x0 = mBoxStartScreen.x - min.x;
+                    float y0 = mBoxStartScreen.y - min.y;
+                    float x1 = mBoxEndScreen.x - min.x;
+                    float y1 = mBoxEndScreen.y - min.y;
+                    if (x0 > x1) std::swap(x0, x1);
+                    if (y0 > y1) std::swap(y0, y1);
+                    x0 = (std::max)(0.0f, (std::min)(x0, sw));
+                    y0 = (std::max)(0.0f, (std::min)(y0, sh));
+                    x1 = (std::max)(0.0f, (std::min)(x1, sw));
+                    y1 = (std::max)(0.0f, (std::min)(y1, sh));
+                    mBoxResultMinX = x0;
+                    mBoxResultMinY = y0;
+                    mBoxResultMaxX = x1;
+                    mBoxResultMaxY = y1;
+                    mBoxSelectPending = true;
+                }
+                else if (mSceneHovered)
+                {
+                    mSceneCaptureClick = true;
+                }
+            }
         }
         else
         {
+            mUiManipDragging = false;
+
             if (mSceneHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
                 mBoxDragging = true;
@@ -1921,6 +2150,7 @@ void ImGuiManager::DrawScenePanel()
     {
         ImGui::TextDisabled("Scene render target not ready (%u x %u)", width, height);
         mBoxDragging = false;
+        mUiManipDragging = false;
     }
 
     ImGui::End();
@@ -2127,7 +2357,7 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
     if (ImGui::Button("Clear Selection", ImVec2(-FLT_MIN, 0)))
         engine->ClearSelection();
 
-    TextLineDisabled("3D: LMB drag box | Shift+drag add | RMB pick");
+    TextLineDisabled("3D: LMB drag box | Shift+drag add | RMB pick (off while Manipulate Mesh)");
     TextLineDisabled("UI: short LMB on image | list click");
     ImGui::Separator();
 
@@ -2158,9 +2388,9 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
             }
         }
 
-        ImGui::SeparatorText("UI Images");
+        ImGui::SeparatorText("UI Objects");
         if (uiEntities.empty())
-            TextLineDisabled("No UI images");
+            TextLineDisabled("No UI objects");
         else
         {
             for (Entity e : uiEntities)
@@ -2184,20 +2414,50 @@ void ImGuiManager::DrawHierarchyPanel(Engine* engine)
 
 void ImGuiManager::DrawToolsContent()
 {
-    if (CheckboxWrapped("Manipulate Selected Object", &mManipulateSelected))
+    ImGui::SeparatorText("Mesh");
+    if (CheckboxWrapped("Manipulate Mesh", &mManipulateSelected))
     {
         if (m_Callback)
             m_Callback->buttonClicked(ButtonAction::ToggleManipulateSelected);
     }
     if (mManipulateSelected)
     {
-        ImGui::Spacing();
         TextLine(
-            "3rd-person follow: Mouse orbit | WASD move | Space/Shift up/down | Wheel zoom");
+            "Orbit: mouse | Move: WASD | Space/Ctrl: Y | Shift: faster | Wheel: speed | RMB: L/R zoom, U/D cam Y");
+        CheckboxWrapped("Snap Mesh (AABB faces)", &mSnapMesh);
+        if (mSnapMesh)
+        {
+            DragFloatFull("Mesh snap distance", &mSnapMeshThreshold, 0.01f, 0.01f, 10.f);
+            TextLineDisabled("Snaps whole-mesh bounds faces/centers to other meshes.");
+            TextLineDisabled("Hold Shift while moving to bypass snap (and go faster).");
+        }
     }
     else
     {
-        TextLineDisabled("Enable to orbit / move the selected entity.");
+        TextLineDisabled("Enable to orbit / move selected mesh objects.");
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("UI");
+    if (CheckboxWrapped("Manipulate UI", &mManipulateUi))
+    {
+        if (m_Callback)
+            m_Callback->buttonClicked(ButtonAction::ToggleManipulateUi);
+    }
+    if (mManipulateUi)
+    {
+        TextLine("Scene: LMB on UI → drag → drop. Empty space: box select / mouse look.");
+        CheckboxWrapped("Snap UI", &mSnapUi);
+        if (mSnapUi)
+        {
+            DragFloatFull("UI snap distance (%)", &mSnapUiThresholdPercent, 0.05f, 0.1f, 20.f);
+            TextLineDisabled("%% of canvas W (left/right) and H (top/bottom). Default 1%%.");
+            TextLineDisabled("Drop: prefer edge snap (L/R/T/B); corners need closer approach.");
+        }
+    }
+    else
+    {
+        TextLineDisabled("Enable to drag screen UI with the mouse on Scene.");
     }
 
     ImGui::Spacing();
@@ -2257,41 +2517,364 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
             fn(e);
     };
 
-    // --- UI Image inspector (when selected entity is UI) ---
+    // --- UI Object inspector (same Transform / Material style as 3D objects) ---
     if (UiElementComponent* uiEl = engine->GetUiElement(primary))
     {
-        ImGui::SeparatorText("UI Image");
-        if (UiImageComponent* img = engine->GetUiImage(primary))
-            TextLine("Material: %s", img->materialName.empty() ? "(none)" : img->materialName.c_str());
+        TextLineDisabled("UI Object");
 
-        bool vis = uiEl->visible;
-        if (CheckboxWrapped("Visible", &vis))
-            engine->SetUiVisible(primary, vis);
-        bool act = uiEl->active;
-        if (CheckboxWrapped("Active", &act))
-            engine->SetUiActive(primary, act);
-
-        TextLine("Layout: %s", uiEl->layoutPercent ? "center %% of canvas" : "legacy pixels");
-        if (uiEl->layoutPercent)
+        if (!ImGui::BeginTabBar("UiInspectorTabs",
+                ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_DrawSelectedOverline))
         {
-            float center[2] = { uiEl->position.x * 100.f, uiEl->position.y * 100.f };
-            float sizePct[2] = { uiEl->size.x * 100.f, uiEl->size.y * 100.f };
-            if (DragFloatFull("Center X %", &center[0], 0.1f, 0.f, 100.f))
-                uiEl->position.x = center[0] * 0.01f;
-            if (DragFloatFull("Center Y %", &center[1], 0.1f, 0.f, 100.f))
-                uiEl->position.y = center[1] * 0.01f;
-            if (DragFloatFull("Width %", &sizePct[0], 0.1f, 0.1f, 100.f))
-                uiEl->size.x = sizePct[0] * 0.01f;
-            if (DragFloatFull("Height %", &sizePct[1], 0.1f, 0.1f, 100.f))
-                uiEl->size.y = sizePct[1] * 0.01f;
-        }
-        if (ImGui::Button("Delete UI Entity", ImVec2(-FLT_MIN, 0)))
-        {
-            engine->ClearSelection();
-            engine->DestroyUiEntity(primary);
             ImGui::End();
             return;
         }
+
+        // --- Transform (layout + optional world Transform for billboards) ---
+        if (ImGui::BeginTabItem("Transform"))
+        {
+            if (uiEl->mode == UiSpaceMode::WorldBillboard)
+            {
+                if (TransformComponent* tf = engine->GetTransform(primary))
+                {
+                    TextLine("World position (billboard)");
+                    XMFLOAT3 pos = tf->position;
+                    if (DragFloat3Full("Position", &pos.x, 0.05f))
+                    {
+                        const XMFLOAT3 delta{
+                            pos.x - tf->position.x,
+                            pos.y - tf->position.y,
+                            pos.z - tf->position.z
+                        };
+                        forEachSelected([&](Entity e)
+                        {
+                            if (!engine->GetUiElement(e))
+                                return;
+                            if (TransformComponent* t = engine->GetTransform(e))
+                            {
+                                t->position.x += delta.x;
+                                t->position.y += delta.y;
+                                t->position.z += delta.z;
+                                t->MarkDirty(e);
+                            }
+                        });
+                    }
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                }
+                else
+                {
+                    TextLineDisabled("WorldBillboard without TransformComponent");
+                }
+            }
+
+            TextLine("Layout");
+            TextLineDisabled(uiEl->layoutPercent
+                ? "Screen: center & size as %% of design/live canvas"
+                : "Legacy pixel layout");
+
+            if (uiEl->layoutPercent)
+            {
+                float center[2] = { uiEl->position.x * 100.f, uiEl->position.y * 100.f };
+                float sizePct[2] = { uiEl->size.x * 100.f, uiEl->size.y * 100.f };
+                if (DragFloatFull("Center X %", &center[0], 0.1f, 0.f, 100.f))
+                {
+                    const float v = center[0] * 0.01f;
+                    const float d = v - uiEl->position.x;
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->position.x += d;
+                    });
+                }
+                if (DragFloatFull("Center Y %", &center[1], 0.1f, 0.f, 100.f))
+                {
+                    const float v = center[1] * 0.01f;
+                    const float d = v - uiEl->position.y;
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->position.y += d;
+                    });
+                }
+                if (DragFloatFull("Width %", &sizePct[0], 0.1f, 0.1f, 100.f))
+                {
+                    const float v = sizePct[0] * 0.01f;
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->size.x = v;
+                    });
+                }
+                if (DragFloatFull("Height %", &sizePct[1], 0.1f, 0.1f, 100.f))
+                {
+                    const float v = sizePct[1] * 0.01f;
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->size.y = v;
+                    });
+                }
+            }
+            else
+            {
+                float pos[2] = { uiEl->position.x, uiEl->position.y };
+                float size[2] = { uiEl->size.x, uiEl->size.y };
+                if (DragFloatFull("Pos X", &pos[0], 1.f))
+                {
+                    const float d = pos[0] - uiEl->position.x;
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->position.x += d;
+                    });
+                }
+                if (DragFloatFull("Pos Y", &pos[1], 1.f))
+                {
+                    const float d = pos[1] - uiEl->position.y;
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->position.y += d;
+                    });
+                }
+                if (DragFloatFull("Width", &size[0], 1.f, 1.f, 10000.f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->size.x = size[0];
+                    });
+                }
+                if (DragFloatFull("Height", &size[1], 1.f, 1.f, 10000.f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiElementComponent* el = engine->GetUiElement(e))
+                            el->size.y = size[1];
+                    });
+                }
+            }
+
+            float rotDeg = uiEl->rotationRad * (180.f / 3.14159265f);
+            if (DragFloatFull("Rotation (deg)", &rotDeg, 0.5f, -180.f, 180.f))
+            {
+                const float rad = rotDeg * (3.14159265f / 180.f);
+                forEachSelected([&](Entity e)
+                {
+                    if (UiElementComponent* el = engine->GetUiElement(e))
+                        el->rotationRad = rad;
+                });
+            }
+
+            float pivot[2] = { uiEl->pivot.x, uiEl->pivot.y };
+            if (DragFloatFull("Pivot X", &pivot[0], 0.01f, 0.f, 1.f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (UiElementComponent* el = engine->GetUiElement(e))
+                        el->pivot.x = pivot[0];
+                });
+            }
+            if (DragFloatFull("Pivot Y", &pivot[1], 0.01f, 0.f, 1.f))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (UiElementComponent* el = engine->GetUiElement(e))
+                        el->pivot.y = pivot[1];
+                });
+            }
+
+            if (uiEl->designW > 1.f && uiEl->designH > 1.f)
+            {
+                TextLine("Design canvas: %.0f x %.0f", uiEl->designW, uiEl->designH);
+                if (uiEl->layoutPercent && uiEl->size.y > 1e-6f)
+                {
+                    const float pxW = uiEl->size.x * uiEl->designW;
+                    const float pxH = uiEl->size.y * uiEl->designH;
+                    TextLineDisabled("Authored size ~ %.0fx%.0f px (aspect %.3f)",
+                        pxW, pxH, pxW / pxH);
+                }
+            }
+            else
+            {
+                TextLineDisabled("Design canvas unset (needed for Keep Aspect size)");
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        // --- Material (image + tint) ---
+        if (ImGui::BeginTabItem("Material"))
+        {
+            UiImageComponent* img = engine->GetUiImage(primary);
+            if (!img)
+            {
+                TextLineDisabled("No UiImageComponent");
+            }
+            else
+            {
+                auto matNames = MaterialManager::Get().GetLoadedMaterialNames();
+                std::sort(matNames.begin(), matNames.end());
+
+                int matIdx = 0;
+                if (!img->materialName.empty())
+                {
+                    auto it = std::find(matNames.begin(), matNames.end(), img->materialName);
+                    if (it != matNames.end())
+                        matIdx = 1 + (int)std::distance(matNames.begin(), it);
+                }
+
+                if (!matNames.empty())
+                {
+                    if (ComboFull("Material", &matIdx, MainMaterialComboGetter,
+                            &matNames, (int)matNames.size() + 1))
+                    {
+                        const std::string newMat =
+                            (matIdx == 0) ? "Default" : matNames[matIdx - 1];
+                        forEachSelected([&](Entity e)
+                        {
+                            if (UiImageComponent* uiImg = engine->GetUiImage(e))
+                                uiImg->materialName = newMat;
+                        });
+                    }
+                }
+                else
+                {
+                    TextLine("Material: %s",
+                        img->materialName.empty() ? "(none)" : img->materialName.c_str());
+                    TextLineDisabled("No materials loaded");
+                }
+
+                float col[4] = {
+                    img->color.x, img->color.y, img->color.z, img->color.w
+                };
+                if (ImGui::ColorEdit4("Color##ui_tint", col))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiImageComponent* uiImg = engine->GetUiImage(e))
+                            uiImg->color = { col[0], col[1], col[2], col[3] };
+                    });
+                }
+
+                float uv[4] = {
+                    img->uvRect.x, img->uvRect.y, img->uvRect.z, img->uvRect.w
+                };
+                if (DragFloatFull("UV u0", &uv[0], 0.01f, 0.f, 1.f) ||
+                    DragFloatFull("UV v0", &uv[1], 0.01f, 0.f, 1.f) ||
+                    DragFloatFull("UV u1", &uv[2], 0.01f, 0.f, 1.f) ||
+                    DragFloatFull("UV v1", &uv[3], 0.01f, 0.f, 1.f))
+                {
+                    forEachSelected([&](Entity e)
+                    {
+                        if (UiImageComponent* uiImg = engine->GetUiImage(e))
+                            uiImg->uvRect = { uv[0], uv[1], uv[2], uv[3] };
+                    });
+                }
+
+                TextLineDisabled("None in combo → Default material name.");
+            }
+            ImGui::EndTabItem();
+        }
+
+        // --- UI (flags / mode / delete) ---
+        if (ImGui::BeginTabItem("UI"))
+        {
+            const char* modeName = "ScreenAlways";
+            if (uiEl->mode == UiSpaceMode::ScreenConditional)
+                modeName = "ScreenConditional";
+            else if (uiEl->mode == UiSpaceMode::WorldBillboard)
+                modeName = "WorldBillboard";
+            TextLine("Space mode: %s", modeName);
+
+            int scaleMode = static_cast<int>(uiEl->scaleMode);
+            const char* scaleItems[] = {
+                "Stretch (fill, may squash)",
+                "Keep Aspect Fit",
+                "Keep Aspect Fill"
+            };
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::Combo("Scale Mode##ui_el_scale", &scaleMode, scaleItems, IM_ARRAYSIZE(scaleItems)))
+            {
+                const UiScaleMode sm = static_cast<UiScaleMode>(scaleMode);
+                float gw = 0.f, gh = 0.f;
+                engine->GetUiDesignResolution(gw, gh);
+                forEachSelected([&](Entity e)
+                {
+                    if (UiElementComponent* el = engine->GetUiElement(e))
+                    {
+                        el->scaleMode = sm;
+                        // Uniform* needs design canvas for stable aspect
+                        if ((sm == UiScaleMode::UniformMin || sm == UiScaleMode::UniformMax)
+                            && (el->designW < 1.f || el->designH < 1.f)
+                            && gw > 1.f && gh > 1.f)
+                        {
+                            if (el->designW < 1.f) el->designW = gw;
+                            if (el->designH < 1.f) el->designH = gh;
+                        }
+                    }
+                });
+            }
+            TextLineDisabled("Per-widget. New UI inherits UI panel default below Create.");
+
+            bool vis = uiEl->visible;
+            if (CheckboxWrapped("Visible", &vis))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (engine->GetUiElement(e))
+                        engine->SetUiVisible(e, vis);
+                });
+            }
+            bool act = uiEl->active;
+            if (CheckboxWrapped("Active", &act))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (engine->GetUiElement(e))
+                        engine->SetUiActive(e, act);
+                });
+            }
+            // Mode-specific meaning (see ComponentStruct UiElementShould*)
+            if (uiEl->mode == UiSpaceMode::ScreenConditional)
+                TextLineDisabled("Active: Conditional mode — must be ON to draw and click.");
+            else if (uiEl->mode == UiSpaceMode::ScreenAlways)
+                TextLineDisabled("Active: Always mode — draw uses Visible only; Active off = no click.");
+            else
+                TextLineDisabled("Active: WorldBillboard — draw uses Visible; Active off = no pointer.");
+
+            int z = uiEl->zOrder;
+            if (ImGui::DragInt("Z Order##ui_z", &z, 1, -10000, 10000))
+            {
+                forEachSelected([&](Entity e)
+                {
+                    if (UiElementComponent* el = engine->GetUiElement(e))
+                        el->zOrder = z;
+                });
+            }
+
+            ImGui::Spacing();
+            if (ImGui::Button("Delete UI Object", ImVec2(-FLT_MIN, 0)))
+            {
+                // Destroy all selected UI entities
+                std::vector<Entity> toKill;
+                for (Entity e : selectedList)
+                {
+                    if (engine->GetUiElement(e))
+                        toKill.push_back(e);
+                }
+                engine->ClearSelection();
+                for (Entity e : toKill)
+                    engine->DestroyUiEntity(e);
+                ImGui::EndTabItem();
+                ImGui::EndTabBar();
+                ImGui::End();
+                return;
+            }
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
         ImGui::End();
         return;
     }
@@ -2564,6 +3147,34 @@ void ImGuiManager::DrawInspectorPanel(Engine* engine)
         ImGui::EndTabItem();
     }
 
+    // --- Object (delete mesh / renderable) ---
+    if (ImGui::BeginTabItem("Object"))
+    {
+        const bool canDelete = engine->GetRenderable(primary) != nullptr;
+        TextLineDisabled("Deletes selected mesh objects from the scene (not asset files).");
+        if (!canDelete)
+            ImGui::BeginDisabled();
+        if (ImGui::Button("Delete Mesh Object", ImVec2(-FLT_MIN, 0)))
+        {
+            std::vector<Entity> toKill;
+            for (Entity e : selectedList)
+            {
+                if (engine->GetRenderable(e))
+                    toKill.push_back(e);
+            }
+            engine->ClearSelection();
+            for (Entity e : toKill)
+                engine->DestroyRenderableEntity(e);
+            ImGui::EndTabItem();
+            ImGui::EndTabBar();
+            ImGui::End();
+            return;
+        }
+        if (!canDelete)
+            ImGui::EndDisabled();
+        ImGui::EndTabItem();
+    }
+
     ImGui::EndTabBar();
     ImGui::End();
 }
@@ -2618,7 +3229,7 @@ void ImGuiManager::DrawProjectSpawnContent(Engine* engine)
                 matIdx = 1 + (int)std::distance(matNames.begin(), it);
         }
 
-        if (ComboFull("Main Material", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
+        if (ComboFull("Mesh Material", &matIdx, MainMaterialComboGetter, &matNames, (int)matNames.size() + 1))
             mSelectedMaterial = (matIdx == 0) ? "" : matNames[matIdx - 1];
     }
     else
@@ -2643,11 +3254,11 @@ void ImGuiManager::DrawProjectSpawnContent(Engine* engine)
     {
         const char* spawnMat = mSelectedMaterial.empty() ? "None (Init/Default)" : mSelectedMaterial.c_str();
         TextLine("Ready: %s / %s", mSelectedMesh.c_str(), spawnMat);
-        TextLineDisabled("Spawns at the Scene crosshair (view center).");
+        TextLineDisabled("Mesh spawn only — UI Image material is chosen in the UI panel.");
     }
 
     ImGui::Separator();
-    TextLineDisabled("In-game UI tools moved to the UI dock panel (View → UI).");
+    TextLineDisabled("In-game UI: View → UI (separate material picker for Create UI Image).");
 
     ImGui::Separator();
     TextLineDisabled("Loaded meshes: %zu", meshNames.size());
@@ -2857,21 +3468,81 @@ void ImGuiManager::DrawHelpContent()
     ImGui::Separator();
     TextLine("Scene View");
     BulletLine("Crosshair = spawn position (view center)");
-    BulletLine("RMB pick selects entity under cursor");
+    BulletLine("RMB pick selects entity (disabled during Manipulate Mesh — RMB drag zooms)");
     BulletLine("ESC releases mouse look (does not quit)");
 }
 
 void ImGuiManager::DrawUiPanelContent(Engine* engine)
 {
     TextLineDisabled("Edit canvas = Scene dock size. Play canvas = window size.");
-    TextLineDisabled("Layout: center & size stored as %% of canvas (updates on resize).");
 
     // --- Create ---
     ImGui::SeparatorText("Create");
     {
-        const char* uiMat = mSelectedMaterial.empty() ? "Default" : mSelectedMaterial.c_str();
-        TextLine("Material: %s", uiMat);
-        TextLineDisabled("Uses Project Main Material (empty → Default).");
+        // UI-only material (not Project mesh spawn material).
+        auto uiMatNames = MaterialManager::Get().GetLoadedMaterialNames();
+        std::sort(uiMatNames.begin(), uiMatNames.end());
+        if (!uiMatNames.empty())
+        {
+            int uiMatIdx = 0;
+            if (!mSelectedUiMaterial.empty())
+            {
+                auto it = std::find(uiMatNames.begin(), uiMatNames.end(), mSelectedUiMaterial);
+                if (it != uiMatNames.end())
+                    uiMatIdx = 1 + (int)std::distance(uiMatNames.begin(), it);
+            }
+
+            auto uiMatGetter = [](void* data, int idx) -> const char*
+            {
+                auto* vec = static_cast<std::vector<std::string>*>(data);
+                if (idx == 0) return "(Default)";
+                if (!vec || idx < 1 || idx > (int)vec->size()) return nullptr;
+                return (*vec)[idx - 1].c_str();
+            };
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::Combo("UI Material##ui_create_mat", &uiMatIdx, uiMatGetter,
+                    &uiMatNames, (int)uiMatNames.size() + 1))
+            {
+                mSelectedUiMaterial = (uiMatIdx == 0) ? "" : uiMatNames[uiMatIdx - 1];
+            }
+        }
+        else
+        {
+            mSelectedUiMaterial.clear();
+            TextLineDisabled("No materials loaded.");
+        }
+
+        const char* uiMat = mSelectedUiMaterial.empty() ? "Default" : mSelectedUiMaterial.c_str();
+        TextLine("Create with: %s", uiMat);
+
+        // Default scale mode for newly created UI (per-object can override in Inspector).
+        if (engine)
+        {
+            int scaleMode = static_cast<int>(engine->GetUiScaleMode());
+            const char* scaleItems[] = {
+                "Stretch (fill, may squash)",
+                "Keep Aspect Fit",
+                "Keep Aspect Fill"
+            };
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::Combo("Scale Mode##ui_create_scale", &scaleMode, scaleItems, IM_ARRAYSIZE(scaleItems)))
+                engine->SetUiScaleMode(static_cast<UiScaleMode>(scaleMode));
+            TextLineDisabled("Applied to new UI only. Change existing in Inspector → UI.");
+        }
+
+        CheckboxWrapped("Fit image aspect ratio", &mUiCreateFitImageAspect);
+        if (mUiCreateFitImageAspect)
+        {
+            float aspect = 1.f;
+            if (TryGetMaterialTextureAspect(mSelectedUiMaterial, aspect))
+                TextLineDisabled("Drag box is fitted to texture aspect (%.3f).", aspect);
+            else
+                TextLineDisabled("Texture size unknown — free rect (aspect unlock).");
+        }
+        else
+        {
+            TextLineDisabled("Off: free drag size. On: keep texture W:H inside drag.");
+        }
 
         ImGui::PushID("ui_image_create");
         if (mUiImageCreateMode)
@@ -2929,30 +3600,9 @@ void ImGuiManager::DrawUiPanelContent(Engine* engine)
             if (mUiCreateEnablePending)
                 TextLineDisabled("Starting UI Create mode…");
             else
-                TextLineDisabled("1) Create  2) Drag on Scene  3) Complete");
+                TextLineDisabled("1) Material / Scale / Aspect  2) Create  3) Drag  4) Complete");
         }
         ImGui::PopID();
-    }
-
-    // --- Scale / canvas info ---
-    ImGui::SeparatorText("Canvas & Scale");
-    if (engine)
-    {
-        const float canvasW = static_cast<float>((std::max)(1u, mDesiredSceneWidth));
-        const float canvasH = static_cast<float>((std::max)(1u, mDesiredSceneHeight));
-        TextLine("Live canvas: %.0f x %.0f  (Scene panel / play window)", canvasW, canvasH);
-        TextLine("Live UI elements: %zu", engine->GetUiEntities().size());
-
-        int scaleMode = static_cast<int>(engine->GetUiScaleMode());
-        const char* scaleItems[] = { "Stretch (%% of canvas)", "Uniform Min", "Uniform Max" };
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::Combo("##ui_scale_mode", &scaleMode, scaleItems, IM_ARRAYSIZE(scaleItems)))
-            engine->SetUiScaleMode(static_cast<UiScaleMode>(scaleMode));
-        TextLineDisabled("Stretch: center/size as %% of current canvas every frame.");
-    }
-    else
-    {
-        TextLineDisabled("Engine unavailable.");
     }
 
     // --- Presets ---

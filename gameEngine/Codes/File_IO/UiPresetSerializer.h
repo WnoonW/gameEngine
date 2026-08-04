@@ -12,6 +12,7 @@
 struct UiPresetElementData
 {
     UiSpaceMode mode = UiSpaceMode::ScreenAlways;
+    UiScaleMode scaleMode = UiScaleMode::Stretch;
     bool active = true;
     bool visible = true;
     int zOrder = 0;
@@ -25,6 +26,10 @@ struct UiPresetElementData
     bool layoutPercent = true;
     float designW = 0.0f;
     float designH = 0.0f;
+    bool snapLeft = false;
+    bool snapRight = false;
+    bool snapTop = false;
+    bool snapBottom = false;
 
     std::string materialName;
     DirectX::XMFLOAT4 color{ 1, 1, 1, 1 };

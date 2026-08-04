@@ -298,11 +298,11 @@ void PlayMode::UpdateCamera(AppContext& ctx, float dt)
     XMVECTOR worldUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
     float speed = mFlySpeed * dt;
-    if (mKeyCtrl)
+    if (mKeyShift)
         speed *= 2.0f;
 
     const auto axes = FlyCameraMath::BuildNormalizedAxes(
-        mKeyW, mKeyS, mKeyA, mKeyD, mKeySpace, mKeyShift);
+        mKeyW, mKeyS, mKeyA, mKeyD, mKeySpace, mKeyCtrl);
 
     XMVECTOR horizForward = FlyCameraMath::FlattenHorizForward(lookForward, yawRot);
 

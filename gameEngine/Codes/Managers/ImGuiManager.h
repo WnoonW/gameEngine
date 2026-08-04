@@ -26,6 +26,7 @@ enum class ButtonAction
     ReloadShaders,
     PrintECSStats,
     ToggleManipulateSelected,
+    ToggleManipulateUi,
     SpawnSelectedMesh,
     BeginCreateUiImage, // enter Scene drag-to-create UI mode
 };
@@ -54,7 +55,12 @@ public:
 
     // for object creation from loaded assets
     const std::string& GetSelectedMesh() const { return mSelectedMesh; }
+    // Mesh spawn material (Project panel). Not used for UI.
     const std::string& GetSelectedMaterial() const { return mSelectedMaterial; }
+    // UI Image create material (UI panel). Independent of mesh spawn.
+    const std::string& GetSelectedUiMaterial() const { return mSelectedUiMaterial; }
+    // When true, create-drag rect is fitted to the selected material texture aspect.
+    bool IsUiCreateFitImageAspect() const { return mUiCreateFitImageAspect; }
 
     void Shutdown();
 
@@ -70,7 +76,7 @@ public:
     // 표시 중인 에디터 패널 일괄 그리기
     void DrawEditorPanels(Engine* engine = nullptr);
 
-    void DrawScenePanel();
+    void DrawScenePanel(Engine* engine = nullptr);
     void DrawHierarchyPanel(Engine* engine = nullptr);
     void DrawInspectorPanel(Engine* engine = nullptr);
     void DrawToolsPanel();
@@ -115,7 +121,7 @@ public:
     // additive: Shift 누른 채 드래그
     bool ConsumeBoxSelection(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY, bool& outAdditive);
 
-    // UI image create: Project "Create UI Image" → drag on Scene → consume rect (scene local px).
+    // UI image create: UI panel material + "Create UI Image" → drag Scene → consume rect.
     // Enable is deferred to the next Tick so the Create click cannot also hit Cancel.
     void SetUiImageCreateMode(bool on);
     bool IsUiImageCreateMode() const { return mUiImageCreateMode; }
@@ -123,6 +129,15 @@ public:
 
     void SetManipulateSelected(bool on) { mManipulateSelected = on; }
     bool IsManipulateSelected() const { return mManipulateSelected; }
+
+    void SetManipulateUi(bool on) { mManipulateUi = on; }
+    bool IsManipulateUi() const { return mManipulateUi; }
+    bool IsUiManipDragging() const { return mUiManipDragging; }
+    bool IsSnapMesh() const { return mSnapMesh; }
+    bool IsSnapUi() const { return mSnapUi; }
+    float GetSnapMeshThreshold() const { return mSnapMeshThreshold; }
+    // 0..100 — percent of canvas width (X) / height (Y) for edge snap.
+    float GetSnapUiThresholdPercent() const { return mSnapUiThresholdPercent; }
 
     // 커맨드 리스트가 닫힌 뒤 호출 (초기화 완료 후 창 위치 복원)
     void ApplyMainWindowPlacement();
@@ -170,6 +185,17 @@ private:
     DescriptorAllocator* m_DescriptorAllocator = nullptr;
 
     bool mManipulateSelected = false;
+    bool mManipulateUi = false;
+    bool mSnapMesh = false;
+    bool mSnapUi = false;
+    float mSnapMeshThreshold = 0.35f;   // world units (AABB face/center)
+    float mSnapUiThresholdPercent = 1.0f; // % of canvas axis (default 1%)
+
+    // UI click-drag manipulate (Scene LMB); snap only on drop if mSnapUi
+    bool mUiManipDragging = false;
+    bool mUiDragMoved = false;
+    float mUiDragLastLocalX = 0.f;
+    float mUiDragLastLocalY = 0.f;
     bool mPlayMode = false;
 
     // View 메뉴로 열고 닫는 패널 (X로 닫으면 꺼짐, View에서 다시 켬)
@@ -215,7 +241,9 @@ private:
     int mWindowShowCmd = SW_SHOWNORMAL; // SW_SHOWNORMAL / SW_SHOWMAXIMIZED
 
     std::string mSelectedMesh;
-    std::string mSelectedMaterial;
+    std::string mSelectedMaterial;   // mesh spawn (Project)
+    std::string mSelectedUiMaterial; // UI Image create (UI panel)
+    bool mUiCreateFitImageAspect = false; // lock create rect to texture aspect
 
     // 씬 파일 IO 상태
     std::string mLastScenePath;
@@ -256,7 +284,7 @@ private:
     float mBoxResultMaxX = 0, mBoxResultMaxY = 0;
     static constexpr float kBoxDragThresholdPx = 4.0f;
 
-    // Create UI Image mode (drag size on Scene with selected material).
+    // Create UI Image mode (drag size on Scene with mSelectedUiMaterial).
     // Mode stays ON until Complete / Cancel / Esc — drag only updates the preview rect.
     bool mUiImageCreateMode = false;
     // Create button sets this; Tick applies mode ON next panel frame (avoids same-click Cancel).

@@ -151,26 +151,7 @@ void UiSystem::ResolveScreenLayout(
     float* outScaleX,
     float* outScaleY)
 {
-    // --- Percent layout: position = center 0..1, size = extent 0..1 of LIVE canvas ---
-    // Edit: canvas = Scene dock image / RT. Play: canvas = window client.
-    // Every frame remaps to current screenW/H so resize updates immediately.
-    if (el.layoutPercent)
-    {
-        if (mode == UiScaleMode::Stretch || mode == UiScaleMode::UniformMin
-            || mode == UiScaleMode::UniformMax)
-        {
-            // Stretch (default): pure percent of current canvas — no lag, no design lock.
-            // Uniform*: still percent of current canvas (center+size scale together).
-            // (Uniform letterboxing would need a virtual canvas; keep full-canvas % for sync.)
-            outPosPx = { el.position.x * screenW, el.position.y * screenH };
-            outSizePx = { el.size.x * screenW, el.size.y * screenH };
-            if (outScaleX) *outScaleX = screenW;
-            if (outScaleY) *outScaleY = screenH;
-            return;
-        }
-    }
-
-    // --- Legacy: design-space pixels ---
+    // Authoring canvas for this element (create/save time). Fallback: global → live screen.
     float refW = (el.designW > 1.0f) ? el.designW
         : ((globalDesignW > 1.0f) ? globalDesignW : screenW);
     float refH = (el.designH > 1.0f) ? el.designH
@@ -178,6 +159,39 @@ void UiSystem::ResolveScreenLayout(
     if (refW < 1.0f) refW = screenW;
     if (refH < 1.0f) refH = screenH;
 
+    // --- Percent layout: position/size are 0..1 of authoring canvas (refW x refH) ---
+    if (el.layoutPercent)
+    {
+        if (mode == UiScaleMode::Stretch)
+        {
+            // Each axis tracks the live window independently (widget aspect may change).
+            outPosPx = { el.position.x * screenW, el.position.y * screenH };
+            outSizePx = { el.size.x * screenW, el.size.y * screenH };
+            if (outScaleX) *outScaleX = screenW;
+            if (outScaleY) *outScaleY = screenH;
+            return;
+        }
+
+        // Keep aspect (UniformMin / UniformMax):
+        // Position: same as Stretch — center as % of LIVE canvas.
+        // Size: design pixels * one scale s → authored width:height preserved.
+        float sx = screenW / refW;
+        float sy = screenH / refH;
+        const float s = (mode == UiScaleMode::UniformMax)
+            ? (std::max)(sx, sy)
+            : (std::min)(sx, sy); // UniformMin (fit)
+
+        outPosPx = { el.position.x * screenW, el.position.y * screenH };
+        outSizePx = {
+            el.size.x * refW * s,
+            el.size.y * refH * s
+        };
+        if (outScaleX) *outScaleX = refW * s;
+        if (outScaleY) *outScaleY = refH * s;
+        return;
+    }
+
+    // --- Legacy: design-space pixels (position/size already in ref pixels) ---
     float sx = screenW / refW;
     float sy = screenH / refH;
     switch (mode)
@@ -201,10 +215,72 @@ void UiSystem::ResolveScreenLayout(
         break;
     }
 
-    outPosPx = { el.position.x * sx, el.position.y * sy };
-    outSizePx = { el.size.x * sx, el.size.y * sy };
+    // Center letterbox/crop for uniform modes so origin stays consistent with percent path.
+    if (mode == UiScaleMode::UniformMin || mode == UiScaleMode::UniformMax)
+    {
+        const float offX = (screenW - refW * sx) * 0.5f;
+        const float offY = (screenH - refH * sy) * 0.5f;
+        outPosPx = { el.position.x * sx + offX, el.position.y * sy + offY };
+        outSizePx = { el.size.x * sx, el.size.y * sy };
+    }
+    else
+    {
+        outPosPx = { el.position.x * sx, el.position.y * sy };
+        outSizePx = { el.size.x * sx, el.size.y * sy };
+    }
     if (outScaleX) *outScaleX = sx;
     if (outScaleY) *outScaleY = sy;
+}
+
+void UiSystem::MaintainKeepAspectFitEdgeLocks(
+    UiElementComponent& el,
+    float screenW, float screenH,
+    float globalDesignW, float globalDesignH)
+{
+    // Only Keep Aspect Fit: size scale is independent of position %, so edges drift on resize.
+    if (el.scaleMode != UiScaleMode::UniformMin)
+        return;
+    if (el.mode == UiSpaceMode::WorldBillboard)
+        return;
+    if (!el.snapLeft && !el.snapRight && !el.snapTop && !el.snapBottom)
+        return;
+    if (screenW < 1.f || screenH < 1.f)
+        return;
+
+    XMFLOAT2 posPx{}, sizePx{};
+    ResolveScreenLayout(el, screenW, screenH, el.scaleMode,
+        globalDesignW, globalDesignH, posPx, sizePx);
+    if (sizePx.x <= 0.f || sizePx.y <= 0.f)
+        return;
+
+    // ax/ay = pivot point in screen pixels
+    float ax = el.anchor.x * screenW + posPx.x;
+    float ay = el.anchor.y * screenH + posPx.y;
+
+    // Prefer left over right, top over bottom if both locked (fixed size cannot satisfy both).
+    if (el.snapLeft)
+        ax = el.pivot.x * sizePx.x;
+    else if (el.snapRight)
+        ax = screenW - (1.f - el.pivot.x) * sizePx.x;
+
+    if (el.snapTop)
+        ay = el.pivot.y * sizePx.y;
+    else if (el.snapBottom)
+        ay = screenH - (1.f - el.pivot.y) * sizePx.y;
+
+    posPx.x = ax - el.anchor.x * screenW;
+    posPx.y = ay - el.anchor.y * screenH;
+
+    if (el.layoutPercent)
+    {
+        el.position.x = posPx.x / screenW;
+        el.position.y = posPx.y / screenH;
+    }
+    else
+    {
+        el.position.x = posPx.x;
+        el.position.y = posPx.y;
+    }
 }
 
 void UiSystem::EmitScreenQuad(
@@ -362,15 +438,23 @@ void UiSystem::Render(
     const float sw = static_cast<float>((std::max)(1u, screenWidth));
     const float sh = static_cast<float>((std::max)(1u, screenHeight));
 
+    // Re-stick Keep Aspect Fit widgets that were edge-snapped (survive window resize).
+    world.ForEach<UiElementComponent>(
+        [&](Entity, UiElementComponent& el)
+        {
+            MaintainKeepAspectFitEdgeLocks(el, sw, sh, mGlobalDesignW, mGlobalDesignH);
+        });
+
     std::vector<DrawItem> items;
     items.reserve(64);
 
+    // Screen UI (Always / Conditional). WorldBillboard needs Transform — second pass.
     world.ForEach<UiElementComponent, UiImageComponent>(
         [&](Entity, UiElementComponent& el, UiImageComponent& img)
         {
-            if (!el.visible)
+            if (!UiElementShouldDraw(el))
                 return;
-            if (el.mode == UiSpaceMode::ScreenConditional && !el.active)
+            if (el.mode == UiSpaceMode::WorldBillboard)
                 return;
 
             // Prefer named material; fall back to Default / Missing so play export always draws.
@@ -383,26 +467,18 @@ void UiSystem::Render(
                 return;
             const UINT mi = mat->mTextureHandle.Index;
 
-            if (el.mode == UiSpaceMode::WorldBillboard)
-            {
-                // Need transform — look up via second pass is awkward in ForEach without Transform
-                // Skip here; handled below with Transform
-                return;
-            }
-
             XMFLOAT2 posPx{}, sizePx{};
-            ResolveScreenLayout(el, sw, sh, mScaleMode, mGlobalDesignW, mGlobalDesignH,
+            ResolveScreenLayout(el, sw, sh, el.scaleMode, mGlobalDesignW, mGlobalDesignH,
                 posPx, sizePx);
             EmitScreenQuad(items, el.anchor, el.pivot, posPx, sizePx,
                 el.rotationRad, img.color, img.uvRect, mi, el.zOrder, sw, sh);
         });
 
+    // Gameplay UI in world (not Effect VFX).
     world.ForEach<TransformComponent, UiElementComponent, UiImageComponent>(
         [&](Entity, TransformComponent& tf, UiElementComponent& el, UiImageComponent& img)
         {
-            if (!el.visible || el.mode != UiSpaceMode::WorldBillboard)
-                return;
-            if (!el.active && el.mode == UiSpaceMode::ScreenConditional)
+            if (el.mode != UiSpaceMode::WorldBillboard || !UiElementShouldDraw(el))
                 return;
 
             Material* mat = MaterialManager::Get().GetMaterial(img.materialName).get();
@@ -417,7 +493,7 @@ void UiSystem::Render(
                 img.color, img.uvRect, mat->mTextureHandle.Index, el.zOrder, false, view, proj);
         });
 
-    // VFX billboards
+    // VFX billboards (lifetime-owned; separate component by design).
     world.ForEach<TransformComponent, EffectBillboardComponent>(
         [&](Entity, TransformComponent& tf, EffectBillboardComponent& fx)
         {
@@ -506,18 +582,21 @@ bool UiSystem::HandlePointer(
     const float sw = static_cast<float>(screenWidth);
     const float sh = static_cast<float>(screenHeight);
 
+    world.ForEach<UiElementComponent>(
+        [&](Entity, UiElementComponent& el)
+        {
+            MaintainKeepAspectFitEdgeLocks(el, sw, sh, mGlobalDesignW, mGlobalDesignH);
+        });
+
     world.ForEach<UiElementComponent, UiImageComponent, UiButtonComponent>(
         [&](Entity e, UiElementComponent& el, UiImageComponent&, UiButtonComponent& btn)
         {
-            if (!el.visible || !btn.interactable)
+            // visible + active + screen mode + interactable (see ComponentStruct helpers)
+            if (!UiButtonShouldAcceptPointer(el, btn))
                 return;
-            if (el.mode == UiSpaceMode::ScreenConditional && !el.active)
-                return;
-            if (el.mode == UiSpaceMode::WorldBillboard)
-                return; // 2D pick only for screen UI in MVP
 
             XMFLOAT2 posPx{}, sizePx{};
-            ResolveScreenLayout(el, sw, sh, mScaleMode, mGlobalDesignW, mGlobalDesignH,
+            ResolveScreenLayout(el, sw, sh, el.scaleMode, mGlobalDesignW, mGlobalDesignH,
                 posPx, sizePx);
 
             const float ax = el.anchor.x * sw + posPx.x;

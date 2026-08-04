@@ -407,7 +407,7 @@ GameExportResult GameExporter::Export(
             readme << "How to play:\n";
             readme << "  1. Double-click Play.bat  (or run Game.exe)\n";
             readme << "  2. Mouse look: LMB click (or auto on start)\n";
-            readme << "  3. Move: WASD, Space/Shift\n";
+            readme << "  3. Move: WASD, Space/Ctrl (up/down), Shift (faster)\n";
             readme << "  4. ESC: quit\n\n";
             readme << "Contents:\n";
             readme << "  game.cfg          - player settings\n";

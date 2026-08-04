@@ -68,12 +68,14 @@ public:
         float designW = 0.0f, float designH = 0.0f);
 
     // UI canvas scaler (screen-space elements).
+    // Default scale mode applied when creating new UI (per-element can override).
     void SetUiScaleMode(UiScaleMode mode);
     UiScaleMode GetUiScaleMode() const;
     void SetUiDesignResolution(float width, float height);
     void GetUiDesignResolution(float& outW, float& outH) const;
 
     void DestroyUiEntity(Entity e);
+    // active: logic / Conditional draw / pointer. visible: render (all modes). See ComponentStruct.h.
     void SetUiActive(Entity e, bool active);
     void SetUiVisible(Entity e, bool visible);
     const std::vector<Entity>& GetUiEntities();
@@ -254,6 +256,15 @@ public:
     void MoveSelectedViewRelative(float forward, float right, float up, float speed, const XMMATRIX& view);
     void MoveSelectedPlanar(float forward, float right, float up, float speed,
         const XMFLOAT3& horizForward, const XMFLOAT3& horizRight);
+
+    // Screen UI: move layout position (percent or legacy px units). Multi-select applies same delta.
+    void MoveSelectedUi(float dPosX, float dPosY);
+    // Snap selected mesh AABB faces/centers to other mesh world AABBs (threshold in world units).
+    void SnapSelectedMesh(float threshold);
+    // Snap selected screen UI to editor canvas L/R/T/B edges only.
+    // thresholdPercent: 0..100 of canvas axis (X uses W, Y uses H).
+    // Returns true if any selected UI moved due to snap.
+    bool SnapSelectedUi(float thresholdPercent, float canvasW, float canvasH);
 
     TransformComponent* GetTransform(Entity entity);
     bool HasGravityComponent(Entity entity);
